@@ -1895,6 +1895,26 @@ def _normalizar_catalogo(cat):
     if modificado:
         tocado = True
 
+    # EL NOMBRE DE LA COPIA A MEDIDA LLEVA SU MEDIDA DE AHORA (MAPA 679, reclamo del usuario 2026-10-12: «me muestra
+    # Bandera 1,00×1,00 y la medida es otra»): la copia nacía «<plantilla> <medida>» y al cambiarle la medida el
+    # nombre quedaba con la primera. Se deriva siempre de la plantilla y de la medida guardada (gemelo de
+    # `_talle_de_medida`, escrito acá porque esto corre también al arrancar).
+    _f2 = lambda m: f"{round(float(m) * 100) / 100:.2f}".replace(".", ",")
+    _por_id = {p.get("id"): p for p in cat.get("productos", []) if isinstance(p, dict)}
+    for _p in cat.get("productos", []):
+        _am = (_p or {}).get("a_medida") if isinstance(_p, dict) else None
+        if not (isinstance(_am, dict) and _am.get("de")):
+            continue
+        _pl = _por_id.get(_am.get("de"))
+        if not _pl or not _pl.get("nombre"):
+            continue
+        try:
+            _nom = f"{_pl['nombre']} {_f2(_am.get('ancho_m', 1))}x{_f2(_am.get('alto_m', 1))}"
+        except (TypeError, ValueError):
+            continue
+        if _p.get("nombre") != _nom:
+            _p["nombre"] = _nom
+            tocado = True
 
     return tocado
 
@@ -3056,7 +3076,10 @@ def _evitar_cache(response):
     # no-store) apunta al nuevo. Antes les tocaba no-store como a todo: medido en el servidor
     # publicado (2026-09-16), el navegador volvía a bajar **1,09 MB sin comprimir en cada carga**
     # — 3 s por F5, por pestaña y por persona.
-    if request.path.startswith("/assets/") and response.status_code == 200:
+    # 🔴 …TAMBIÉN EN EL 304 (MAPA 684): un «no cambió» de un asset salía con el `no-store` de abajo y el navegador
+    # le PISABA la regla guardada → cada hilo nuevo volvía a pedir el motor (mupdf-wasm, 10 MB) al servidor. Con
+    # la máquina cargada, el molde con diseño (un hilo por núcleo) tardaba minutos sólo en bajar lo mismo.
+    if request.path.startswith("/assets/") and response.status_code in (200, 304):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         response.headers.pop("Pragma", None)
         response.headers.pop("Expires", None)
@@ -4342,6 +4365,18 @@ def _archivo_subido(campo="archivo"):
         if ruta:
             return _ArchivoLocal(ruta, request.form.get(campo + "_nombre") or os.path.basename(ruta))
     return None
+
+
+# LA TRANSPARENCIA QUE SE CONSERVA A PROPÓSITO NO SE AVISA (MAPA 686, pedido del usuario 2026-10-12: «quitá ese
+# aviso»). Un objeto semitransparente del arte (p. ej. estrellas al 63 %) se deja como grupo de transparencia para
+# que salga igual que en el arte (MAPA 615: aplastarlo lo imprimía al 100 %); la revisión del RIP lo marcaba como
+# «XObject anidado» + «/Group /Transparency» en cada tizada con ese arte. Sigue anotado (`rip_compatible`, consola);
+# al pedido sólo llega lo que SÍ es un problema (fuentes sin embeber, color fuera de CMYK, capas…).
+_RIP_TRANSPARENCIA = ("anidado a profundidad", "/Group /Transparency", "SMask", "opacidad < 1", "modo de fusión")
+
+
+def _rip_fallas_para_avisar(fallas):
+    return [f for f in (fallas or []) if not any(m in str(f) for m in _RIP_TRANSPARENCIA)]
 
 
 @app.get("/api/monitor")
@@ -7980,6 +8015,9 @@ def _reserva_borde_mm(prod, cat=None):
     (mínimo 0,2) o 2 mm si está apagado (`B` de `generar_pedido` ↔ `configBorde` de pieza/base.js). En un
     MOLDE A MEDIDA el rectángulo se arma esto más chico por lado, así lo impreso mide EXACTO la medida
     escrita (decisión del usuario 2026-10-07: «borde por dentro»)."""
+    # el TRIÁNGULO (MAPA 645) no se achica: su contorno es el total y el borde va por DENTRO
+    if _forma_de((prod or {}).get("a_medida"))[0] == "triangulo":
+        return 0.0
     b = _borde_de(prod, cat)
     activo = b.get("activo", True)
     try:
@@ -8158,7 +8196,9 @@ def _borde_de(prod, cat=None):
     # MOLDE A MEDIDA (2026-10-07, «borde por dentro»): el rectángulo ya viene la reserva más chico
     # (`_reserva_borde_mm`); el borde va «fuera» de ESE contorno = adentro de la medida escrita
     if isinstance((prod or {}).get("a_medida"), dict):
-        b["alineacion"] = "fuera"
+        # el TRIÁNGULO (MAPA 645): el contorno ES el total y el borde va por dentro; con el contorno
+        # achicado y el borde «fuera», la punta del borde salía de la página de la pieza y se cortaba
+        b["alineacion"] = "dentro" if _forma_de(prod["a_medida"])[0] == "triangulo" else "fuera"
         # MARCAS DE TIRAS (MAPA 639): viajan con el borde porque las dibuja el mismo bloque del motor
         # (`_ops_tiras` ↔ `opsTiras`) y así llegan solas a la previa del Arte, a la tizada y al robot
         _t = _tiras_de(prod, cat)
@@ -11154,40 +11194,221 @@ def _ficha_a_medida(prod, cat=None):
     m = _margen_a_medida(am.get("margen"))
     _t = float(m.get("todos") or 0)
     mg = {k: float(m.get(k, _t) or 0) for k in ("arriba", "abajo", "izq", "der")}
-    W, H = an * 100 + mg["izq"] + mg["der"], al * 100 + mg["arriba"] + mg["abajo"]
-    if len(set(mg.values())) == 1:
-        _mtxt = f"{cm(mg['arriba'])} cm por lado" if mg["arriba"] > 0 else "sin margen"
+    f, o = _forma_de(am)
+    term = _norm_terminacion(am.get("terminacion"))
+    W, H = _medida_pieza(an, al, am.get("margen"), f, o, term)
+    mu = MP._margen_uniforme(mg)
+    if f != "rectangulo":
+        _mtxt = f"{cm(mu)} cm parejo en todo el borde" if mu > 0 else ""
+    elif len(set(mg.values())) == 1:
+        _mtxt = f"{cm(mg['arriba'])} cm por lado" if mg["arriba"] > 0 else ""
     else:
         _mtxt = f"arriba {cm(mg['arriba'])} · abajo {cm(mg['abajo'])} · izquierda {cm(mg['izq'])} · derecha {cm(mg['der'])} cm"
+    # LA TERMINACIÓN (MAPA 652): dobladillo (con las puntas del triángulo recortadas), overlock o sin margen
+    _ttxt = ("Sin margen" if term == "sin" or mu <= 0 else
+             f"Overlock · {_mtxt}" if term == "overlock" else
+             f"Dobladillo · {_mtxt}" + (" · puntas recortadas" if f == "triangulo" else " · esquinas recortadas" if f == "rectangulo" else ""))
     b = _borde_de(prod, cat)
     _btxt = (f"{cm(float(b.get('ancho_mm') or 0))} mm, adentro de la medida total" if b.get("activo") else "sin borde de corte")
+    if f == "circulo":
+        _md, _tt = f"Ø {cm(an * 100)} cm", f"Ø {cm(W)} cm"
+    else:
+        _md, _tt = f"{cm(an * 100)} × {cm(al * 100)} cm", f"{cm(W)} × {cm(H)} cm"
     filas = [
-        {"etiqueta": "Medida del diseño (guía)", "valor": f"{cm(an * 100)} × {cm(al * 100)} cm"},
-        {"etiqueta": "Total del arte (con el margen)", "valor": f"{cm(W)} × {cm(H)} cm"},
-        {"etiqueta": "Margen (dobladillo)", "valor": _mtxt},
+        {"etiqueta": "Forma", "valor": _NOMBRE_FORMA[f] + (f", {_NOMBRE_PUNTA[o]}" if f == "triangulo" else "")},
+        {"etiqueta": "Medida del diseño (guía)", "valor": _md},
+        {"etiqueta": "Total del arte (con el margen)", "valor": _tt},
+        {"etiqueta": "Terminación", "valor": _ttxt},
         {"etiqueta": "Borde de corte", "valor": _btxt},
     ]
     notas = []
-    t = _tiras_de(prod, cat)
+    t = _tiras_de(prod, cat, para_ficha=True)
     if t:
-        total = len(MP._segmentos_tiras(W, H, t["margen"], t["lados"]))
-        col = " ".join(f"{l}{round(float(v) * 100)}" for l, v in zip("CMYK", t["color"]))
-        filas.append({"etiqueta": "Tiras", "valor": f"{total} marca{'s' if total != 1 else ''} en total · grosor {cm(t['grosor_mm'])} mm · color {col}"})
-        for k, nombre, L in (("arriba", "Arriba", W), ("abajo", "Abajo", W), ("izq", "Izquierda", H), ("der", "Derecha", H)):
-            n = int(t["lados"].get(k) or 0)
-            if n <= 0 or t["margen"][k] <= 0:
-                continue
-            if n == 1:
-                v = f"1 marca, en el medio (a {cm(L / 2)} cm de cada punta)"
+        _rec = t.get("recorte", True)
+        total = (len(MP._segmentos_tiras(W, H, t["margen"], t["lados"], f, o, t.get("diseno_cm"), _rec)) if t.get("marcar", True)
+                 else _total_tiras(f, t["lados"], _rec))
+        filas.append({"etiqueta": "Tiras", "valor": (f"{total} tira{'s' if total != 1 else ''} en total · no se marcan en la tizada"
+                                                     if not t.get("marcar", True) else
+                                                     f"{total} marca{'s' if total != 1 else ''} en total · grosor {cm(t['grosor_mm'])} mm · negra con contorno blanco")})
+        for x in _tiras_por_lado(f, o, W, H, t):
+            if x["marcas"] == 1 and x["lado"] != "alrededor":
+                v = f"1 marca, en el medio (a {cm(x['largo_del_lado_cm'] / 2)} cm de cada punta)"
+            elif x["lado"] == "alrededor":
+                v = f"{x['marcas']} marca{'s' if x['marcas'] != 1 else ''} parejas, una cada {cm(x['cada_cm'])} cm sobre el borde"
             else:
-                v = f"{n} marcas contando las 2 puntas, una cada {cm(L / (n - 1))} cm"
-            filas.append({"etiqueta": nombre, "valor": v + f" · marca de {cm(t['margen'][k])} cm", "sub": True})
+                v = f"{x['marcas']} marcas contando las 2 puntas, una cada {cm(x['cada_cm'])} cm"
+            filas.append({"etiqueta": x["nombre"], "valor": v + (f" · marca de {cm(x['largo_marca_cm'])} cm" if t.get("marcar", True) else ""), "sub": True})
         # una frase por renglón: la ficha no parte el texto y una sola larga se cortaba al borde de la hoja
-        notas = ["Cada marca va del borde de la pieza hasta la guía del diseño; las de las esquinas, en diagonal.",
-                 "Las distancias se miden sobre el borde, de punta a punta."]
+        notas = (["Cada marca va del borde de la pieza hacia el centro, hasta la guía del diseño.",
+                  "Las distancias se miden sobre el borde, empezando arriba."] if f == "circulo" else
+                 ["Cada marca va del borde de la pieza hasta la guía; en las puntas no lleva (el corte ya la marca).",
+                  "Las distancias se miden sobre la guía, de punta a punta."] if f == "triangulo" and _rec else
+                 ["Cada marca va del borde de la pieza hasta la guía; las de las puntas, en diagonal.",
+                  "Las distancias se miden sobre la guía, de punta a punta."] if f == "triangulo" else
+                 ["Cada marca va del borde de la pieza hasta la guía; en las esquinas no lleva (el corte ya la marca).",
+                  "Las distancias se miden sobre la guía, de esquina a esquina."] if _rec else
+                 ["Cada marca va del borde de la pieza hasta la guía del diseño; las de las esquinas, en diagonal.",
+                  "Las distancias se miden sobre el borde, de punta a punta."])
+        if not t.get("marcar", True):      # no van impresas (MAPA 652): la primera nota habla de la marca
+            notas = ["No van marcadas en la tela: se cosen a estas distancias."] + notas[1:]
     else:
         filas.append({"etiqueta": "Tiras", "valor": "no lleva"})
-    return {"filas": filas, "notas": notas}
+    # LOS DIBUJOS (MAPA 659, «más específica y visualmente detallista, mostrando y explicando los dobleces»):
+    # el plano con cotas, el borde en corte paso a paso, la esquina/punta cortada y doblada y los pasos.
+    # Se calculan acá (la misma geometría del motor) y las dos fichas sólo los dibujan (`ficha_a_medida.py`).
+    # Best-effort: si algo falla, la ficha sale igual con las filas.
+    dibujos = []
+    try:
+        import ficha_a_medida as _FAM
+        _tot = None
+        if t:
+            _tot = (len(MP._segmentos_tiras(W, H, t["margen"], t["lados"], f, o, t.get("diseno_cm"), t.get("recorte", True)))
+                    if t.get("marcar", True) else _total_tiras(f, t["lados"], t.get("recorte", True)))
+        dibujos = _FAM.dibujos_a_medida(f, o, term, an * 100, al * 100, mg if term != "sin" else {}, W, H, tiras=t,
+                                        borde_mm=float(b.get("ancho_mm") or 0) if b.get("activo") else 0.0, total_tiras=_tot)
+    except Exception as e:
+        print(f"[ficha] dibujos del molde a medida: {e}")
+        dibujos = []
+    return {"filas": filas, "notas": notas, "dibujos": dibujos}
+
+
+def _agrupar_a_medida_ficha(guias, cat):
+    """LOS MOLDES A MEDIDA EN LA FICHA (MAPA 665-666). Cambia la lista en el lugar; lo usan las DOS fichas
+    (la del plan para el navegador y la del servidor).
+
+    1) UNA sección «MEDIDA Y TERMINACIÓN» por CONFIGURACIÓN, no por diseño (665, «si elijo el mismo molde en 2
+       diseños y tienen lo mismo seleccionado, se muestra una vez; si son diferentes, una por diseño»): dos guías
+       van juntas si salen de la MISMA plantilla (`a_medida.de`) y su sección es igual en todo (filas, notas y
+       dibujos); la primera la muestra y las demás quedan con `a_medida: None`. Si la plantilla está en más de
+       un diseño, cada sección lleva en el título los diseños a los que corresponde (`titulo_disenos`).
+    2) UN BLOQUE COMPACTO por plantilla (666, «cuando es una sola pieza es mucho título, los 2 diseños re
+       lejos, mucho espacio en blanco»): cada guía a medida lleva `am` = {grupo (la plantilla), molde (su
+       nombre), sub (la medida y la forma de ESE diseño), aspecto (alto ÷ ancho de la pieza)} y las de una
+       misma plantilla quedan JUNTAS en la lista; las fichas las dibujan en un solo bloque, una tarjeta por
+       diseño (`_compactar_a_medida` ↔ `compactarAMedida`)."""
+    prods = {p.get("id"): p for p in ((cat or {}).get("productos") or [])}
+    m2 = lambda v: f"{float(v):.2f}".replace(".", ",")
+    miembros = {}
+    for g in guias or []:
+        pid = g.get("pid")
+        am_c = ((prods.get(pid) or {}).get("a_medida"))
+        if not isinstance(am_c, dict):
+            continue
+        origen = am_c.get("de") or pid
+        miembros[origen] = miembros.get(origen, 0) + 1
+        f, o = _forma_de(am_c)
+        an, al = float(am_c.get("ancho_m") or 1), float(am_c.get("alto_m") or 1)
+        try:
+            W, H = _medida_pieza(an, al, am_c.get("margen"), f, o, am_c.get("terminacion"))
+        except Exception:
+            W, H = an * 100, al * 100
+        sub = (f"Ø {m2(an)} m · círculo" if f == "circulo" else
+               f"{m2(an)} × {m2(al)} m" + (" · triángulo" if f == "triangulo" else ""))
+        tpl = prods.get(origen) or prods.get(pid) or {}
+        g["am"] = {"grupo": origen, "molde": str(tpl.get("nombre") or g.get("molde") or g.get("nombre") or ""),
+                   "sub": sub, "aspecto": round(H / W, 4) if W else 1.0}
+    # las de una misma plantilla, juntas (en el lugar de la primera; el resto no cambia de orden)
+    orden, hechos = [], set()
+    for g in guias or []:
+        k = (g.get("am") or {}).get("grupo")
+        if not k:
+            orden.append(g)
+        elif k not in hechos:
+            hechos.add(k)
+            orden += [x for x in guias if (x.get("am") or {}).get("grupo") == k]
+    guias[:] = orden
+    vistos = {}
+    for g in guias or []:
+        am = g.get("a_medida")
+        if not isinstance(am, dict) or not am.get("filas"):
+            continue
+        origen = (g.get("am") or {}).get("grupo") or g.get("pid")
+        clave = json.dumps([origen, am.get("filas"), am.get("notas"), am.get("dibujos")], sort_keys=True, default=str)
+        dis = str(g.get("diseno_nombre") or g.get("diseno") or "").strip()
+        if clave in vistos:
+            ds = vistos[clave]["a_medida"]["_disenos"]
+            if dis and dis not in ds:
+                ds.append(dis)
+            g["a_medida"] = None                      # ya está en la primera
+            continue
+        g["a_medida"] = {**am, "_disenos": [dis] if dis else []}
+        vistos[clave] = g
+    for g in vistos.values():
+        ds = g["a_medida"].pop("_disenos")
+        origen = (g.get("am") or {}).get("grupo") or g.get("pid")
+        if ds and (len(ds) > 1 or miembros.get(origen, 0) > 1):
+            g["a_medida"]["titulo_disenos"] = ds[0] if len(ds) == 1 else ", ".join(ds[:-1]) + " y " + ds[-1]
+    return guias
+
+
+def _total_tiras(forma, lados, recorte=True):
+    """Cuántas tiras lleva la pieza sin dibujarlas (para la ficha cuando NO se marcan, MAPA 652): lo mismo
+    que cuenta `_segmentos_tiras` — cada lado cuenta las 2 puntas; una esquina que piden 2 lados va una
+    vez; el triángulo con las puntas recortadas no lleva en las puntas."""
+    n = lambda k: max(0, int(float((lados or {}).get(k) or 0)))
+    medio = lambda c: 1 if c == 1 else max(0, c - 2)
+    if forma == "circulo":
+        return n("alrededor")
+    if forma == "triangulo":
+        nb, nl = n("base"), n("laterales")
+        puntas = 0 if recorte else (2 if (nb >= 2 or nl >= 2) else 0) + (1 if nl >= 2 else 0)
+        return puntas + medio(nb) + 2 * medio(nl)
+    a, b, i, d = n("arriba"), n("abajo"), n("izq"), n("der")
+    esquinas = 0 if recorte else sum(1 for x, y in ((i, b), (d, b), (d, a), (i, a)) if x >= 2 or y >= 2)
+    return esquinas + medio(a) + medio(b) + medio(i) + medio(d)
+
+
+_NOMBRE_TERMINACION = {"dobladillo": "Dobladillo", "overlock": "Overlock", "sin": "Sin margen"}
+_NOMBRE_FORMA = {"rectangulo": "Rectángulo", "circulo": "Círculo", "triangulo": "Triángulo"}
+_NOMBRE_PUNTA = {"abajo": "punta abajo", "arriba": "punta arriba", "izq": "punta a la izquierda", "der": "punta a la derecha"}
+
+
+def _forma_de(am):
+    """(forma, orientación) de un molde a medida (MAPA 645): la elige cada pedido; sin elegir, rectángulo."""
+    am = am if isinstance(am, dict) else {}
+    return MP._norm_forma(am.get("forma")), MP._norm_orientacion(am.get("orientacion"))
+
+
+def _tiras_por_lado(forma, orientacion, W, H, t):
+    """Las tiras de cada lado de la pieza TOTAL (`W` × `H` cm) para la ficha y la API: `[{lado, nombre,
+    marcas, largo_del_lado_cm, cada_cm, en_el_medio, largo_marca_cm}]`. Rectángulo: arriba, abajo, izq, der;
+    círculo: alrededor (cada = perímetro ÷ N); triángulo: base y laterales (cada uno)."""
+    import math as _m
+    out = []
+    lados, mg = t.get("lados") or {}, t.get("margen") or {}
+    mu = MP._margen_uniforme(mg)
+    _todas = not t.get("marcar", True)          # no se marcan: la ficha las lista igual, sin largo de marca
+    if forma == "circulo":
+        n = int(lados.get("alrededor") or 0)
+        if n > 0 and (mu > 0 or _todas):
+            per = _m.pi * W
+            out.append({"lado": "alrededor", "nombre": "Alrededor", "marcas": n, "largo_del_lado_cm": round(per, 1),
+                        "cada_cm": round(per / n, 2), "en_el_medio": False, "largo_marca_cm": mu})
+        return out
+    if forma == "triangulo":
+        # recortado (MAPA 649) las marcas se reparten sobre la GUÍA (el borde terminado), de punta a punta
+        _dc = t.get("diseno_cm") or [W, H]
+        P = MP._vertices_triangulo(0.0, 0.0, float(_dc[0]), float(_dc[1]), orientacion)
+        d = lambda u, v: _m.sqrt((u[0] - v[0]) ** 2 + (u[1] - v[1]) ** 2)
+        for k, nombre, L in (("base", "Base", d(P[0], P[1])), ("laterales", "Laterales (cada uno)", d(P[1], P[2]))):
+            n = int(lados.get(k) or 0)
+            if n > 0 and (mu > 0 or _todas):
+                out.append({"lado": k, "nombre": nombre, "marcas": n, "largo_del_lado_cm": round(L, 1),
+                            "cada_cm": round(L / (n - 1), 2) if n >= 2 else None, "en_el_medio": n == 1, "largo_marca_cm": mu})
+        return out
+    if t.get("recorte"):      # esquinas recortadas (MAPA 653): sobre la GUÍA, de esquina a esquina
+        _mi, _md, _ma, _mb = (float(mg.get(k) or 0) for k in ("izq", "der", "arriba", "abajo"))
+        _lados_r = (("arriba", "Arriba", W - _mi - _md), ("abajo", "Abajo", W - _mi - _md),
+                    ("izq", "Izquierda", H - _ma - _mb), ("der", "Derecha", H - _ma - _mb))
+    else:
+        _lados_r = (("arriba", "Arriba", W), ("abajo", "Abajo", W), ("izq", "Izquierda", H), ("der", "Derecha", H))
+    for k, nombre, L in _lados_r:
+        n = int(lados.get(k) or 0)
+        if n > 0 and (float(mg.get(k) or 0) > 0 or _todas):
+            out.append({"lado": k, "nombre": nombre, "marcas": n, "largo_del_lado_cm": round(L, 1),
+                        "cada_cm": round(L / (n - 1), 2) if n >= 2 else None, "en_el_medio": n == 1,
+                        "largo_marca_cm": float(mg.get(k) or 0)})
+    return out
 
 
 def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None,
@@ -11969,6 +12190,7 @@ def _plan_para_navegador(plan):
             _relanzar_calculo(e)
             _g["a_medida"] = None
         guias.append(_g)
+    _agrupar_a_medida_ficha(guias, plan["cat"])         # la misma sección a medida, una vez (MAPA 665)
     # 🔴 EL PERFIL DE COLOR DE LA HOJA (2026-09-22): el que TRAE el arte, como hacía la tizada del
     # servidor (`_icc_para_salida(arts)`); la del navegador salía siempre con el predeterminado.
     # Lo que trae cada arte lo lee el navegador (`arte/perfil.js`) y queda en su memoria; acá se
@@ -12121,9 +12343,10 @@ def paquete_pedido():
                     if not _okr:
                         _fallas.extend(f"{h['archivo']}: {x}" for x in _fr)
             res["rip_compatible"] = not _fallas
-            if _fallas:
+            _fallas_aviso = _rip_fallas_para_avisar(_fallas)
+            if _fallas_aviso:
                 res["avisos_pedido"] = list(res.get("avisos_pedido") or []) + [
-                    "La hoja tiene algo que un RIP podría rechazar: " + " · ".join(_fallas[:4])]
+                    "La hoja tiene algo que un RIP podría rechazar: " + " · ".join(_fallas_aviso[:4])]
         except Exception as _er:
             print("  [rip] no se pudo verificar la compatibilidad:", _er)
         try:
@@ -12293,9 +12516,10 @@ def generar_multi():
                     if not _okr:
                         _rip_fallas.extend(f"{h['archivo']}: {x}" for x in _fr)
                 res["rip_compatible"] = not _rip_fallas
-                if _rip_fallas:
+                _rip_aviso = _rip_fallas_para_avisar(_rip_fallas)
+                if _rip_aviso:
                     res["avisos_pedido"] = list(res.get("avisos_pedido") or []) + [
-                        "La hoja tiene algo que un RIP podría rechazar: " + " · ".join(_rip_fallas[:4])]
+                        "La hoja tiene algo que un RIP podría rechazar: " + " · ".join(_rip_aviso[:4])]
                     print("  [rip] ⚠️ " + " | ".join(_rip_fallas[:6]), flush=True)
             except Exception as _er:
                 print("  [rip] no se pudo verificar la compatibilidad:", _er)
@@ -12371,7 +12595,9 @@ def generar_multi():
                                               marcas_ped=_marcas_del_pedido(cuerpo, _pf, _dsf),
                                               sin_marca_ped=_marcas_del_pedido(cuerpo, _pf, _dsf, "sin_marca_pedido"))
                         if g:
+                            g["pid"] = _pf
                             _guias.append(g)
+                _agrupar_a_medida_ficha(_guias, cat)     # la misma sección a medida, una vez (MAPA 665)
                 _pl = planilla_ficha or {"columnas": [], "filas": prendas}
                 _FT.generar_ficha(salida,
                                   "Ficha técnica", " + ".join(nombres) + " · " + time.strftime("%d/%m/%Y"),
@@ -14656,8 +14882,8 @@ def _metros(v):
     return x if _AM_MIN_M <= x <= _AM_MAX_M else None
 
 
-_TIRAS_DEFAULT = {"activo": False, "lados": {"arriba": 0, "abajo": 0, "izq": 0, "der": 0},
-                  "color": [0.0, 0.0, 0.0, 1.0], "grosor_mm": 1.0}
+_TIRAS_DEFAULT = {"activo": False, "lados": {"arriba": 0, "abajo": 0, "izq": 0, "der": 0, "base": 0, "laterales": 0, "alrededor": 0},
+                  "color": [0.0, 0.0, 0.0, 1.0], "grosor_mm": 1.0, "marcar": True}
 
 
 def _tiras_limpias(t):
@@ -14678,23 +14904,22 @@ def _tiras_limpias(t):
             except (TypeError, ValueError):
                 _l[_lado] = 0
     lados = {}
-    for k in ("arriba", "abajo", "izq", "der"):
+    # rectángulo: arriba/abajo/izq/der · triángulo: base y laterales · círculo: alrededor (MAPA 645)
+    for k in ("arriba", "abajo", "izq", "der", "base", "laterales", "alrededor"):
         try:
-            lados[k] = max(0, min(50, int(float(_l.get(k, 0) or 0))))
+            lados[k] = max(0, min(200 if k == "alrededor" else 50, int(float(_l.get(k, 0) or 0))))
         except (TypeError, ValueError):
             lados[k] = 0
     out["lados"] = lados
+    # MARCAR EN LA TIZADA (MAPA 652): con `marcar` en falso las tiras NO se imprimen, pero la ficha las trae
+    out["marcar"] = bool(t.get("marcar", True))
     try:
         out["grosor_mm"] = max(0.1, min(10.0, float(str(t.get("grosor_mm", 1.0)).replace(",", "."))))
     except (TypeError, ValueError):
         pass
-    try:
-        c = [max(0.0, min(1.0, float(x))) for x in (t.get("color") or out["color"])][:4]
-        while len(c) < 4:
-            c.append(0.0)
-        out["color"] = c
-    except (TypeError, ValueError):
-        pass
+    # EL COLOR NO SE ELIGE (MAPA 682): la marca es negra con contorno blanco (`MP._ops_tiras`); lo que haya
+    # guardado de antes se ignora
+    out["color"] = [0.0, 0.0, 0.0, 1.0]
     return out
 
 
@@ -14713,13 +14938,15 @@ def _tiras_efectivas(prod, cat=None):
             _tpl = None
         if _tpl is not None:
             _tt = _tiras_limpias(_tpl.get("marcas_tiras"))
-            t["grosor_mm"], t["color"] = _tt["grosor_mm"], _tt["color"]
+            t["grosor_mm"] = _tt["grosor_mm"]
     return t
 
 
-def _tiras_de(prod, cat=None):
+def _tiras_de(prod, cat=None, para_ficha=False):
     """Lo que el MOTOR necesita para dibujar las marcas de tiras de este molde, o None: los lados, el
-    color, el grosor y el margen POR LADO en cm (las marcas van del borde de la pieza a la guía)."""
+    color, el grosor y el margen POR LADO en cm (las marcas van del borde de la pieza a la guía).
+    `para_ficha` (MAPA 652): también cuando NO se marcan en la tizada (`marcar` apagado, o sin margen: no
+    hay guía) — la ficha técnica las trae igual; `marcar` dice si se imprimen."""
     am = (prod or {}).get("a_medida")
     t = _tiras_efectivas(prod, cat)
     if not isinstance(am, dict) or not t["activo"]:
@@ -14727,11 +14954,23 @@ def _tiras_de(prod, cat=None):
     m = _margen_a_medida(am.get("margen"))
     _t = float(m.get("todos") or 0)
     mg = {k: float(m.get(k, _t) or 0) for k in ("arriba", "abajo", "izq", "der")}
-    if not any(v > 0 for v in mg.values()):
-        return None                     # sin margen no hay guía hasta donde llevar la marca
-    if not any(t["lados"][k] > 0 and mg[k] > 0 for k in mg):
-        return None                     # ningún lado con tiras (o los que tienen no tienen margen)
-    return {"lados": dict(t["lados"]), "color": t["color"], "grosor_mm": t["grosor_mm"], "margen": mg}
+    sin_margen = not any(v > 0 for v in mg.values())
+    marcar = bool(t.get("marcar", True)) and not sin_margen
+    if not para_ficha and not marcar:
+        return None                     # no se imprimen (apagado, o sin margen no hay guía hasta donde llevar la marca)
+    f, o = _forma_de(am)
+    if f == "rectangulo":
+        if not any(t["lados"][k] > 0 and (mg[k] > 0 or not marcar) for k in mg):
+            return None                 # ningún lado con tiras (o los que tienen no tienen margen)
+    elif not any(t["lados"][k] > 0 for k in (("alrededor",) if f == "circulo" else ("base", "laterales"))):
+        return None
+    term = _norm_terminacion(am.get("terminacion"))
+    return {"lados": dict(t["lados"]), "color": t["color"], "grosor_mm": t["grosor_mm"], "margen": mg,
+            "forma": f, "orientacion": o, "marcar": marcar, "terminacion": term,
+            # el triángulo con overlock lleva las puntas enteras (MAPA 652); con dobladillo, recortadas
+            "recorte": term != "overlock",
+            # la medida del DISEÑO: el triángulo recortado arma sus marcas desde ahí (MAPA 649)
+            "diseno_cm": [float(am.get("ancho_m") or 1) * 100, float(am.get("alto_m") or 1) * 100]}
 
 
 def _margen_a_medida(m):
@@ -14806,7 +15045,22 @@ def _a_medida_crear(cuerpo, cat, pid_nuevo):
                                   for k, v in _etq["posiciones"].items()}
         extra["a_medida"] = {"pieza": tpl["a_medida"].get("pieza"),
                              "margen": copy.deepcopy(tpl["a_medida"].get("margen") or {}),
-                             "ancho_m": an, "alto_m": al, "de": de, "variable": clave}
+                             "ancho_m": an, "alto_m": al, "de": de, "variable": clave,
+                             # la FORMA de este pedido (MAPA 645)
+                             "forma": MP._norm_forma(cuerpo.get("forma") or tpl["a_medida"].get("forma")),
+                             "orientacion": MP._norm_orientacion(cuerpo.get("orientacion") or tpl["a_medida"].get("orientacion")),
+                             # LA TERMINACIÓN de este pedido (MAPA 652): `margen` es el que rige; el del dobladillo
+                             # (el del molde) y el del overlock quedan guardados para poder cambiar de una a otra
+                             "terminacion": _norm_terminacion(cuerpo.get("terminacion") or tpl["a_medida"].get("terminacion")),
+                             "margen_dobladillo": copy.deepcopy(tpl["a_medida"].get("margen") or {}),
+                             "overlock_cm": _overlock_cm(tpl["a_medida"])}
+        extra["a_medida"]["margen"] = _margen_de_terminacion(extra["a_medida"])
+        # la versión de la geometría con la que se va a armar (MAPA 651), en la misma creación (MAPA 664)
+        if cuerpo.get("geo_v") is not None:
+            try:
+                extra["a_medida"]["geo_v"] = max(1, min(1000, int(cuerpo.get("geo_v"))))
+            except (TypeError, ValueError):
+                pass
         return extra, de, None
     am = cuerpo.get("a_medida")
     if not isinstance(am, dict):
@@ -14823,12 +15077,55 @@ def _a_medida_crear(cuerpo, cat, pid_nuevo):
                          "alto_m": al, "variable": _clave_var_a_medida(pid_nuevo)}}, None, None
 
 
-def _medida_pieza(ancho_m, alto_m, margen):
+_TERMINACIONES = ("dobladillo", "overlock", "sin")
+_OVERLOCK_DEFECTO_CM = 1.0
+
+
+def _norm_terminacion(t):
+    """La TERMINACIÓN del borde de un molde a medida (MAPA 652): `dobladillo` (el margen del molde, que se
+    dobla), `overlock` (la costura en el borde: la forma tal cual con la medida del overlock) o `sin`
+    (sin margen). Gemelo: `normTerminacion` de motor/molde/aMedida.js."""
+    t = str(t or "").strip().lower()
+    return t if t in _TERMINACIONES else "dobladillo"
+
+
+def _overlock_cm(am):
+    try:
+        v = float(str((am or {}).get("overlock_cm", _OVERLOCK_DEFECTO_CM)).replace(",", "."))
+    except (TypeError, ValueError):
+        v = _OVERLOCK_DEFECTO_CM
+    return max(0.0, min(20.0, v))
+
+
+def _margen_de_terminacion(am, terminacion=None):
+    """El margen que rige con una terminación: el del molde (dobladillo; en una copia queda guardado en
+    `margen_dobladillo`), el del overlock, o nada. Gemelo: `margenDeTerminacion`."""
+    am = am if isinstance(am, dict) else {}
+    t = _norm_terminacion(terminacion if terminacion is not None else am.get("terminacion"))
+    if t == "sin":
+        return {"todos": 0.0}
+    if t == "overlock":
+        return {"todos": _overlock_cm(am)}
+    return _margen_a_medida(am.get("margen_dobladillo") if isinstance(am.get("margen_dobladillo"), dict) else am.get("margen"))
+
+
+def _medida_pieza(ancho_m, alto_m, margen, forma="rectangulo", orientacion="abajo", terminacion="dobladillo"):
     """La PIEZA terminada en cm: la medida escrita es la del DISEÑO y la pieza lleva el margen
-    alrededor (regla del usuario 2026-10-07). Gemelo: `medidaPieza` de motor/molde/aMedida.js."""
+    alrededor (regla del usuario 2026-10-07). CÍRCULO y TRIÁNGULO (MAPA 645): margen PAREJO (el mayor)
+    y la forma corrida hacia afuera. Gemelo: `medidaPieza` de motor/molde/aMedida.js."""
     m = _margen_a_medida(margen)
     t = float(m.get("todos") or 0)
     lado = lambda k: float(m.get(k, t))
+    f = MP._norm_forma(forma)
+    if f == "circulo":
+        D = float(ancho_m) * 100 + 2 * MP._margen_uniforme({k: lado(k) for k in ("arriba", "abajo", "izq", "der")})
+        return D, D
+    if f == "triangulo":
+        # con las puntas en INGLETE (MAPA 649): la caja del contorno cortado
+        g = MP._geo_triangulo(float(ancho_m) * 100, float(alto_m) * 100,
+                              MP._margen_uniforme({k: lado(k) for k in ("arriba", "abajo", "izq", "der")}), orientacion,
+                              _norm_terminacion(terminacion) != "overlock")
+        return g["W"], g["H"]
     return float(ancho_m) * 100 + lado("izq") + lado("der"), float(alto_m) * 100 + lado("arriba") + lado("abajo")
 
 
@@ -14836,7 +15133,7 @@ _RESOLUCION_DEFECTO_MM = 4.0    # gemelo de RESOLUCION_DEFECTO_MM: la grilla del
 
 
 def _cabe_en_tela(ancho_m, alto_m, borde_mm, ancho_cm, largo_max_cm, margen_nesting_mm=0, rotacion="ninguna", margen=None,
-                  resolucion_mm=_RESOLUCION_DEFECTO_MM):
+                  resolucion_mm=_RESOLUCION_DEFECTO_MM, forma="rectangulo", orientacion="abajo", terminacion="dobladillo"):
     """¿La pieza a medida entra en la tela? Gemelo EXACTO de `cabeEnTela` (motor/molde/aMedida.js):
     la pieza = la medida del diseño + el margen (`_medida_pieza`; el borde de corte va adentro, `borde_mm`
     queda por compatibilidad); la mesa y el largo máximo se achican por el margen del nesting a cada
@@ -14848,7 +15145,27 @@ def _cabe_en_tela(ancho_m, alto_m, borde_mm, ancho_cm, largo_max_cm, margen_nest
     _t = float(_m.get("todos") or 0)
     mx = float(_m.get("izq", _t)) + float(_m.get("der", _t))
     my = float(_m.get("arriba", _t)) + float(_m.get("abajo", _t))
-    w, h = float(ancho_m) * 100 + mx, float(alto_m) * 100 + my
+    f = MP._norm_forma(forma)
+    _mu = MP._margen_uniforme({k: float(_m.get(k, _t)) for k in ("arriba", "abajo", "izq", "der")})
+    # el TRIÁNGULO lleva el borde por dentro y el armado le deja la reserva alrededor (MAPA 645)
+    try:
+        _bm = float(borde_mm or 0)
+    except (TypeError, ValueError):
+        _bm = 0.0
+    extra = 2 * ((_bm if _bm > 0 else 2) / 10) if f == "triangulo" else 0
+    _w0, _h0 = _medida_pieza(ancho_m, alto_m, margen, f, orientacion, terminacion)
+    w, h = _w0 + extra, _h0 + extra
+
+    def _maximo_forma(eje, limite):
+        d = math.floor(limite)
+        while d >= _AM_MIN_M * 100:
+            a = d / 100 if (f == "circulo" or eje == "ancho") else float(ancho_m)
+            b = d / 100 if (f == "circulo" or eje == "alto") else float(alto_m)
+            ta, tb = _medida_pieza(a, b, margen, f, orientacion, terminacion)
+            if (ta if eje == "ancho" else tb) + extra <= limite + 1e-6:
+                return d
+            d -= 1
+        return 0
     try:
         res = float(resolucion_mm)
     except (TypeError, ValueError):
@@ -14864,19 +15181,21 @@ def _cabe_en_tela(ancho_m, alto_m, borde_mm, ancho_cm, largo_max_cm, margen_nest
     if cabe(w, h) or (gira and cabe(h, w)):
         return True, None
     cm = lambda x: f"{round(x * 10) / 10:g}".replace(".", ",")
-    con_m = " con el margen" if (mx or my) else ""
+    con_m = " con el margen" if ((mx or my) if f == "rectangulo" else _mu > 0) else ""
     tam = f"La bandera{con_m} mide {cm(w)} × {cm(h)} cm"
     if (min(w, h) if gira else w) > util + 1e-6:
         por_alto = gira and h < w
         exceso = (h if por_alto else w) - util
-        max_cm = math.floor((util - (my if por_alto else mx)) + 1e-6)
-        lado = "alto" if por_alto else "ancho"
+        max_cm = (math.floor((util - (my if por_alto else mx)) + 1e-6) if f == "rectangulo"
+                  else _maximo_forma("alto" if por_alto else "ancho", util))
+        lado = "diámetro" if f == "circulo" else ("alto" if por_alto else "ancho")
         motivo = f"{tam} y en esta tela entra hasta {cm(util)} cm de ancho: se pasa {cm(exceso)} cm{' (ni girándola)' if gira else ''}."
     else:
         derecha = w <= util + 1e-6
         exceso = (h if derecha else w) - largo
-        max_cm = math.floor((largo - (my if derecha else mx)) + 1e-6)
-        lado = "alto" if derecha else "ancho"
+        max_cm = (math.floor((largo - (my if derecha else mx)) + 1e-6) if f == "rectangulo"
+                  else _maximo_forma("alto" if derecha else "ancho", largo))
+        lado = "diámetro" if f == "circulo" else ("alto" if derecha else "ancho")
         motivo = f"{tam} y en la mesa más larga entra hasta {cm(largo)} cm: se pasa {cm(exceso)} cm."
     if max_cm >= _AM_MIN_M * 100:
         _txt = f"{max_cm / 100:.2f}".replace(".", ",")
@@ -14914,6 +15233,41 @@ def _nesting_de(prod, cat):
             "resolucion_mm": float(os.environ.get("TIZADA_RES_MM", _RESOLUCION_DEFECTO_MM))}
 
 
+def _arte_otra_medida(prod, diseno, tol_cm=0.5):
+    """¿EL ARTE DE ESTE DISEÑO ES DE OTRA MEDIDA que el molde a medida? (MAPA 658). El arte se arma sobre
+    la plantilla, que tiene la medida del momento en que se creó: si después la medida cambia, la mesa del
+    arte ya no es la pieza y el diseño deja tela sin cubrir. Compara la mesa del arte de la pieza (la de su
+    nombre en la guía o, si hay una sola, ésa) con la pieza del registro. Sólo LEE la detección guardada al
+    lado del arte (el servidor no calcula). None si coinciden o no se sabe; si no,
+    {"arte": {w, h}, "molde": {w, h}} en cm. Gemelo: `arteDeOtraMedida` de `motor/molde/aMedida.js`."""
+    am = (prod or {}).get("a_medida")
+    if not isinstance(am, dict):
+        return None
+    pid = prod.get("id")
+    try:
+        pieza = str(am.get("pieza") or "")
+        reg = (_cargar("registro_producto.json", pid) or {}).get(pieza) or {}
+        dims = [d for d in reg.values() if isinstance(d, dict) and d.get("w_cm") and d.get("h_cm")]
+        if not dims:
+            return None
+        mw, mh = float(dims[0]["w_cm"]), float(dims[0]["h_cm"])
+        ruta = os.path.join(os.path.dirname(_ruta_entrada("arte.ai", pid, sub=_diseno_sub(diseno))), ".deteccion_cache.json")
+        with open(ruta, encoding="utf-8") as f:
+            mesas = ((json.load(f) or {}).get("det") or {}).get("mesas") or []
+        _n = lambda s: str(s or "").strip().lower()
+        mesa = next((m for m in mesas if _n(m.get("nombre_detectado") or m.get("rotulo")) == _n(pieza)), None)
+        if mesa is None and len(mesas) == 1:
+            mesa = mesas[0]
+        if not mesa:
+            return None
+        aw, ah = float(mesa.get("w_cm") or 0), float(mesa.get("h_cm") or 0)
+        if min(aw, ah, mw, mh) <= 0 or (abs(aw - mw) <= tol_cm and abs(ah - mh) <= tol_cm):
+            return None
+        return {"arte": {"w": aw, "h": ah}, "molde": {"w": mw, "h": mh}}
+    except Exception:
+        return None
+
+
 def _a_medida_publico(prod, cat):
     """Lo que la pantalla necesita de un molde a medida para decidir sola si una tela sirve (con
     `cabeEnTela`): la medida, el borde de corte y el acomodo de ESTE molde."""
@@ -14925,6 +15279,9 @@ def _a_medida_publico(prod, cat):
             # el borde va ADENTRO de la medida: la pantalla arma el rectángulo esto más chico y mide el
             # margen desde el contorno con esto (`margenSobreContorno`)
             "reserva_mm": _reserva_borde_mm(prod, cat),
+            # la reserva SIN mirar la forma (MAPA 645): la pantalla cambia de triángulo (reserva 0) a
+            # rectángulo/círculo antes de que el servidor guarde la forma nueva, y necesita la del borde
+            "reserva_borde_mm": _reserva_borde_mm({**prod, "a_medida": {**am, "forma": "rectangulo"}}, cat),
             "marcas_tiras": _tiras_efectivas(prod, cat),
             "nesting": _nesting_de(prod, cat)}
 
@@ -14949,7 +15306,7 @@ def _a_medida_telas_que_no_entran(prod, cat, ids):
     return out
 
 
-def _copia_a_medida(tpl_pid, ancho_m, alto_m, externo=None):
+def _copia_a_medida(tpl_pid, ancho_m, alto_m, externo=None, forma=None, orientacion=None, terminacion=None):
     """La COPIA a medida de un molde del catálogo, para un pedido del OTRO SISTEMA (la hace el robot,
     que no tiene sesión): lo mismo que `crear_producto` con `a_medida_de`, marcada `externo: <ref>`
     para borrarla con su pedido. El archivo lo sube después el robot por `/api/plantilla`.
@@ -14957,8 +15314,8 @@ def _copia_a_medida(tpl_pid, ancho_m, alto_m, externo=None):
     cat = _cargar_catalogo_para_editar()
     try:
         pid = "prod_" + time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:4]
-        extra, de, err = _a_medida_crear({"a_medida_de": tpl_pid, "efimero": True, "ancho_m": ancho_m, "alto_m": alto_m},
-                                          cat, pid)
+        extra, de, err = _a_medida_crear({"a_medida_de": tpl_pid, "efimero": True, "ancho_m": ancho_m, "alto_m": alto_m,
+                                           "forma": forma, "orientacion": orientacion, "terminacion": terminacion}, cat, pid)
         if err:
             return None, err[0]
         tpl = next(p for p in cat["productos"] if p.get("id") == de)
@@ -15021,6 +15378,32 @@ def guardar_a_medida():
         am["margen"] = _margen_a_medida(cuerpo.get("margen"))
     if "marcas_tiras" in cuerpo:
         prod["marcas_tiras"] = _tiras_limpias(cuerpo.get("marcas_tiras"))
+    # LA FORMA (MAPA 645): rectángulo, círculo o triángulo (con su punta); se elige en cada pedido
+    if "forma" in cuerpo:
+        am["forma"] = MP._norm_forma(cuerpo.get("forma"))
+    if "orientacion" in cuerpo:
+        am["orientacion"] = MP._norm_orientacion(cuerpo.get("orientacion"))
+    if "overlock_cm" in cuerpo:
+        am["overlock_cm"] = _overlock_cm({"overlock_cm": cuerpo.get("overlock_cm")})
+    if "terminacion" in cuerpo:
+        # MAPA 652: en el molde, la de POR DEFECTO; en la copia del pedido, la elegida (y el margen que rige)
+        if am.get("de"):
+            if not isinstance(am.get("margen_dobladillo"), dict):
+                # copia armada antes de la 652: su margen era el del dobladillo
+                am["margen_dobladillo"] = copy.deepcopy(am.get("margen") or {}) if _norm_terminacion(am.get("terminacion")) == "dobladillo" else {}
+            if "overlock_cm" not in am:      # copia de antes de la 652: el overlock del molde del catálogo
+                _tpl = next((x for x in cat.get("productos", []) if x.get("id") == am.get("de")), None)
+                am["overlock_cm"] = _overlock_cm((_tpl or {}).get("a_medida"))
+            am["terminacion"] = _norm_terminacion(cuerpo.get("terminacion"))
+            am["margen"] = _margen_de_terminacion(am)
+        else:
+            am["terminacion"] = _norm_terminacion(cuerpo.get("terminacion"))
+    if "geo_v" in cuerpo:
+        # con qué versión de la geometría se armó el archivo (MAPA 651: `GEO_VERSION` de molde/aMedida.js)
+        try:
+            am["geo_v"] = max(1, min(1000, int(cuerpo.get("geo_v"))))
+        except (TypeError, ValueError):
+            pass
     if "pieza" in cuerpo:
         # EL NOMBRE DE LA PIEZA se cambia desde «Variables» (MAPA 624). Lo que el molde guarda POR
         # PIEZA (posición de la etiqueta «variable§Pieza», telas por pieza, límite del texto por
@@ -15057,8 +15440,9 @@ def guardar_a_medida():
                     for v in o.values():
                         _renombrar(v)
             _renombrar(prod.get("editables"))
+    _normalizar_catalogo(cat)   # el nombre de la copia toma la medida nueva (MAPA 679)
     _guardar_catalogo(cat)
-    return jsonify({"ok": True, "a_medida": am, "marcas_tiras": _tiras_limpias(prod.get("marcas_tiras"))})
+    return jsonify({"ok": True, "a_medida": am, "marcas_tiras": _tiras_limpias(prod.get("marcas_tiras")), "nombre": prod.get("nombre")})
 
 
 @app.post("/api/productos/crear")
@@ -15214,6 +15598,20 @@ def activar_producto():
     # del catálogo para trabajar. Alcanza con que lo pueda VER.
     _no = _guard_id(cuerpo, permiso=None)
     if _no: return _no          # molde de otro usuario
+    # ⚡ YA ESTÁ ACTIVO → NO SE ESCRIBE NADA (MAPA 664). La pantalla lo pide varias veces seguidas (4 en 2 s al
+    # cambiar de diseño) y cada una tomaba el candado del catálogo y lo guardaba ENTERO en la base: el alta de la
+    # copia a medida esperaba su turno («catálogo 2,9 s» de un guardado que tarda 0,2). Sólo se anota la sesión.
+    try:
+        _cat_l = _cargar_catalogo()
+        if _cat_l.get("activo") == pid and any(p.get("id") == pid for p in _cat_l.get("productos", [])):
+            try:
+                session["pid_activo"] = pid
+                session.permanent = True
+            except Exception:
+                pass
+            return jsonify({"ok": True, "activo": pid})
+    except Exception:
+        pass
     cat = _cargar_catalogo_para_editar()
     exists = any(p["id"] == pid for p in cat["productos"])
     if not exists:
@@ -16947,6 +17345,24 @@ if __name__ == "__main__":
     # Los procesos de dibujo tienen que morirse CON el servidor (si no, cada reinicio deja
     # ~1 GB de procesos sueltos y la máquina se va poniendo lenta sin que se note por qué).
     _atado = _atar_hijos_a_este_proceso()
+    # 🔴 PRIORIDAD NORMAL (MAPA 685). La tarea de Windows que lo levanta corre los programas en prioridad
+    # «por debajo de lo normal» (la de fábrica del Programador de tareas): con cualquier otro programa usando
+    # la CPU (un `cargo build`, Ghidra…) el servidor quedaba último en la fila y un `/api/salud` tardaba 26 s
+    # — medido 2026-10-12 —, y con él cada paso de la pantalla. Se pide la NORMAL, la de cualquier programa
+    # abierto a mano; los procesos de dibujo que se crean después la heredan.
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            _k32 = ctypes.windll.kernel32
+            # los tipos de 64 bits a mano: sin esto ctypes pasa el handle como int de 32 y la llamada falla callada
+            _k32.GetCurrentProcess.restype = wintypes.HANDLE
+            _k32.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+            _k32.SetPriorityClass.restype = wintypes.BOOL
+            if not _k32.SetPriorityClass(_k32.GetCurrentProcess(), 0x00000020):   # NORMAL_PRIORITY_CLASS
+                print(f"  [!] no se pudo poner la prioridad normal (error {ctypes.GetLastError()})", flush=True)
+        except Exception as _e:
+            print(f"  [!] no se pudo poner la prioridad normal: {_e}", flush=True)
     # La base se pone al día ACÁ y no al importar el módulo: los workers del pool lo re-importan.
     _poner_base_al_dia_al_arrancar()
     # las tipografías subidas antes con el rótulo `subida_` pasan a su nombre real

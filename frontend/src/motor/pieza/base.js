@@ -12,6 +12,7 @@
 // usan los placeholders y las etiquetas.
 import { pyFixed, pyG } from '../py.js'
 import { segmentosTiras } from '../molde/tiras.js'
+import { normForma } from '../molde/formas.js'
 
 export const MM = 2.83465            // puntos por mm (molde_real.MM)
 export const CM = 28.3465            // puntos por cm (motor_pedido.CM)
@@ -115,18 +116,29 @@ export function bloqueBorde(bc, cont, S, clip, W, H) {
  * `_ops_tiras`: el trazo de las MARCAS DE TIRAS (molde a medida, MAPA 639) sobre la página de la pieza
  * (`W` × `H` pt = el total: contorno + la reserva del borde). `tiras` = `servidor._tiras_de` (margen en cm).
  */
-export function opsTiras(tiras, W, H) {
+/** El contorno blanco de la marca de tira, de cada lado, en mm (gemelo: `TIRA_CONTORNO_MM` de motor_pedido). */
+export const TIRA_CONTORNO_MM = 0.4
+
+export function opsTiras(tiras, W, H, B = 0) {
   if (!tiras || typeof tiras !== 'object') return ''
   const mg = tiras.margen || {}
   const m = {}
   for (const k of ['arriba', 'abajo', 'izq', 'der']) m[k] = (Number(mg[k]) || 0) * CM
-  const segs = segmentosTiras(W, H, m, tiras.lados)
+  // el TOTAL es la página entera (rectángulo y círculo) salvo en el TRIÁNGULO: ahí el contorno ES el
+  // total y la página lo rodea con `B` (MAPA 645). Gemelo: `_ops_tiras`.
+  const forma = normForma(tiras.forma)
+  // el triángulo recortado se arma con la medida del DISEÑO (MAPA 649), en las unidades de la página
+  const dis = Array.isArray(tiras.diseno_cm) ? [Number(tiras.diseno_cm[0]) * CM, Number(tiras.diseno_cm[1]) * CM] : null
+  const segs = forma === 'triangulo'
+    ? segmentosTiras(W, H, m, tiras.lados, forma, tiras.orientacion, dis, tiras.recorte !== false).map(([a, b, c, d]) => [a + B, b + B, c + B, d + B])
+    : segmentosTiras(W + 2 * B, H + 2 * B, m, tiras.lados, forma, tiras.orientacion, dis, tiras.recorte ?? null)
   if (!segs.length) return ''
-  const col = colorOp((tiras.color || [0, 0, 0, 1]).slice(0, 4), 'K')
+  // NEGRA CON CONTORNO BLANCO (MAPA 682): la misma línea en blanco, más ancha, y encima la negra. Gemelo: `_ops_tiras`.
   const w = Math.max(0.1, Number(tiras.grosor_mm) || 1.0) * MM
-  let out = `q\n${pyFixed(w, 3)} w 0 J 0 j ${col}\n`
-  for (const [x1, y1, x2, y2] of segs) out += `${pyFixed(x1, 3)} ${pyFixed(y1, 3)} m ${pyFixed(x2, 3)} ${pyFixed(y2, 3)} l\n`
-  return out + 'S\nQ\n'
+  const wb = w + 2 * TIRA_CONTORNO_MM * MM
+  let trazo = ''
+  for (const [x1, y1, x2, y2] of segs) trazo += `${pyFixed(x1, 3)} ${pyFixed(y1, 3)} m ${pyFixed(x2, 3)} ${pyFixed(y2, 3)} l\n`
+  return `q\n${pyFixed(wb, 3)} w 0 J 0 j 0 0 0 0 K\n${trazo}S\nQ\n` + `q\n${pyFixed(w, 3)} w 0 J 0 j 0 0 0 1 K\n${trazo}S\nQ\n`
 }
 
 /** `_base_stream`: el orden del borde respecto del dibujo depende de la alineación; las marcas de tiras
@@ -134,7 +146,7 @@ export function opsTiras(tiras, W, H) {
 export function componerBase(bc, cont, S, clip, W, H, arteDraw) {
   const { bordeOps, bordePost } = bloqueBorde(bc, cont, S, clip, W, H)
   const base = bc.bcAlin === 'fuera' ? `${bordeOps}${arteDraw}${bordePost}` : `${arteDraw}${bordeOps}${bordePost}`
-  return base + opsTiras(bc.tiras, W + 2 * bc.B, H + 2 * bc.B)
+  return base + opsTiras(bc.tiras, W, H, bc.B)
 }
 
 // ─── el documento de UNA pieza (para la vista previa y los contratos) ────────────────────────

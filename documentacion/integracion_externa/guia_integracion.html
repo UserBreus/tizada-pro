@@ -174,7 +174,7 @@ flowchart LR
     <div><span class="n">2</span>El recorrido de un pedido</div>
     <div><span class="n">3</span>Qué se manda y qué se recibe · <b>3b</b> Cómo lee TIZADA el arte · <b>3c</b> Editables (TPU / DTF / bordado)</div>
     <div><span class="n">4</span>Cómo se conectan los JSON</div>
-    <div><span class="n">5</span>El pedido, el resultado y el aviso · <b>5b</b> Todos los campos de pedido.json · <b>5c</b> Moldes a medida (banderas) · <b>5d</b> Sus cuentas · <b>5e</b> Su JSON</div>
+    <div><span class="n">5</span>El pedido, el resultado y el aviso · <b>5b</b> Todos los campos de pedido.json · <b>5c</b> Moldes a medida (banderas) · <b>5d</b> Sus cuentas · <b>5e</b> Su JSON · <b>5f</b> Círculos y triángulos · <b>5g</b> Terminación y tiras sin marcar</div>
     <div><span class="n">6</span>Estados y alarmas</div>
     <div><span class="n">7</span>Todas las rutas</div>
     <div><span class="n">8</span>Probarlo, lista de control y problemas frecuentes</div>
@@ -512,7 +512,9 @@ flowchart LR
     <tr><td><code>tela</code> · <code>telas_por_pieza</code></td><td>molde</td><td>Id de tela principal (obligatorio) y excepciones por pieza genérica: <code>{"Cuello": "486"}</code></td></tr>
     <tr><td><code>piezas_apagadas</code></td><td>molde · opcional</td><td>Piezas que <b>no</b> se hacen en este pedido: <code>["Tapa costura"]</code></td></tr>
     <tr><td><code>editables</code></td><td>molde · opcional</td><td>Qué lleva cada objeto editable del arte (TPU, DTF, bordado…). <b>Ver sección 3b</b></td></tr>
-    <tr><td><code>medida</code></td><td>molde · sólo prendas a medida</td><td><code>{"ancho_m": 1.5, "alto_m": 0.9}</code> = la medida del <b>diseño</b> en metros (0,05 a 50); TIZADA le suma el margen. Lo indica <code>a_medida</code> en <code>GET /variables</code>; esa fila de la planilla no lleva talle. <b>Ver 5c</b></td></tr>
+    <tr><td><code>medida</code></td><td>molde · sólo prendas a medida</td><td><code>{"ancho_m": 1.5, "alto_m": 0.9}</code> = la medida del <b>diseño</b> en metros (0,05 a 50); TIZADA le suma el margen. Lo indica <code>a_medida</code> en <code>GET /variables</code>; esa fila de la planilla no lleva talle. En el círculo, <code>{"diametro_m": 1}</code>. <b>Ver 5c y 5f</b></td></tr>
+    <tr><td><code>terminacion</code></td><td>molde · a medida · opcional</td><td><code>dobladillo</code>, <code>overlock</code> o <code>sin</code> (sin margen); si no viene, la del molde. <b>Ver 5g</b></td></tr>
+    <tr><td><code>forma</code> · <code>orientacion</code></td><td>molde · a medida · opcional</td><td><code>rectangulo</code> (si no viene), <code>circulo</code> o <code>triangulo</code>; en el triángulo, la punta: <code>abajo</code> (si no viene), <code>arriba</code>, <code>izq</code>, <code>der</code>. <b>Ver 5f</b></td></tr>
     <tr><td><code>tiras</code></td><td>molde · a medida · opcional</td><td>Marcas para coser las tiras: <code>{"lleva": true, "lados": {"arriba": 5, "abajo": 5, "izq": 0, "der": 0}}</code>; cada lado cuenta las 2 puntas. Sin esto, las del molde. <b>Ver 5e</b></td></tr>
   </table>
   <div class="grilla g2">
@@ -553,19 +555,18 @@ flowchart LR
       <line x1="20" y1="290" x2="620" y2="290" stroke="#5b6875" stroke-width="1.5"/>
       <text x="606" y="180" font-size="11" fill="#5b6875" text-anchor="middle" transform="rotate(-90 606 180)" font-weight="700">TELA · 157 cm de ancho</text>
       <!-- el total del arte -->
-      <rect x="96" y="70.8" width="428.4" height="218.4" fill="#ffffff" stroke="#00b8d4" stroke-width="3"/>
+      <!-- con DOBLADILLO, las esquinas recortadas (MAPA 653): al doblar por la guía no sobra nada -->
+      <polygon points="118,70.8 502.4,70.8 502.4,92.8 524.4,92.8 524.4,267.2 502.4,267.2 502.4,289.2 118,289.2 118,267.2 96,267.2 96,92.8 118,92.8" fill="#ffffff" stroke="#00b8d4" stroke-width="3"/>
       <!-- el borde de corte, ADENTRO del total -->
-      <rect x="99" y="73.8" width="422.4" height="212.4" fill="none" stroke="#e0443a" stroke-width="1.2"/>
+      <polygon points="121,73.8 499.4,73.8 499.4,95.8 521.4,95.8 521.4,264.2 499.4,264.2 499.4,286.2 121,286.2 121,264.2 99,264.2 99,95.8 121,95.8" fill="none" stroke="#e0443a" stroke-width="1.2"/>
       <!-- la guía del diseño (margen exagerado para que se vea) -->
       <rect x="118" y="92.8" width="384.4" height="174.4" fill="#fde6f2" stroke="#d6007e" stroke-width="1.6" stroke-dasharray="7 5"/>
       <text x="310" y="172" font-size="14" fill="#a3005f" text-anchor="middle" font-weight="800">300 × 150 cm</text>
       <text x="310" y="190" font-size="10.5" fill="#a3005f" text-anchor="middle">guía del diseño = la medida que se pide</text>
-      <!-- las tiras: arriba 5 y abajo 5 (2 puntas + 3), izquierda 1 (en el medio), derecha 0 -->
+      <!-- las tiras: arriba 5 y abajo 5 (2 esquinas + 3: la esquina recortada no lleva marca), izquierda 1, derecha 0 -->
       <g stroke="#16202a" stroke-width="3.2" stroke-linecap="butt">
-        <line x1="96" y1="70.8" x2="118" y2="92.8"/><line x1="524.4" y1="70.8" x2="502.4" y2="92.8"/>
-        <line x1="96" y1="289.2" x2="118" y2="267.2"/><line x1="524.4" y1="289.2" x2="502.4" y2="267.2"/>
-        <line x1="203.1" y1="70.8" x2="203.1" y2="92.8"/><line x1="310.2" y1="70.8" x2="310.2" y2="92.8"/><line x1="417.3" y1="70.8" x2="417.3" y2="92.8"/>
-        <line x1="203.1" y1="289.2" x2="203.1" y2="267.2"/><line x1="310.2" y1="289.2" x2="310.2" y2="267.2"/><line x1="417.3" y1="289.2" x2="417.3" y2="267.2"/>
+        <line x1="214.1" y1="70.8" x2="214.1" y2="92.8"/><line x1="310.2" y1="70.8" x2="310.2" y2="92.8"/><line x1="406.3" y1="70.8" x2="406.3" y2="92.8"/>
+        <line x1="214.1" y1="289.2" x2="214.1" y2="267.2"/><line x1="310.2" y1="289.2" x2="310.2" y2="267.2"/><line x1="406.3" y1="289.2" x2="406.3" y2="267.2"/>
         <line x1="96" y1="180" x2="118" y2="180"/>
       </g>
       <!-- medidas -->
@@ -574,9 +575,9 @@ flowchart LR
       </g>
       <text x="310" y="17" font-size="11" fill="#007a8f" text-anchor="middle" font-weight="700">306 cm · TOTAL del arte = 300 + 3 + 3 (lo que se imprime)</text>
       <g stroke="#16202a" stroke-width="1">
-        <line x1="96" y1="56" x2="203.1" y2="56"/><line x1="96" y1="51" x2="96" y2="61"/><line x1="203.1" y1="51" x2="203.1" y2="61"/>
+        <line x1="118" y1="56" x2="214.1" y2="56"/><line x1="118" y1="51" x2="118" y2="61"/><line x1="214.1" y1="51" x2="214.1" y2="61"/>
       </g>
-      <text x="149.5" y="50" font-size="10" fill="#16202a" text-anchor="middle" font-weight="700">una cada 76,5 cm</text>
+      <text x="166" y="50" font-size="10" fill="#16202a" text-anchor="middle" font-weight="700">una cada 75 cm</text>
       <text x="420" y="50" font-size="10" fill="#16202a" text-anchor="middle">arriba: 5 tiras = 2 puntas + 3</text>
       <g stroke="#00b8d4" stroke-width="1.2">
         <line x1="548" y1="70.8" x2="548" y2="289.2"/><line x1="542" y1="70.8" x2="554" y2="70.8"/><line x1="542" y1="289.2" x2="554" y2="289.2"/>
@@ -589,7 +590,7 @@ flowchart LR
         <rect x="24" y="304" width="18" height="10" fill="#fff" stroke="#00b8d4" stroke-width="2.5"/><text x="48" y="313">total del arte (medida + margen)</text>
         <rect x="224" y="304" width="18" height="10" fill="#fde6f2" stroke="#d6007e" stroke-dasharray="4 3"/><text x="248" y="313">guía del diseño · margen 3 cm por lado</text>
         <line x1="454" y1="309" x2="472" y2="309" stroke="#e0443a" stroke-width="1.5"/><text x="478" y="313">borde de corte (adentro)</text>
-        <line x1="24" y1="329" x2="42" y2="329" stroke="#16202a" stroke-width="3.2"/><text x="48" y="333">tira: marca del borde hasta la guía · en las esquinas, en diagonal · abajo también 5 · derecha 0</text>
+        <line x1="24" y1="329" x2="42" y2="329" stroke="#16202a" stroke-width="3.2"/><text x="48" y="333">tira: marca del borde hasta la guía · las esquinas van recortadas (sin marca) · abajo también 5 · derecha 0</text>
       </g>
     </svg>
     <div class="pie-fig">Bandera de 3,00 × 1,50 con 3 cm de margen en la tela «Bandera (1,60)»: 306 × 156 entra girada (156 ≤ 156,7). El margen está dibujado más ancho para que se vea.</div>
@@ -601,7 +602,7 @@ flowchart LR
     <div class="tarjeta"><div class="ico i-a"><i class="ti ti-needle-thread"></i></div><h4>3 · Las tiras (opcional)</h4><p>Si lleva y cuántas marcas en <b>cada lado</b> (arriba, abajo, izq, der). El número <b>cuenta las 2 puntas</b>: 5 = 2 esquinas + 3 en el medio; 1 = una en el medio; 0 = ese lado sin tiras. Si no se manda: las del molde.</p></div>
   </div>
 
-  <div class="caja c-bien"><div class="t"><i class="ti ti-circle-check"></i> Lo que hace TIZADA con eso</div><p>Arma la pieza del <b>total</b> (medida + margen), la acomoda en la tela (girada si así entra), imprime el diseño hasta el borde, el <b>borde de corte</b> por dentro y las <b>marcas de las tiras</b> del color y grosor del molde; en la <b>ficha técnica</b> agrega «MEDIDA Y TERMINACIÓN» con todas estas medidas.</p></div>
+  <div class="caja c-bien"><div class="t"><i class="ti ti-circle-check"></i> Lo que hace TIZADA con eso</div><p>Arma la pieza del <b>total</b> (medida + margen), la acomoda en la tela (girada si así entra), imprime el diseño hasta el borde, el <b>borde de corte</b> por dentro y las <b>marcas de las tiras</b> del color y grosor del molde; en la <b>ficha técnica</b> agrega «MEDIDA Y TERMINACIÓN» con todas estas medidas, el <b>plano de la pieza</b> acotado, el borde en corte <b>paso a paso</b> (cómo se dobla y dónde se cose), la esquina o punta <b>cortada y doblada</b> y los pasos para terminarla.</p></div>
 </section>
 
 <!-- ═══════════════════════════ 5d · LAS CUENTAS ═══════════════════════════ -->
@@ -614,8 +615,8 @@ flowchart LR
     <tr><td><b>Total del arte</b></td><td>ancho = ancho del diseño + margen izq + der · alto = alto del diseño + margen arriba + abajo (el borde de corte va <b>adentro</b>)</td><td>300 + 3 + 3 = <b>306</b> · 150 + 3 + 3 = <b>156</b> cm</td></tr>
     <tr><td><b>¿Entra en la tela?</b></td><td>lado atravesado ≤ <code>entra_hasta_cm</code> y el otro ≤ <code>largo_maximo_cm</code>; si <code>gira</code>, probar también al revés</td><td>156 ≤ 156,7 ✓ (girada)</td></tr>
     <tr><td><b>Lo máximo</b></td><td><code>entra_hasta_cm</code> − el margen de esos dos lados, redondeado al cm para abajo</td><td>156,7 − 6 → <b>1,50 m</b> de alto</td></tr>
-    <tr><td><b>Tiras de un lado</b></td><td>N marcas: una en cada punta y las demás a distancias iguales → una cada <b>largo del lado ÷ (N − 1)</b>; con 1, en el medio. Cada marca mide lo que el margen de ese lado</td><td>arriba 5: 306 ÷ 4 = <b>76,5 cm</b> · marca de 3 cm</td></tr>
-    <tr><td><b>Total de marcas</b></td><td>la suma de los lados; una esquina que piden 2 lados <b>cuenta una vez</b></td><td>arriba 5 + abajo 5 + izq 1 = <b>11</b></td></tr>
+    <tr><td><b>Tiras de un lado</b></td><td>N contando las 2 esquinas, a distancias iguales sobre la <b>guía</b> → una cada <b>largo de la guía ÷ (N − 1)</b>; con 1, en el medio. Con dobladillo la esquina va <b>recortada</b> y no lleva marca (cuenta igual); con overlock lleva una, en diagonal</td><td>arriba 5: 300 ÷ 4 = <b>75 cm</b> · marca de 3 cm</td></tr>
+    <tr><td><b>Total de marcas</b></td><td>las del medio de cada lado (+ las esquinas con overlock: una sola aunque la pidan 2 lados)</td><td>3 + 3 + 1 = <b>7</b></td></tr>
   </table>
   <h3><i class="ti ti-bolt"></i> <code>POST /a_medida/calcular</code> — TIZADA hace las cuentas</h3>
 <pre class="json"><span class="c">// lo que se manda (no guarda nada)</span>
@@ -629,10 +630,10 @@ flowchart LR
   <span class="k">"telas"</span>: [ { <span class="k">"id"</span>: <span class="s">"44"</span>, <span class="k">"nombre"</span>: <span class="s">"Bandera (1,60)"</span>, <span class="k">"entra_hasta_cm"</span>: <span class="n">156.7</span>,
                <span class="k">"entra"</span>: <span class="n">true</span>, <span class="k">"motivo"</span>: <span class="n">null</span> } ],     <span class="c">← si no entra: motivo = cuánto se pasa y lo máximo</span>
   <span class="k">"entra_en_alguna"</span>: <span class="n">true</span>,
-  <span class="k">"tiras"</span>: { <span class="k">"lleva"</span>: <span class="n">true</span>, <span class="k">"total_marcas"</span>: <span class="n">11</span>, <span class="k">"grosor_mm"</span>: <span class="n">1</span>, <span class="k">"color_cmyk"</span>: [ <span class="c">…</span> ],
+  <span class="k">"tiras"</span>: { <span class="k">"lleva"</span>: <span class="n">true</span>, <span class="k">"total_marcas"</span>: <span class="n">7</span>, <span class="k">"grosor_mm"</span>: <span class="n">1</span>, <span class="k">"color"</span>: <span class="s">"negra con contorno blanco"</span>,
     <span class="k">"lados"</span>: { <span class="k">"arriba"</span>: <span class="n">5</span>, <span class="k">"abajo"</span>: <span class="n">5</span>, <span class="k">"izq"</span>: <span class="n">1</span>, <span class="k">"der"</span>: <span class="n">0</span> },
-    <span class="k">"por_lado"</span>: [ { <span class="k">"lado"</span>: <span class="s">"arriba"</span>, <span class="k">"marcas"</span>: <span class="n">5</span>, <span class="k">"cada_cm"</span>: <span class="n">76.5</span>, <span class="k">"en_el_medio"</span>: <span class="n">false</span>,
-                   <span class="k">"largo_del_lado_cm"</span>: <span class="n">306</span>, <span class="k">"largo_marca_cm"</span>: <span class="n">3</span> },
+    <span class="k">"por_lado"</span>: [ { <span class="k">"lado"</span>: <span class="s">"arriba"</span>, <span class="k">"marcas"</span>: <span class="n">5</span>, <span class="k">"cada_cm"</span>: <span class="n">75</span>, <span class="k">"en_el_medio"</span>: <span class="n">false</span>,
+                   <span class="k">"largo_del_lado_cm"</span>: <span class="n">300</span>, <span class="k">"largo_marca_cm"</span>: <span class="n">3</span> },
                  { <span class="k">"lado"</span>: <span class="s">"izq"</span>, <span class="k">"marcas"</span>: <span class="n">1</span>, <span class="k">"cada_cm"</span>: <span class="n">null</span>, <span class="k">"en_el_medio"</span>: <span class="n">true</span>, <span class="c">…</span> }, <span class="c">…</span> ] },
   <span class="k">"ficha"</span>: [ { <span class="k">"etiqueta"</span>: <span class="s">"Total del arte (con el margen)"</span>, <span class="k">"valor"</span>: <span class="s">"306 × 156 cm"</span> }, <span class="c">…</span> ],
   <span class="k">"alarmas"</span>: [] }</pre>
@@ -659,7 +660,7 @@ flowchart LR
   <span class="k">"telas"</span>: [ { <span class="k">"id"</span>: <span class="s">"44"</span>, <span class="k">"nombre"</span>: <span class="s">"Bandera (1,60)"</span>, <span class="k">"ancho_mesa_cm"</span>: <span class="n">157</span>, <span class="k">"entra_hasta_cm"</span>: <span class="n">156.7</span> } ],
   <span class="k">"tiras"</span>: { <span class="k">"lleva_por_defecto"</span>: <span class="n">false</span>, <span class="k">"maximo_por_lado"</span>: <span class="n">50</span>,
              <span class="k">"lados_por_defecto"</span>: { <span class="k">"arriba"</span>: <span class="n">0</span>, <span class="k">"abajo"</span>: <span class="n">0</span>, <span class="k">"izq"</span>: <span class="n">0</span>, <span class="k">"der"</span>: <span class="n">0</span> },
-             <span class="k">"grosor_mm"</span>: <span class="n">1</span>, <span class="k">"color_cmyk"</span>: [ <span class="n">0</span>, <span class="n">0</span>, <span class="n">0</span>, <span class="n">1</span> ] },   <span class="c">← grosor y color: los pone TIZADA</span>
+             <span class="k">"grosor_mm"</span>: <span class="n">1</span>, <span class="k">"color"</span>: <span class="s">"negra con contorno blanco"</span> },   <span class="c">← grosor y color: los pone TIZADA</span>
   <span class="c">… y además «total», «regla_entra» y «tiras.regla»: las reglas, en una frase</span> }</pre>
   <div class="grilla g2">
     <div>
@@ -695,6 +696,117 @@ flowchart LR
   </table>
 </section>
 
+<!-- ═══════════════════════════ 5f · CÍRCULOS Y TRIÁNGULOS ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">5f</div><div><div class="kicker">Molde a medida · otras formas</div><h2>Círculos y triángulos: lo mismo, con dos datos más</h2></div></div>
+  <p class="lead">El mismo molde a medida puede salir <b>rectángulo</b> (lo de siempre), <b>círculo</b> o <b>triángulo</b>: la forma la elige <b>cada pedido</b>. Todo lo de 5c a 5e vale igual; cambian sólo tres cosas: se manda <code>forma</code> (y en el triángulo, hacia dónde va la <b>punta</b>), el <b>margen va parejo</b> todo alrededor (el mayor de <code>margen_cm</code>) y las <b>tiras</b> se cuentan distinto.</p>
+  <div class="figura">
+    <svg viewBox="0 0 680 325" width="100%" style="max-height: 86mm; display: block;" font-family="Inter, sans-serif">
+      <!-- triángulo, punta abajo, con las puntas recortadas (MAPA 649-650) -->
+      <polygon points="329.2,57.6 316.0,40.0 78.4,40.0 65.2,57.6 59.0,78.7 180.0,240.1 197.2,233.6 214.4,240.1 335.4,78.7" fill="#ffffff" stroke="#00b8d4" stroke-width="3"/>
+      <polygon points="329.2,57.6 65.2,57.6 197.2,233.6" fill="#fde6f2" stroke="#d6007e" stroke-width="1.6" stroke-dasharray="7 5"/>
+      <g stroke="#16202a" stroke-width="3.2"><line x1="263.2" y1="40.0" x2="263.2" y2="57.6"/><line x1="197.2" y1="40.0" x2="197.2" y2="57.6"/><line x1="131.2" y1="40.0" x2="131.2" y2="57.6"/><line x1="95.1" y1="126.8" x2="109.2" y2="116.3"/><line x1="139.1" y1="185.5" x2="153.2" y2="174.9"/><line x1="255.3" y1="185.5" x2="241.2" y2="174.9"/><line x1="299.3" y1="126.8" x2="285.2" y2="116.3"/></g>
+      <text x="197.2" y="110" font-size="13" fill="#a3005f" text-anchor="middle" font-weight="800">120 × 80 cm</text>
+      <text x="197.2" y="126" font-size="10" fill="#a3005f" text-anchor="middle">guía = la medida que se pide</text>
+      <text x="197.2" y="24" font-size="10.5" fill="#007a8f" text-anchor="middle" font-weight="700">total 122,1 × 84,1 cm · puntas recortadas · base: 5 (2 puntas + 3)</text>
+      <text x="197.2" y="284" font-size="10" fill="#16202a" text-anchor="middle">"forma": "triangulo", "orientacion": "abajo"</text>
+      <text x="62" y="196" font-size="9.5" fill="#16202a" text-anchor="middle">cada lateral:</text>
+      <text x="62" y="208" font-size="9.5" fill="#16202a" text-anchor="middle">4 tiras</text>
+      <!-- círculo -->
+      <circle cx="517.6" cy="157.6" r="127.6" fill="#ffffff" stroke="#00b8d4" stroke-width="3"/>
+      <circle cx="517.6" cy="157.6" r="110.0" fill="#fde6f2" stroke="#d6007e" stroke-width="1.6" stroke-dasharray="7 5"/>
+      <g stroke="#16202a" stroke-width="3.2"><line x1="517.6" y1="30.0" x2="517.6" y2="47.6"/><line x1="453.8" y1="47.1" x2="462.6" y2="62.3"/><line x1="407.1" y1="93.8" x2="422.3" y2="102.6"/><line x1="390.0" y1="157.6" x2="407.6" y2="157.6"/><line x1="407.1" y1="221.4" x2="422.3" y2="212.6"/><line x1="453.8" y1="268.1" x2="462.6" y2="252.9"/><line x1="517.6" y1="285.2" x2="517.6" y2="267.6"/><line x1="581.4" y1="268.1" x2="572.6" y2="252.9"/><line x1="628.1" y1="221.4" x2="612.9" y2="212.6"/><line x1="645.2" y1="157.6" x2="627.6" y2="157.6"/><line x1="628.1" y1="93.8" x2="612.9" y2="102.6"/><line x1="581.4" y1="47.1" x2="572.6" y2="62.3"/></g>
+      <text x="517.6" y="152" font-size="13" fill="#a3005f" text-anchor="middle" font-weight="800">Ø 100 cm</text>
+      <text x="517.6" y="168" font-size="10" fill="#a3005f" text-anchor="middle">total Ø 106 · 12 tiras alrededor</text>
+      <text x="517.6" y="20" font-size="10" fill="#16202a" text-anchor="middle">la primera, arriba al medio</text>
+      <text x="517.6" y="310" font-size="10" fill="#16202a" text-anchor="middle">"forma": "circulo", "medida": {"diametro_m": 1}</text>
+    </svg>
+    <div class="pie-fig">Triángulo 1,20 × 0,80 (punta abajo) y círculo de Ø 1,00, los dos con 3 cm de margen. Celeste: el total que se imprime · rosa punteado: la guía del diseño · negro: las tiras. El margen está dibujado más ancho para que se vea.</div>
+  </div>
+  <div class="grilla g2">
+    <div>
+      <h3><i class="ti ti-upload"></i> En pedido.json</h3>
+<pre class="json"><span class="c">// triángulo: ancho y alto de su CAJA + la punta</span>
+{ <span class="k">"variable"</span>: <span class="s">"v_cb7fd79"</span>, <span class="k">"tela"</span>: <span class="s">"44"</span>,
+  <span class="k">"arte"</span>: <span class="s">"artes/banderin.ai"</span>,
+  <span class="k">"forma"</span>: <span class="s">"triangulo"</span>, <span class="k">"orientacion"</span>: <span class="s">"abajo"</span>,
+  <span class="k">"medida"</span>: { <span class="k">"ancho_m"</span>: <span class="n">1.2</span>, <span class="k">"alto_m"</span>: <span class="n">0.8</span> },
+  <span class="k">"tiras"</span>: { <span class="k">"lleva"</span>: <span class="n">true</span>,
+    <span class="k">"lados"</span>: { <span class="k">"base"</span>: <span class="n">5</span>, <span class="k">"laterales"</span>: <span class="n">4</span> } } }
+
+<span class="c">// círculo: una sola medida, el diámetro</span>
+{ <span class="k">"variable"</span>: <span class="s">"v_cb7fd79"</span>, <span class="k">"tela"</span>: <span class="s">"44"</span>,
+  <span class="k">"arte"</span>: <span class="s">"artes/escudo.ai"</span>,
+  <span class="k">"forma"</span>: <span class="s">"circulo"</span>,
+  <span class="k">"medida"</span>: { <span class="k">"diametro_m"</span>: <span class="n">1</span> },
+  <span class="k">"tiras"</span>: { <span class="k">"alrededor"</span>: <span class="n">12</span> } }</pre>
+      <p class="chico"><code>forma</code> y <code>orientacion</code> pueden ir en el molde o dentro de <code>medida</code>, con o sin tilde. Sin <code>forma</code>: rectángulo. <code>POST /a_medida/calcular</code> acepta lo mismo y contesta <code>forma</code>, <code>orientacion</code>, <code>total_cm</code> y las tiras por lado.</p>
+    </div>
+    <div>
+      <h3><i class="ti ti-calculator"></i> Las cuentas</h3>
+      <table>
+        <tr><th>Qué</th><th>Círculo</th><th>Triángulo</th></tr>
+        <tr><td><b>Total</b></td><td>Ø diseño + 2 × margen: 100 → <b>Ø 106</b></td><td>cada lado + el margen, con las <b>puntas recortadas</b> (al doblar por la guía se superponen sin sobrar): 120 × 80 → <b>122,1 × 84,1</b></td></tr>
+        <tr><td><b>Punta</b></td><td>—</td><td><code>abajo</code> (banderín) · <code>arriba</code> · <code>izq</code> · <code>der</code></td></tr>
+        <tr><td><b>Tiras</b></td><td><code>alrededor</code>: N parejas (hasta 200), la 1.ª arriba; una cada perímetro ÷ N (333 ÷ 12 = 27,75 cm)</td><td><code>base</code> y <code>laterales</code> (cada uno) <b>contando las 2 puntas</b>: sobre la guía: base 5 → cada 30 cm · laterales 4 → cada 33,33 cm</td></tr>
+        <tr><td><b>Esquinas</b></td><td>—</td><td>recortadas hasta la punta de la guía: cada solapa doblada llega justo al otro lado y se <b>superpone</b> con la vecina, como la esquina del rectángulo. <b>La punta no lleva marca</b> (el corte ya la marca) pero cuenta</td></tr>
+        <tr><td><b>Borde de corte</b></td><td colspan="2">adentro del total, como en el rectángulo</td></tr>
+      </table>
+      <p class="chico">¿Entra en la tela? La regla de 5d con la caja del total (el círculo, por su diámetro). Forma o punta que no existe: <code>forma-invalida</code>. Los lados de tiras que no son de esa forma no se usan.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 5g · TERMINACIÓN Y TIRAS SIN MARCAR ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">5g</div><div><div class="kicker">Molde a medida · el borde</div><h2>La terminación del borde, y tiras sin marcar</h2></div></div>
+  <p class="lead">Cada pedido elige cómo se termina el borde de la pieza: <b>dobladillo</b>, <b>overlock</b> o <b>sin margen</b>. Cambia cuánto se agrega alrededor del diseño y, en el triángulo, la forma de las puntas. Si no se manda, va la del molde (<code>terminacion_por_defecto</code>).</p>
+  <div class="figura">
+    <svg viewBox="0 0 680 190" width="100%" style="max-height: 52mm; display: block;" font-family="Inter, sans-serif">
+      <polygon points="190.0,29.2 181.6,18.0 48.4,18.0 40.0,29.2 36.1,42.8 104.0,133.4 115.0,129.2 126.0,133.4 193.9,42.8" fill="#ffffff" stroke="#00b8d4" stroke-width="2.5"/>
+      <polygon points="190.0,29.2 40.0,29.2 115.0,129.2" fill="#fde6f2" stroke="#d6007e" stroke-width="1.4" stroke-dasharray="6 4"/>
+      <polygon points="437.5,18.0 242.5,18.0 340.0,148.0" fill="#ffffff" stroke="#00b8d4" stroke-width="2.5"/>
+      <polygon points="415.0,29.2 265.0,29.2 340.0,129.2" fill="#fde6f2" stroke="#d6007e" stroke-width="1.4" stroke-dasharray="6 4"/>
+      <polygon points="640.0,18.0 490.0,18.0 565.0,118.0" fill="#fde6f2" stroke="#00b8d4" stroke-width="2.5"/>
+      <text x="115" y="160" font-size="12" fill="#16202a" text-anchor="middle" font-weight="800">"dobladillo"</text>
+      <text x="115" y="176" font-size="9.5" fill="#5b6875" text-anchor="middle">el margen del molde, doblado · puntas recortadas</text>
+      <text x="340" y="170" font-size="12" fill="#16202a" text-anchor="middle" font-weight="800">"overlock"</text>
+      <text x="340" y="186" font-size="9.5" fill="#5b6875" text-anchor="middle">overlock_cm alrededor · la forma tal cual</text>
+      <text x="565" y="146" font-size="12" fill="#16202a" text-anchor="middle" font-weight="800">"sin"</text>
+      <text x="565" y="162" font-size="9.5" fill="#5b6875" text-anchor="middle">sin margen · la pieza es el diseño</text>
+    </svg>
+    <div class="pie-fig">Celeste: lo que se imprime · rosa punteado: el diseño. Los márgenes están dibujados más anchos para que se vean.</div>
+  </div>
+  <div class="grilla g2">
+    <div>
+      <h3><i class="ti ti-upload"></i> En pedido.json</h3>
+<pre class="json">{ <span class="k">"variable"</span>: <span class="s">"v_cb7fd79"</span>, <span class="k">"tela"</span>: <span class="s">"44"</span>,
+  <span class="k">"arte"</span>: <span class="s">"artes/banderin.ai"</span>,
+  <span class="k">"forma"</span>: <span class="s">"triangulo"</span>,
+  <span class="k">"terminacion"</span>: <span class="s">"overlock"</span>,     <span class="c">← dobladillo · overlock · sin</span>
+  <span class="k">"medida"</span>: { <span class="k">"ancho_m"</span>: <span class="n">1.2</span>, <span class="k">"alto_m"</span>: <span class="n">0.8</span> },
+  <span class="k">"tiras"</span>: { <span class="k">"lleva"</span>: <span class="n">true</span>,
+             <span class="k">"marcar"</span>: <span class="n">false</span>,    <span class="c">← no se imprimen; van en la ficha</span>
+             <span class="k">"lados"</span>: { <span class="k">"base"</span>: <span class="n">5</span>, <span class="k">"laterales"</span>: <span class="n">4</span> } } }</pre>
+      <p class="chico"><code>terminacion</code> va en el molde o dentro de <code>medida</code>, con o sin tilde («sin margen» también). Si no existe: <code>terminacion-invalida</code>. <code>POST /a_medida/calcular</code> acepta lo mismo y contesta <code>terminacion</code> y <code>tiras.marcadas_en_tizada</code>.</p>
+    </div>
+    <div>
+      <h3><i class="ti ti-ruler-2"></i> Qué cambia con cada una</h3>
+      <table>
+        <tr><th></th><th>Margen</th><th>Rectángulo y triángulo</th><th>Tiras</th></tr>
+        <tr><td><b>dobladillo</b></td><td><code>margen_cm</code></td><td>esquinas y puntas recortadas</td><td>sin marca en la esquina</td></tr>
+        <tr><td><b>overlock</b></td><td><code>overlock_cm</code> parejo</td><td>esquinas y puntas enteras</td><td>una por esquina, en diagonal</td></tr>
+        <tr><td><b>sin</b></td><td>0</td><td>el diseño</td><td>sólo en la ficha</td></tr>
+      </table>
+      <h3 style="margin-top: 8pt;"><i class="ti ti-needle-thread"></i> Tiras que no se marcan</h3>
+      <p class="chico">Con <code>"marcar": false</code> las marcas <b>no se imprimen</b> en la tizada (en la pantalla de TIZADA se ven como guía), pero la <b>ficha técnica</b> trae cuántas tiras van y cada cuánto se cosen. Sin margen siempre es así (no hay guía hasta dónde marcar). Sin <code>marcar</code>: lo del molde (<code>tiras.marcar_por_defecto</code>).</p>
+      <p class="chico">Las marcas salen siempre <b>negras con contorno blanco</b> (se ven sobre cualquier diseño): el color no se elige.</p>
+      <h3 style="margin-top: 8pt;"><i class="ti ti-line-dashed"></i> La costura, en la plantilla</h3>
+      <p class="chico">Con <b>dobladillo</b>, la plantilla de Illustrator y CorelDRAW (y la guía .ai) trae además una línea <b>punteada naranja</b> adentro de la guía del diseño, a la misma distancia (el margen): ahí pasa la costura. Sirve para ver, antes de subir el arte, si algo importante queda debajo.</p>
+    </div>
+  </div>
+</section>
+
 <!-- ═══════════════════════════ 6 · ESTADOS Y ALARMAS ═══════════════════════════ -->
 <section class="apretada">
   <div class="seccion-titulo"><div class="num m">6</div><div><div class="kicker">Cuando algo no está bien</div><h2>Estados y alarmas</h2></div></div>
@@ -718,7 +830,8 @@ flowchart LR
     <tr><td><code>variable-desconocida</code> · <code>variable-ambigua</code></td><td><code>GET /variables</code> (mandar la clave <code>v_…</code>)</td></tr>
     <tr><td><code>molde-repetido</code></td><td>Una variable por prenda en cada diseño</td></tr>
     <tr><td><code>tela-desconocida</code> · <code>tela-no-usable</code> · <code>tela-no-permitida</code></td><td><code>GET /telas</code> (<code>usable</code>) y las <code>telas</code> del molde</td></tr>
-    <tr><td><code>medida-falta</code> · <code>medida-invalida</code> · <code>tela-no-entra</code> · <code>tiras-invalidas</code> · <code>tiras-sin-margen</code></td><td>Prenda <b>a medida</b> (<code>a_medida</code> en <code>GET /variables</code>): <code>medida</code> del diseño en metros, que el total entre en la tela y las <code>tiras</code> bien escritas — o preguntar antes a <code>POST /a_medida/calcular</code> (5c a 5e)</td></tr>
+    <tr><td><code>medida-falta</code> · <code>medida-invalida</code> · <code>forma-invalida</code> · <code>terminacion-invalida</code> · <code>tela-no-entra</code> · <code>tiras-invalidas</code> · <code>tiras-sin-margen</code></td><td>Prenda <b>a medida</b> (<code>a_medida</code> en <code>GET /variables</code>): <code>medida</code> del diseño en metros, que el total entre en la tela y las <code>tiras</code> bien escritas — o preguntar antes a <code>POST /a_medida/calcular</code> (5c a 5g)</td></tr>
+    <tr><td><code>arte-otra-medida</code></td><td>Prenda <b>a medida</b>: el arte se armó con la plantilla de <b>otra medida</b> (sus guías no coinciden con la pieza y el diseño no la cubre). Pedir la plantilla con la medida del pedido (<code>POST /plantillas</code>) y armar el arte ahí</td></tr>
     <tr><td><code>talle-inexistente</code></td><td><code>talles[]</code> del molde</td></tr>
     <tr><td><code>opcion-inexistente</code> · <code>opcion-sin-piezas</code></td><td><code>columnas[].opciones</code> · <code>opciones_de_pieza</code></td></tr>
     <tr><td><code>columna-obligatoria-vacia</code></td><td><code>columnas[].obligatoria</code></td></tr>

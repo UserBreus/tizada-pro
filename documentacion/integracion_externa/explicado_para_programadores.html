@@ -159,8 +159,10 @@
     <span class="chip">El recorrido completo</span>
     <span class="chip">Plantillas y conectores</span>
     <span class="chip">Un archivo por mesa</span>
+    <span class="chip">Lo nuevo</span>
+    <span class="chip">Moldes a medida, fácil</span>
   </div>
-  <div class="pie"><span>API <b>/api/externo/v1</b> · todo con la llave <b>X-Api-Key</b></span><span>Sistema 1.0.48 · 5 de octubre de 2026</span></div>
+  <div class="pie"><span>API <b>/api/externo/v1</b> · todo con la llave <b>X-Api-Key</b></span><span>Sistema 1.0.49 · 12 de octubre de 2026</span></div>
 </div>
 
 <!-- ═══════════════════════════ 1 · EL TALLER ═══════════════════════════ -->
@@ -245,7 +247,7 @@
     <tr><td>TPU · Bordado · DTF</td><td>Partes que NO se imprimen con el resto (se pegan o se bordan aparte): en su lugar va una cruz de referencia.</td><td><code>editables</code> + proceso</td><td>Un flag «no renderizar acá»</td></tr>
     <tr><td>RIP</td><td>El programa de la impresora. Recibe los PDF de la tizada tal cual.</td><td>—</td><td>El driver de la impresora</td></tr>
     <tr><td>Conector</td><td>Un programa chico que se instala una vez en la PC del diseñador y une TIZADA con Illustrator o CorelDRAW.</td><td><code>GET /conectores</code></td><td>Un plugin / agente local</td></tr>
-    <tr><td>Molde a medida</td><td>Un rectángulo de una sola pieza (banderas). No tiene talles: el pedido dice ancho y alto en metros. Su margen (dobladillo) sale punteado en la plantilla.</td><td><code>a_medida</code> + <code>medida</code></td><td>Un producto con dimensiones parametrizables</td></tr>
+    <tr><td>Molde a medida</td><td>Una prenda de una sola pieza sin talles (banderas, banderines): rectángulo, círculo o triángulo. El pedido dice cuánto mide el diseño, en metros. Todo en la §9.</td><td><code>a_medida</code> + <code>medida</code></td><td>Un producto con dimensiones parametrizables</td></tr>
   </table>
 </section>
 
@@ -364,6 +366,7 @@
     <tr><td><code>tela-no-permitida</code></td><td>Esa prenda no se corta en esa tela.</td><td>Elegir una de las telas del molde.</td></tr>
     <tr><td><code>medida-falta</code> · <code>tela-no-entra</code></td><td>Prenda a medida sin su medida, o más grande que el ancho de la tela.</td><td>Mandar <code>medida</code> en metros; elegir una tela más ancha.</td></tr>
     <tr><td><code>arte-sin-mesas-de-pieza</code></td><td>El archivo del diseño no trae una mesa por pieza con su nombre (no se armó sobre la plantilla).</td><td>Pedir la plantilla (§5) y dibujar encima.</td></tr>
+    <tr><td><code>arte-otra-medida</code></td><td>Molde a medida: el arte es de otra medida (se armó con la plantilla de otra medida) y no cubre la pieza.</td><td>Pedir la plantilla con la medida del pedido y armar el arte ahí.</td></tr>
     <tr><td><code>arte-texto-vivo</code></td><td>El diseño tiene textos sin convertir a curvas.</td><td>Illustrator: Texto › Crear contornos.</td></tr>
     <tr><td><code>tipografia-falta</code></td><td>El texto/número usa una letra que TIZADA no tiene.</td><td>Mandar el .ttf/.otf en el paquete.</td></tr>
     <tr><td><code>piezas-en-blanco</code></td><td>Hay piezas que se fabrican y el diseño no cubre: saldrían blancas.</td><td>Agregarlas al arte, o pedir <code>si_piezas_en_blanco: "seguir"</code>.</td></tr>
@@ -379,9 +382,176 @@
     <tr><td><code>TIZADA_PRO_Conectar_otro_sistema.pdf</code></td><td>La guía técnica completa (puesta en marcha en el servidor, firma del aviso, Drive)</td></tr>
     <tr><td><code>API.md</code> · <code>openapi.yaml</code></td><td>Cada ruta con lo que manda y lo que vuelve · la API para Postman / generar un cliente</td></tr>
     <tr><td><code>FORMATO_PEDIDO.md</code> · <code>pedido_ejemplo.json</code></td><td>El pedido campo por campo · un pedido completo</td></tr>
-    <tr><td><code>resultado_ejemplo.json</code> · <code>esquemas/</code> · <code>respuestas/</code></td><td>Lo que vuelve · JSON Schema · la respuesta real de cada ruta</td></tr>
-    <tr><td><code>codigo/</code></td><td>Código listo: mandar un pedido, recibir el aviso (Python y Node)</td></tr>
+    <tr><td><code>resultado_ejemplo.json</code> · <code>esquemas/</code> · <code>respuestas/</code> · <code>codigo/</code></td><td>Lo que vuelve · JSON Schema · la respuesta real de cada ruta · código listo (Python y Node)</td></tr>
   </table>
 </section>
+
+<!-- ═══════════════════════════ 8 · LO NUEVO ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num v">8</div><div><div class="kicker">Octubre 2026</div><h2>Lo nuevo, de un vistazo</h2></div></div>
+  <div class="grilla g2">
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-shapes"></i></div><h4>Banderas de 3 formas</h4><p>El molde a medida ya no es sólo un rectángulo: también <b>círculo</b> y <b>triángulo</b> (banderín), con la punta para el lado que se quiera. Todo en la §9.</p></div>
+    <div class="tarjeta"><div class="ico i-m"><i class="ti ti-needle-thread"></i></div><h4>3 formas de terminar el borde</h4><p><b>Dobladillo</b> (se dobla y se cose), <b>overlock</b> (costura en el borde) o <b>sin</b> terminación. Cambia cuánta tela lleva.</p></div>
+    <div class="tarjeta"><div class="ico i-g"><i class="ti ti-line-dashed"></i></div><h4>Marcas de tiras: siempre negras</h4><p>Las rayitas que dicen dónde coser las tiras salen <b>negras con contorno blanco</b> (se ven sobre cualquier diseño). El color <b>ya no se manda</b>: si llega <code>color_cmyk</code>, el pedido se frena.</p></div>
+    <div class="tarjeta"><div class="ico i-a"><i class="ti ti-alert-triangle"></i></div><h4>El arte tiene que ser de esa medida</h4><p>Si el diseño se dibujó para otra medida, ya no cubre la bandera: vuelve la alarma <code>arte-otra-medida</code>. Siempre pedir la plantilla con la medida del pedido.</p></div>
+    <div class="tarjeta"><div class="ico i-v"><i class="ti ti-calculator"></i></div><h4>Preguntar antes de mandar</h4><p><code>POST /a_medida/calcular</code> dice el tamaño final, en qué telas entra y cuántas tiras van. Ideal para mostrarle al cliente mientras elige.</p></div>
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-file-description"></i></div><h4>Ficha técnica con dibujos</h4><p>La ficha del pedido trae el plano de la bandera, cómo se dobla el borde paso a paso y dónde van las tiras, para el que cose.</p></div>
+  </div>
+  <div class="caja c-bien"><div class="t"><i class="ti ti-check"></i> Lo que no cambió</div>
+    <p>Las rutas, la llave, el formato del paquete y del resultado son los mismos. Un pedido que ya funcionaba sigue funcionando (salvo que mande <code>color_cmyk</code> en las tiras).</p></div>
+</section>
+
+<!-- ═══════════════════════════ 9 · MOLDES A MEDIDA ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num m">9</div><div><div class="kicker">Banderas, banderines y círculos</div><h2>Moldes a medida, explicado fácil</h2></div></div>
+  <p class="lead">Una prenda normal (una camiseta) viene en <b>talles</b> fijos: S, M, L… Un molde <b>a medida</b> es distinto: es <b>una sola pieza de tela</b> (una bandera) y el cliente dice <b>cuánto mide</b>. No hay talles.</p>
+
+  <h3><i class="ti ti-ruler-measure"></i> Lo único que hay que entender: «la medida del diseño»</h3>
+  <div class="grilla g2" style="align-items:center">
+    <div class="dibujo"><svg viewBox="0 0 330 190" width="330">
+      <rect x="15" y="15" width="300" height="140" rx="3" fill="#e0f7fb" stroke="#00b8d4" stroke-width="2.5"/>
+      <rect x="40" y="40" width="250" height="90" fill="#fff" stroke="#16202a" stroke-width="1.6" stroke-dasharray="6 4"/>
+      <text x="165" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#16202a">EL DISEÑO</text>
+      <text x="165" y="98" text-anchor="middle" font-size="10.5" fill="#5b6875">lo que se ve (lo pide el cliente)</text>
+      <text x="27" y="33" font-size="9.5" fill="#007a8f" font-weight="700">margen para coser</text>
+      <line x1="40" y1="172" x2="290" y2="172" stroke="#d6007e" stroke-width="1.5"/><polygon points="40,172 47,168 47,176" fill="#d6007e"/><polygon points="290,172 283,168 283,176" fill="#d6007e"/>
+      <text x="165" y="186" text-anchor="middle" font-size="10.5" font-weight="700" fill="#d6007e">ancho del diseño</text>
+    </svg></div>
+    <div>
+      <p><b>El cliente siempre dice la medida del dibujo que quiere ver</b>: «una bandera de 1,50 × 0,90 m».</p>
+      <p><b>TIZADA le agrega solo</b>, alrededor, la tela que hace falta para coser el borde (el <b>margen</b>, celeste en el dibujo). Por eso la tela impresa es un poco más grande que lo que pidió el cliente.</p>
+      <p class="chico">Las medidas van siempre en <b>metros</b> (1,50 = un metro y medio).</p>
+    </div>
+  </div>
+
+  <h3><i class="ti ti-shapes"></i> Las 3 formas y qué medida pide cada una</h3>
+  <div class="grilla g3">
+    <div class="tarjeta" style="text-align:center">
+      <svg viewBox="0 0 160 110" width="160"><rect x="25" y="20" width="110" height="66" fill="#fde6f2" stroke="#d6007e" stroke-width="2"/>
+        <line x1="25" y1="98" x2="135" y2="98" stroke="#16202a"/><text x="80" y="108" text-anchor="middle" font-size="10" font-weight="700">ancho</text>
+        <line x1="145" y1="20" x2="145" y2="86" stroke="#16202a"/><text x="152" y="57" font-size="10" font-weight="700" transform="rotate(90 152 57)" text-anchor="middle">alto</text></svg>
+      <h4>Rectángulo</h4><p>La bandera clásica. Se pide <b>ancho</b> y <b>alto</b>.</p>
+      <p class="chico"><code>"medida": {"ancho_m": 1.5, "alto_m": 0.9}</code></p>
+    </div>
+    <div class="tarjeta" style="text-align:center">
+      <svg viewBox="0 0 160 110" width="160"><circle cx="80" cy="53" r="38" fill="#fde6f2" stroke="#d6007e" stroke-width="2"/>
+        <line x1="42" y1="53" x2="118" y2="53" stroke="#16202a" stroke-dasharray="3 2"/><text x="80" y="47" text-anchor="middle" font-size="10" font-weight="700">diámetro</text></svg>
+      <h4>Círculo</h4><p>Se pide <b>una sola medida</b>: el <b>diámetro</b> (de un borde al otro pasando por el centro).</p>
+      <p class="chico"><code>"medida": {"diametro_m": 1.2}</code></p>
+    </div>
+    <div class="tarjeta" style="text-align:center">
+      <svg viewBox="0 0 160 110" width="160"><rect x="30" y="15" width="100" height="74" fill="none" stroke="#9aa7b3" stroke-dasharray="4 3"/>
+        <polygon points="30,15 130,15 80,89" fill="#fde6f2" stroke="#d6007e" stroke-width="2"/>
+        <text x="80" y="104" text-anchor="middle" font-size="10" font-weight="700">ancho × alto de la caja</text></svg>
+      <h4>Triángulo</h4><p>El banderín. Se pide el <b>ancho</b> y el <b>alto</b> de la caja que lo encierra, y <b>hacia dónde va la punta</b>.</p>
+      <p class="chico"><code>"forma": "triangulo"</code></p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="seccion-titulo"><div class="num m">9</div><div><div class="kicker">El que más dudas trae</div><h2>El triángulo, exacto</h2></div></div>
+  <p class="lead">El triángulo de TIZADA es siempre <b>parejo</b> (los dos lados largos iguales, la punta en el medio). Para medirlo, imaginá <b>una caja</b> que lo encierra justo, con la bandera <b>ya colgada como se va a ver</b>:</p>
+  <div class="caja c-info" style="margin-top:0"><div class="t"><i class="ti ti-box"></i> La regla</div>
+    <p><b>ancho</b> = la caja de izquierda a derecha · <b>alto</b> = la caja de arriba a abajo · <b>orientación</b> = hacia dónde mira la punta. Siempre así, gire para donde gire. El margen para coser va igual en los tres lados y las puntas se recortan para que al doblar no se amontone: lo calcula TIZADA.</p></div>
+  <div class="grilla g2">
+    <div class="tarjeta"><svg viewBox="0 0 260 150" width="100%">
+      <rect x="40" y="15" width="180" height="105" fill="none" stroke="#9aa7b3" stroke-dasharray="4 3"/>
+      <polygon points="40,15 220,15 130,120" fill="#fde6f2" stroke="#d6007e" stroke-width="2"/>
+      <line x1="40" y1="135" x2="220" y2="135" stroke="#16202a"/><text x="130" y="147" text-anchor="middle" font-size="10" font-weight="700">ancho = la base (arriba)</text>
+      <line x1="232" y1="15" x2="232" y2="120" stroke="#16202a"/><text x="246" y="68" font-size="10" font-weight="700" transform="rotate(90 246 68)" text-anchor="middle">alto = hasta la punta</text>
+      <text x="130" y="45" text-anchor="middle" font-size="9.5" fill="#a3005f">la parte que se cuelga</text></svg>
+      <h4><code>"orientacion": "abajo"</code> · el banderín</h4><p>Es la de siempre (si no se dice nada, va así). La base cuelga arriba y la punta apunta al piso.</p></div>
+    <div class="tarjeta"><svg viewBox="0 0 260 150" width="100%">
+      <rect x="40" y="15" width="180" height="105" fill="none" stroke="#9aa7b3" stroke-dasharray="4 3"/>
+      <polygon points="40,120 220,120 130,15" fill="#fde6f2" stroke="#d6007e" stroke-width="2"/>
+      <line x1="40" y1="135" x2="220" y2="135" stroke="#16202a"/><text x="130" y="147" text-anchor="middle" font-size="10" font-weight="700">ancho = la base (abajo)</text>
+      <line x1="232" y1="15" x2="232" y2="120" stroke="#16202a"/><text x="246" y="68" font-size="10" font-weight="700" transform="rotate(90 246 68)" text-anchor="middle">alto = hasta la punta</text></svg>
+      <h4><code>"orientacion": "arriba"</code></h4><p>Como una carpa: la base abajo, la punta arriba.</p></div>
+    <div class="tarjeta"><svg viewBox="0 0 260 150" width="100%">
+      <rect x="40" y="15" width="180" height="105" fill="none" stroke="#9aa7b3" stroke-dasharray="4 3"/>
+      <polygon points="220,15 220,120 40,67.5" fill="#fde6f2" stroke="#d6007e" stroke-width="2"/>
+      <line x1="40" y1="135" x2="220" y2="135" stroke="#16202a"/><text x="130" y="147" text-anchor="middle" font-size="10" font-weight="700">ancho = de la base a la punta</text>
+      <line x1="232" y1="15" x2="232" y2="120" stroke="#16202a"/><text x="246" y="68" font-size="10" font-weight="700" transform="rotate(90 246 68)" text-anchor="middle">alto = la base</text></svg>
+      <h4><code>"orientacion": "izq"</code></h4><p>La punta mira a la izquierda. Ojo: acá la <b>base es el alto</b> y el <b>largo hasta la punta es el ancho</b>.</p></div>
+    <div class="tarjeta"><svg viewBox="0 0 260 150" width="100%">
+      <rect x="40" y="15" width="180" height="105" fill="none" stroke="#9aa7b3" stroke-dasharray="4 3"/>
+      <polygon points="40,15 40,120 220,67.5" fill="#fde6f2" stroke="#d6007e" stroke-width="2"/>
+      <line x1="40" y1="135" x2="220" y2="135" stroke="#16202a"/><text x="130" y="147" text-anchor="middle" font-size="10" font-weight="700">ancho = de la base a la punta</text>
+      <line x1="232" y1="15" x2="232" y2="120" stroke="#16202a"/><text x="246" y="68" font-size="10" font-weight="700" transform="rotate(90 246 68)" text-anchor="middle">alto = la base</text></svg>
+      <h4><code>"orientacion": "der"</code></h4><p>La punta mira a la derecha (el banderín «de palo», colgado de costado).</p></div>
+  </div>
+  <div class="caja c-ojo"><div class="t"><i class="ti ti-bulb"></i> Ejemplo para no equivocarse</div>
+    <p>El cliente quiere un banderín de <b>1 m de base</b> y <b>60 cm hasta la punta</b>, colgado de un palo con la punta a la derecha → <code>"orientacion": "der", "medida": {"ancho_m": 0.6, "alto_m": 1.0}</code>. Si lo cuelga de una soga con la punta abajo → <code>"orientacion": "abajo", "medida": {"ancho_m": 1.0, "alto_m": 0.6}</code>.</p></div>
+</section>
+
+<section>
+  <div class="seccion-titulo"><div class="num m">9</div><div><div class="kicker">El borde y las tiras</div><h2>Cómo se termina y dónde se cose</h2></div></div>
+  <h3><i class="ti ti-needle-thread"></i> La terminación del borde (<code>terminacion</code>)</h3>
+  <div class="grilla g3">
+    <div class="tarjeta" style="text-align:center"><svg viewBox="0 0 150 100" width="150">
+      <polygon points="16,10 134,10 134,90 16,90" fill="#e0f7fb" stroke="#00b8d4" stroke-width="2"/>
+      <rect x="30" y="24" width="90" height="52" fill="#fff" stroke="#16202a" stroke-dasharray="5 3"/>
+      <rect x="16" y="10" width="14" height="14" fill="#fff"/><rect x="120" y="10" width="14" height="14" fill="#fff"/><rect x="16" y="76" width="14" height="14" fill="#fff"/><rect x="120" y="76" width="14" height="14" fill="#fff"/>
+      <text x="75" y="54" text-anchor="middle" font-size="9" fill="#5b6875">se dobla acá</text></svg>
+      <h4>Dobladillo</h4><p>Lleva un margen de tela que se <b>dobla para adentro y se cose</b>. Las esquinas van cortadas para que al doblar no se amontonen. Es la más prolija.</p></div>
+    <div class="tarjeta" style="text-align:center"><svg viewBox="0 0 150 100" width="150">
+      <rect x="22" y="16" width="106" height="68" fill="#fde6f2" stroke="#d6007e" stroke-width="2"/>
+      <rect x="22" y="16" width="106" height="68" fill="none" stroke="#16202a" stroke-width="3" stroke-dasharray="2 3"/>
+      <text x="75" y="54" text-anchor="middle" font-size="9" fill="#5b6875">costura</text></svg>
+      <h4>Overlock</h4><p>Se cose <b>sobre el borde</b> con una máquina especial. Lleva muy poca tela de más.</p></div>
+    <div class="tarjeta" style="text-align:center"><svg viewBox="0 0 150 100" width="150">
+      <rect x="22" y="16" width="106" height="68" fill="#fde6f2" stroke="#d6007e" stroke-width="2"/>
+      <text x="75" y="54" text-anchor="middle" font-size="9" fill="#5b6875">sin coser</text></svg>
+      <h4>Sin</h4><p>No se cose el borde: <b>la tela es exactamente el diseño</b>. Sin margen, las tiras no se pueden marcar (sólo van en la ficha).</p></div>
+  </div>
+
+  <h3><i class="ti ti-line-dashed"></i> Las tiras (<code>tiras</code>)</h3>
+  <div class="grilla g2" style="align-items:center">
+    <div class="dibujo"><svg viewBox="0 0 300 165" width="300"><rect x="20" y="20" width="260" height="120" fill="#e0f7fb" stroke="#00b8d4" stroke-width="2"/><rect x="38" y="38" width="224" height="84" fill="#fff" stroke="#16202a" stroke-dasharray="5 3"/><g stroke="#fff" stroke-width="6"><line x1="38" y1="20" x2="38" y2="38"/><line x1="94" y1="20" x2="94" y2="38"/><line x1="150" y1="20" x2="150" y2="38"/><line x1="206" y1="20" x2="206" y2="38"/><line x1="262" y1="20" x2="262" y2="38"/></g><g stroke="#000" stroke-width="2.6"><line x1="38" y1="20" x2="38" y2="38"/><line x1="94" y1="20" x2="94" y2="38"/><line x1="150" y1="20" x2="150" y2="38"/><line x1="206" y1="20" x2="206" y2="38"/><line x1="262" y1="20" x2="262" y2="38"/></g><text x="150" y="13" text-anchor="middle" font-size="10" font-weight="700">"arriba": 5</text><text x="150" y="85" text-anchor="middle" font-size="10" fill="#5b6875">el diseño</text><text x="150" y="157" text-anchor="middle" font-size="9.5" fill="#5b6875">5 marcas: las 2 de las puntas + 3 en el medio, parejas</text></svg></div>
+    <div>
+      <p>Las <b>tiras</b> son las cintas que se cosen a la bandera para atarla. TIZADA imprime unas <b>rayitas</b> (negras con contorno blanco) que le dicen al costurero dónde coser cada una.</p>
+      <p>Se dice <b>cuántas por lado, contando las dos puntas</b>: 5 = una en cada esquina + 3 en el medio · 1 = una sola en el centro · 0 = ese lado sin tiras.</p>
+      <p class="chico">Rectángulo: <code>arriba</code>, <code>abajo</code>, <code>izq</code>, <code>der</code> · Triángulo: <code>base</code> y <code>laterales</code> · Círculo: <code>alrededor</code>. Con dobladillo, la marca de la esquina no se imprime (la esquina cortada ya marca el lugar) pero cuenta.</p>
+    </div>
+  </div>
+  <div class="caja c-mal"><div class="t"><i class="ti ti-ban"></i> Errores típicos</div>
+    <p>Mandar centímetros en vez de metros (150 en vez de 1.5) · en el triángulo con la punta a un costado, invertir ancho y alto · cambiar la medida y no rehacer el arte · pedir una tela donde no entra (<code>tela-no-entra</code>) · mandar talle en la fila de una bandera (no lleva).</p></div>
+</section>
+
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">9</div><div><div class="kicker">Para el sistema de ventas</div><h2>Qué preguntarle al cliente, y en qué orden</h2></div></div>
+  <p class="lead">Cada respuesta depende de la anterior: por eso el orden importa. Lo que está en <span class="pill p-opc">automático</span> pueden completarlo ustedes sin preguntar.</p>
+  <div class="pasos">
+    <div class="paso"><div class="b m">1</div><div class="x"><b class="tit">¿Qué producto? (bandera, banderín, círculo…)</b>Es la <b>variable</b> a medida (<code>GET /variables</code>, trae su bloque <code>a_medida</code> con las formas, telas, margen y tiras posibles). <span class="chico">Por qué primero: de acá sale todo lo demás.</span></div></div>
+    <div class="paso"><div class="b m">2</div><div class="x"><b class="tit">¿Qué forma?</b>Rectángulo, círculo o triángulo. <span class="pill p-opc">automático</span> si el producto ya es de una forma (un «banderín» siempre es triángulo). <span class="chico">Por qué antes de la medida: define qué medidas hay que pedir.</span></div></div>
+    <div class="paso"><div class="b m">3</div><div class="x"><b class="tit">Sólo triángulo: ¿para dónde va la punta?</b>Abajo, arriba, izquierda o derecha. <span class="pill p-opc">automático: abajo</span> <span class="chico">Por qué antes de la medida: decide cuál es el ancho y cuál el alto (ver la página del triángulo).</span></div></div>
+    <div class="paso"><div class="b m">4</div><div class="x"><b class="tit">¿Cuánto mide el diseño?</b>En metros. Rectángulo y triángulo: ancho y alto · círculo: el diámetro. <span class="chico">Es la medida de lo que se ve; el margen lo agrega TIZADA.</span></div></div>
+    <div class="paso"><div class="b m">5</div><div class="x"><b class="tit">¿Cómo se termina el borde?</b>Dobladillo, overlock o sin. <span class="pill p-opc">automático: el del molde</span> (<code>terminacion_por_defecto</code>). <span class="chico">Por qué acá: cambia cuánta tela lleva, y eso decide la tela.</span></div></div>
+    <div class="paso"><div class="b m">6</div><div class="x"><b class="tit">¿En qué tela?</b>Sólo las telas en las que <b>entra</b>. <span class="pill p-opc">automático</span> con <code>POST /a_medida/calcular</code>: devuelve el tamaño final y la lista de telas donde entra (y lo máximo que se puede pedir en cada una). <span class="chico">Si no entra en ninguna: avisarle al cliente antes de vender.</span></div></div>
+    <div class="paso"><div class="b m">7</div><div class="x"><b class="tit">¿Lleva tiras? ¿Cuántas por lado?</b><span class="pill p-opc">automático: las del molde</span> <span class="chico">Al final porque dependen de la forma (qué lados hay) y de la terminación (sin borde no se marcan).</span></div></div>
+    <div class="paso"><div class="b a">8</div><div class="x"><b class="tit">El diseño (el arte)</b>Con la medida ya cerrada, pedir la <b>plantilla de esa medida</b> (<code>POST /plantillas</code> con la misma <code>medida</code>), el diseñador dibuja encima y el arte viaja en el pedido. <span class="chico">Por qué último: un arte hecho para otra medida no cubre la bandera (<code>arte-otra-medida</code>).</span></div></div>
+  </div>
+  <h3><i class="ti ti-code"></i> Así va en el pedido</h3>
+  <div class="grilla g3">
+<pre class="json"><span class="c">// rectángulo</span>
+{ <span class="k">"variable"</span>: <span class="s">"v_…"</span>, <span class="k">"tela"</span>: <span class="s">"486"</span>,
+  <span class="k">"medida"</span>: { <span class="k">"ancho_m"</span>: <span class="n">1.5</span>, <span class="k">"alto_m"</span>: <span class="n">0.9</span> },
+  <span class="k">"terminacion"</span>: <span class="s">"dobladillo"</span>,
+  <span class="k">"tiras"</span>: { <span class="k">"arriba"</span>: <span class="n">5</span> } }</pre>
+<pre class="json"><span class="c">// círculo</span>
+{ <span class="k">"variable"</span>: <span class="s">"v_…"</span>, <span class="k">"tela"</span>: <span class="s">"486"</span>,
+  <span class="k">"forma"</span>: <span class="s">"circulo"</span>,
+  <span class="k">"medida"</span>: { <span class="k">"diametro_m"</span>: <span class="n">1.2</span> },
+  <span class="k">"tiras"</span>: { <span class="k">"alrededor"</span>: <span class="n">8</span> } }</pre>
+<pre class="json"><span class="c">// triángulo, punta abajo</span>
+{ <span class="k">"variable"</span>: <span class="s">"v_…"</span>, <span class="k">"tela"</span>: <span class="s">"486"</span>,
+  <span class="k">"forma"</span>: <span class="s">"triangulo"</span>,
+  <span class="k">"orientacion"</span>: <span class="s">"abajo"</span>,
+  <span class="k">"medida"</span>: { <span class="k">"ancho_m"</span>: <span class="n">1.0</span>, <span class="k">"alto_m"</span>: <span class="n">0.6</span> },
+  <span class="k">"tiras"</span>: { <span class="k">"base"</span>: <span class="n">3</span> } }</pre>
+  </div>
+</section>
+
 </body>
 </html>

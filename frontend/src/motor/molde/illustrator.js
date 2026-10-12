@@ -23,6 +23,7 @@
 // lienzo → Illustrator tiraba «PARM». Cada mesa = la caja de SU pieza (apta para los talles del
 // modo: default = todos, rango = los del rango, talle = ese talle).
 import { EDITABLES_GUIA, normNom } from './herramientas.js'
+import { segsDobladillo, segsCostura, segsRayas } from './formas.js'
 
 export const PUERTO_ILLUSTRATOR = 47850
 /**
@@ -112,16 +113,33 @@ const PT_POR_CM = 72 / 2.54
 /** MOLDE A MEDIDA (MAPA 623): el rectángulo del MARGEN (dobladillo) hacia adentro de la pieza, que
  *  marca dónde va el doblez. La extensión lo dibuja y lo vuelve GUÍA de Illustrator. */
 function caminoDobladillo(segs, dobladillo, T, capa, mesa) {
-  const b = cajaSegs(segs)
-  if (!b || !dobladillo) return null
-  const tieneMargen = (dobladillo.izq || 0) > 0 || (dobladillo.der || 0) > 0 || (dobladillo.arriba || 0) > 0 || (dobladillo.abajo || 0) > 0
-  if (!tieneMargen) return null
-  const x0 = b[0] + (dobladillo.izq || 0) * PT_POR_CM, x1 = b[2] - (dobladillo.der || 0) * PT_POR_CM
-  const y0 = b[1] + (dobladillo.abajo || 0) * PT_POR_CM, y1 = b[3] - (dobladillo.arriba || 0) * PT_POR_CM
-  if (!(x1 > x0 && y1 > y0)) return null
-  const sub = subcaminos([['m', x0, y0], ['l', x1, y0], ['l', x1, y1], ['l', x0, y1], ['h']], T)
+  // con la FORMA de la pieza (MAPA 645): círculo o triángulo llevan la guía redonda o en punta
+  const g = segsDobladillo(cajaSegs(segs), dobladillo, PT_POR_CM)
+  if (!g) return null
+  const sub = subcaminos(g, T)
   return { capa, sub, ancho: 1, color: [0, 0, 0, 100], mesa, nombre: 'dobladillo', punteado: [9, 6] }
 }
+
+/** 🧵 LA COSTURA (MAPA 654, sólo dobladillo): la línea adentro de la guía del diseño, a la misma distancia,
+ *  donde va la costura. 🔴 Va como GUÍA PUNTEADA (MAPA 656): RAYAS sueltas (`segsRayas`, 1 cm cada 1,6 cm)
+ *  que entran por el SVG y la extensión las vuelve guías, igual que el contorno y el dobladillo — así se
+ *  ven siempre (encima del fondo de la mesa) y con CUALQUIER conector instalado. Como arte punteado
+ *  (654) quedaba tapada por el fondo de la mesa: «en Illustrator y Corel falta la tercera guía». */
+function caminoCostura(segs, dobladillo, T, capa, mesa) {
+  const g = segsCostura(cajaSegs(segs), dobladillo, PT_POR_CM)
+  const r = g ? segsRayas(g, 1 * PT_POR_CM, 0.6 * PT_POR_CM) : null
+  if (!r) return null
+  // 🔴 los conectores aceptan hasta 500 sub-caminos por camino (`sanear` de puente.js, `Lista(…, 500)` de
+  // ArmarCorel.cs): una bandera grande tiene más rayas que eso y el plan entero se rechazaba («no funciona
+  // la conexión», MAPA 657). Se reparten en varios caminos de hasta 400.
+  const sub = subcaminos(r, T), out = []
+  for (let i = 0; i < sub.length; i += MAX_SUB_POR_CAMINO) {
+    out.push({ capa, sub: sub.slice(i, i + MAX_SUB_POR_CAMINO), ancho: 1, color: [0, 60, 100, 0], mesa, nombre: 'costura' })
+  }
+  return out
+}
+// lo que aceptan los conectores instalados es 500; se deja margen
+const MAX_SUB_POR_CAMINO = 400
 
 /** Los tramos de `segs` como sub-caminos de Illustrator: `[[x, y, izqX, izqY, derX, derY], …]`. */
 function subcaminos(segs, T) {
@@ -357,10 +375,13 @@ export function planIllustrator(capasData, { config = 'default', rango = [], tit
       // 1.4 no lo conocía. Así anda con cualquier versión instalada, sin reinstalar nada.
       const dob = dobladillo ? caminoDobladillo(it.segs, dobladillo, T, iGuias, im) : null
       if (dob) { delete dob.punteado; caminos.push(dob) }
+      const cos = dobladillo ? caminoCostura(it.segs, dobladillo, T, iGuias, im) : null
+      if (cos) caminos.push(...cos)         // rayas sueltas: guías en fila = guía punteada
       // un <path> por sub-camino: así cada uno entra a Illustrator como un trazado suelto que se
       // puede volver GUÍA (un trazado compuesto no puede)
       for (const sp of subs) svg.push(`<path d="${dSvg([sp])}"/>`)
       if (dob) for (const sp of dob.sub) svg.push(`<path d="${dSvg([sp])}"/>`)
+      if (cos) for (const k of cos) for (const sp of k.sub) svg.push(`<path d="${dSvg([sp])}"/>`)
     }
     // el nombre de la mesa como TEXTO VIVO en «guias», arriba a la izquierda DENTRO de la mesa: es
     // lo que lee el motor para saber de qué pieza es (tiene que quedar adentro de la mesa)

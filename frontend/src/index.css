@@ -229,6 +229,28 @@ body {
 }
 
 /* Animación de los modales: backdrop que aparece y contenido que "popea" */
+/* MOLDE A MEDIDA (MAPA 646): las tarjetas de la forma y de la punta del triángulo — sólo la figura */
+.forma-tile {
+  height: 58px; padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  border-radius: 14px; border: 1px solid var(--border-light); color: var(--text-muted);
+  background: linear-gradient(160deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
+  transition: transform .15s ease, border-color .15s ease, color .15s ease, box-shadow .2s ease, background .2s ease;
+}
+.forma-tile:hover { color: #fff; border-color: rgba(0,243,255,0.45); transform: translateY(-1px); }
+.forma-tile:active { transform: translateY(0) scale(0.97); }
+.forma-tile.on {
+  color: var(--accent); border-color: var(--accent);
+  background: radial-gradient(120% 120% at 50% 0%, rgba(0,243,255,0.22), rgba(0,243,255,0.04) 70%);
+  box-shadow: 0 0 0 1px rgba(0,243,255,0.25) inset, 0 8px 22px -12px rgba(0,243,255,0.9);
+}
+.forma-tile.chica { height: 38px; border-radius: 11px; }
+/* la punta del triángulo: sólo el triangulito blanco, sin caja (MAPA 647) */
+.punta-btn {
+  padding: 6px; border: none; background: none; cursor: pointer; display: flex;
+  color: rgba(255,255,255,0.55); transition: color .15s ease, transform .15s ease, filter .2s ease;
+}
+.punta-btn:hover { color: #fff; transform: scale(1.12); }
+.punta-btn.on { color: #fff; filter: drop-shadow(0 0 6px rgba(0,243,255,0.9)); }
 @keyframes modalOverlayIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modalPopIn {
   0%   { opacity: 0; transform: translateY(10px) scale(0.94); }
@@ -238,6 +260,8 @@ body {
 .modal-overlay { animation: modalOverlayIn .18s ease-out; }
 .modal-pop { animation: modalPopIn .28s cubic-bezier(0.34, 1.56, 0.64, 1); }
 @keyframes perfilSpin { to { transform: rotate(360deg); } }
+/* el giro de los botones «haciendo algo» (`animation: spin …`): se usaba sin estar definido y no giraba (MAPA 678) */
+@keyframes spin { to { transform: rotate(360deg); } }
 .perfil-spinner { animation: perfilSpin .7s linear infinite; }
 
 /* Tarjetas de perfil ICC (color management) */

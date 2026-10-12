@@ -85,7 +85,7 @@ async function api(ruta, opts = {}) {
 const apiJson = (ruta, cuerpo) => api(ruta, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo || {}) })
 async function archivoDelPedido(ref, ruta) {
   const r = await fetch(rutaApi(`/api/externo/robot/archivo/${encodeURIComponent(ref)}?ruta=${encodeURIComponent(ruta)}`))
-  if (!r.ok) throw new Error(`no se pudo leer «${ruta}» del paquete (${r.status})`)
+  if (!r.ok) { await r.text().catch(() => ''); throw new Error(`no se pudo leer «${ruta}» del paquete (${r.status})`) }   // leída (MAPA 671)
   return new Uint8Array(await r.arrayBuffer())
 }
 
@@ -212,8 +212,12 @@ async function subirTipografias(m, ref, pid, rutas) {
       fd.append('pid', pid)
       m.adjuntarAnalisis(fd, an)
       const r = await fetch(rutaApi('/api/pedido/fuente_resolver'), { method: 'POST', body: fd })
+      // 🔴 LA RESPUESTA SE LEE SIEMPRE (MAPA 671): una respuesta sin leer deja la conexión «pausada» y, cuando el
+      // servidor la cierra, el `fetch` de Node 24 (undici) revienta con `assert(!this.paused)` y se lleva al robot
+      // entero (medido: la mitad de las corridas del contrato de integración, justo después de las tipografías)
+      const d = await r.json().catch(() => ({}))
       // 409 «ya existe» = esa misma fuente ya está cargada en el molde: sirve
-      if (!r.ok && r.status !== 409) { const d = await r.json().catch(() => ({})); throw new Error(d.error || r.status) }
+      if (!r.ok && r.status !== 409) throw new Error(d.error || r.status)
     } catch (e) {
       invalidas.push(`${path.basename(ruta)} (${String(e.message || e).slice(0, 120)})`)
     }
@@ -279,11 +283,13 @@ async function esperarTrabajo(resp) {
 }
 async function armarCopiaAMedida(m, ref, plantilla, medida, slug = null) {
   const c = await apiJson(`/api/externo/robot/a_medida/${encodeURIComponent(ref)}`,
-    { plantilla, ancho_m: medida.ancho_m, alto_m: medida.alto_m, slug })
+    { plantilla, ancho_m: medida.ancho_m, alto_m: medida.alto_m, forma: medida.forma || null, orientacion: medida.orientacion || null,
+      terminacion: medida.terminacion || null, slug })
   const [AM, CA, PQ] = await Promise.all([import('../molde/aMedida.js'), import('../molde/caminoA.js'), import('../paquete/armar.js')])
   // el borde de corte va ADENTRO de la medida: el rectángulo, la reserva más chico (como la pantalla)
   const { pdf, resumen } = AM.pdfMoldeAMedida(m.mupdf, { anchoM: c.ancho_m, altoM: c.alto_m, pieza: c.pieza,
-    reservaMm: c.reserva_mm ?? AM.RESERVA_DEFECTO_MM, margen: c.margen || null })
+    reservaMm: c.reserva_mm ?? AM.RESERVA_DEFECTO_MM, margen: c.margen || null, forma: c.forma, orientacion: c.orientacion,
+    terminacion: c.terminacion })
   const doc = m.mupdf.Document.openDocument(pdf, 'application/pdf')
   let zip, sha1
   try {
@@ -304,7 +310,8 @@ async function armarCopiaAMedida(m, ref, plantilla, medida, slug = null) {
   if (!r.ok) throw new Error(d.error || `subir el molde a medida: ${r.status}`)
   await esperarTrabajo(d)
   const fin = await apiJson(`/api/externo/robot/a_medida/${encodeURIComponent(ref)}/listo`, { pid: c.pid })
-  return { pid: c.pid, variable: fin.variable, acomodo: fin.acomodo, talle: c.talle }
+  return { pid: c.pid, variable: fin.variable, acomodo: fin.acomodo, talle: c.talle,
+           margen: c.margen, reserva_mm: c.reserva_mm, forma: c.forma, orientacion: c.orientacion, terminacion: c.terminacion }
 }
 
 function clasificarFalla(e) {
@@ -480,7 +487,11 @@ async function procesarPlantilla(ref, normal) {
     for (const it of dis.vars) {
       if (!it.medida) continue
       const c = await armarCopiaAMedida(await motor(), ref, it.pid, it.medida)
-      Object.assign(it, { pid: c.pid, clave: c.variable.clave, variable: c.variable, acomodo: c.acomodo || {} })
+      // la guía del margen con la FORMA (MAPA 645): medida desde el contorno, como la pantalla
+      const AMx = await import('../molde/aMedida.js')
+      Object.assign(it, { pid: c.pid, clave: c.variable.clave, variable: c.variable, acomodo: c.acomodo || {},
+                          dobladillo: AMx.margenSobreContorno(c.margen, c.reserva_mm, c.forma, c.orientacion,
+                            (it.medida || {}).ancho_m, (it.medida || {}).alto_m, c.terminacion) })
       log(ref, '· plantilla a medida', dis.nombre, '→', it.molde, c.talle)
     }
   }

@@ -276,12 +276,14 @@ function texto(ctx, pg, x, y, s, size = 9, color = NEGRO, bold = false, maxW = n
 }
 
 // ─── formas: Shape.draw_rect / draw_line + finish + commit ──────────────────────────────────
-function terminar(ctx, drawCont, { width = 1, color = [0], fill = null, closePath = true, evenOdd = false }) {
-  // `Shape.finish` (sin dashes, sin cap/join, sin opacidad, sin capa, sin morph)
+function terminar(ctx, drawCont, { width = 1, color = [0], fill = null, closePath = true, evenOdd = false, dashes = null }) {
+  // `Shape.finish` (sin cap/join, sin opacidad, sin capa, sin morph)
   if (width === 0) color = null
   else if (color === null || color === undefined) width = 0
   const colorStr = colorCode(ctx, color, 'c'), fillStr = colorCode(ctx, fill, 'f')
   if (width !== 1 && width !== 0) drawCont += ctx.g(width) + ' w\n'
+  // las rayas van ADELANTE de todo el trazo, como `"%s d\n" % dashes + draw_cont` de PyMuPDF
+  if (dashes !== null && dashes !== undefined && dashes !== '' && dashes !== '[] 0') drawCont = dashes + ' d\n' + drawCont
   if (closePath) drawCont += 'h\n'
   if (color !== null && color !== undefined) drawCont += colorStr
   if (fill !== null && fill !== undefined) {
@@ -306,6 +308,31 @@ function dibujarLinea(ctx, pg, p1, p2, color, width = 1) {
   const a = jmTuple(transformarPunto(p1[0], p1[1], IPCTM)), b = jmTuple(transformarPunto(p2[0], p2[1], IPCTM))
   const cont = `${a.map((v) => ctx.g(v)).join(' ')} m\n${b.map((v) => ctx.g(v)).join(' ')} l\n`
   pg.trozos.push(terminar(ctx, cont, { color, width, closePath: false }))
+}
+
+/** `page.draw_polyline(points, color=, fill=, dashes=, width=, closePath=)` (`Shape.draw_polyline` + `finish`) */
+function dibujarPolilinea(ctx, pg, pts, { color = [0], fill = null, width = 1, dashes = null, closePath = false } = {}) {
+  let cont = ''
+  pts.forEach((p, i) => {
+    const v = jmTuple(transformarPunto(p[0], p[1], IPCTM))
+    cont += v.map((x) => ctx.g(x)).join(' ') + (i === 0 ? ' m\n' : ' l\n')
+  })
+  pg.trozos.push(terminar(ctx, cont, { color, fill, width, dashes, closePath }))
+}
+
+/** Los trazos ya calculados de un dibujo (MAPA 659, `ficha_a_medida.py` del servidor): polilíneas y textos
+ *  relativos a (x0, y0). Gemelo: `_dibujar_ops` de `ficha_tecnica.py`. */
+function dibujarOps(ctx, pg, x0, y0, ops) {
+  for (const op of ops || []) {
+    if (op.k === 'l') {
+      const pts = (op.p || []).map(([x, y]) => [x0 + Number(x), y0 + Number(y)])
+      if (pts.length < 2) continue
+      dibujarPolilinea(ctx, pg, pts, { color: verdad(op.c) ? op.c : null, fill: verdad(op.f) ? op.f : null,
+        dashes: op.d || null, width: op.w !== null && op.w !== undefined ? Number(op.w) : 1, closePath: verdad(op.h) })
+    } else if (op.k === 't') {
+      texto(ctx, pg, x0 + Number(op.x), y0 + Number(op.y), op.s, Number(op.z) || 8, op.c || NEGRO, verdad(op.b), null)
+    }
+  }
 }
 
 // ─── show_pdf_page: una página de otro PDF, incrustada vectorial ────────────────────────────
@@ -530,15 +557,18 @@ function dibujarTabla(ctx, pg, y, columnas, filas, yMax, fila0 = 0) {
 }
 
 // ── MOLDE GUÍA (piezas de la variable, con el diseño recortado — el MISMO PDF que la tizada) ───
-function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = GUIA_COLS) {
+function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = GUIA_COLS, hCardAm = null) {
   // Grilla de `cols` columnas; cada pieza en su TARJETA (sombra + fondo claro + borde) y adentro
   // el PDF real de la pieza (recorte NATIVO). Devuelve [yFinal, restantes].
   const x0 = MARGEN
   const ancho = A4_W - 2 * MARGEN
   const wCel = ancho / cols
   const gap = GUIA_GAP                   // aire entre tarjetas
-  const hCel = GUIA_HCEL                 // alto de la celda (tarjeta + rótulo)
-  const hCard = hCel - 28                // alto de la tarjeta (la imagen); el rótulo es nombre + tela
+  // MOLDE A MEDIDA (MAPA 666): la tarjeta toma el alto JUSTO de la pieza (`hCardAm`) y el rótulo lleva una
+  // línea más (la medida del diseño); si no, la celda de siempre
+  const conSub = piezas.some((pz) => 'sub' in pz)
+  const hCel = hCardAm ? (hCardAm + 28 + (conSub ? 9 : 0)) : GUIA_HCEL   // alto de la celda (tarjeta + rótulo)
+  const hCard = hCardAm || (hCel - 28)   // alto de la tarjeta (la imagen); el rótulo es nombre + tela
   let restantes = [], filaY = y, i = 0
   while (i < piezas.length) {
     if (filaY + hCel > yMax) { restantes = piezas.slice(i); break }
@@ -591,10 +621,16 @@ function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = GUIA_COLS) {
         if (src) { try { src.destroy() } catch { /* nada */ } }
       }
       // Rótulo: NOMBRE general de la pieza (sin número) + en qué TELA va. La medida no se muestra.
-      const nom = generico(oVacio(pz.nombre) || '—')
+      // (a medida, MAPA 666: el nombre es el DISEÑO y va tal cual; debajo, su medida y su forma)
+      const nom = ('sub' in pz) ? (pyStr(oVacio(pz.nombre)) || '—') : generico(oVacio(pz.nombre) || '—')
       texto(ctx, pg, cx + gap + 2, filaY + hCard + 12, nom, 7.5, NEGRO, true, wCel - 2 * gap - 2)
+      let yT = filaY + hCard + 22
+      if ('sub' in pz) {
+        texto(ctx, pg, cx + gap + 2, filaY + hCard + 21, pyStr(oVacio(pz.sub)), 6.5, GRIS, false, wCel - 2 * gap - 2)
+        yT = filaY + hCard + 30
+      }
       const tela = pyStrip(pyStr(oVacio(pz.tela)))
-      if (tela) texto(ctx, pg, cx + gap + 2, filaY + hCard + 22, 'Tela: ' + tela, 6.5, ACENTO, true, wCel - 2 * gap - 2)
+      if (tela) texto(ctx, pg, cx + gap + 2, yT, 'Tela: ' + tela, 6.5, ACENTO, true, wCel - 2 * gap - 2)
     }
     filaY += hCel
   }
@@ -606,6 +642,46 @@ function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = GUIA_COLS) {
 // «nombre»/«texto» se muestran «Texto» (2026-10-06); gemelo: `_LABEL_CAMPO` de ficha_tecnica.py
 const LABEL_CAMPO = { nombre: 'Texto', texto: 'Texto', numero: 'Número', 'numero 2': 'Número 2',
   numero2: 'Número 2', palabra: 'Palabra', apellido: 'Apellido' }
+
+/**
+ * MOLDE A MEDIDA: UN BLOQUE POR PLANTILLA, UNA TARJETA POR DISEÑO (MAPA 666). Las guías seguidas con el mismo
+ * `am.grupo` (las marca el servidor) se juntan en una: título corto, piezas una al lado de la otra (nombre = el
+ * diseño, `sub` = su medida), tipografías sin repetir, lo que no se sublima de todas y sus secciones a medida.
+ * Gemelo EXACTO: `_compactar_a_medida` de `ficha_tecnica.py`.
+ */
+export function compactarAMedida(guias) {
+  const out = []
+  let i = 0
+  while (i < guias.length) {
+    const mg = guias[i]
+    const am = (mg.am && typeof mg.am === 'object') ? mg.am : null
+    if (!am || !verdad(am.grupo)) { out.push(mg); i++; continue }
+    const grupo = []
+    while (i < guias.length && guias[i].am && typeof guias[i].am === 'object' && guias[i].am.grupo === am.grupo) { grupo.push(guias[i]); i++ }
+    const piezas = [], fuentes = [], vistas = new Set(), procesos = [], secciones = []
+    let asp = 0
+    for (const m of grupo) {
+      const a = m.am
+      asp = Math.max(asp, Number(a.aspecto) || 0)
+      for (const pz of (m.piezas || [])) piezas.push({ ...pz, nombre: pyStr(oVacio(m.diseno) || oVacio(pz.nombre)), sub: pyStr(oVacio(a.sub)) })
+      for (const f of (m.fuentes || [])) {
+        const k = ['campo', 'fuente', 'pedida', 'sustituida'].map((x) => pyStr(oVacio(f[x]))).join('|')
+        if (!vistas.has(k)) { vistas.add(k); fuentes.push(f) }
+      }
+      procesos.push(...(m.procesos || []))
+      if (verdad(m.a_medida)) secciones.push(m.a_medida)
+    }
+    out.push({ nombre: pyStr(oVacio(am.molde) || oVacio(mg.nombre)), compacta: true, piezas, fuentes, procesos, a_medidas: secciones, aspecto: asp })
+  }
+  return out
+}
+
+/** El alto de la tarjeta de un bloque a medida (3 columnas). Gemelo: `_h_card_a_medida`. */
+function hCardAMedida(aspecto) {
+  if (!(Number(aspecto) > 0)) return null
+  const disp = (A4_W - 2 * MARGEN) / 3 - 2 * 5 - 2 * 7
+  return Math.max(40, Math.min(170, disp * Number(aspecto) + 14))
+}
 
 /**
  * Arma el PDF de la ficha. Ver el encabezado del archivo por la forma de la entrada.
@@ -646,18 +722,15 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
       const todo = new Uint8Array(partes.reduce((a, x) => a + x.length, 0))
       let k = 0
       for (const x of partes) { todo.set(x, k); k += x.length }
-      const clave = JSON.stringify([pyStr(oVacio(mg.nombre)), pyStr(oVacio(mg.variante)), pyStr(oVacio(mg.opciones)), sha1HexBytes(todo)])
+      const clave = JSON.stringify([pyStr(oVacio(mg.nombre)), pyStr(oVacio(mg.variante)), pyStr(oVacio(mg.opciones)),
+        verdad(mg.am) ? pyStr(oVacio(mg.diseno)) : '', sha1HexBytes(todo)])
       if (vistas.has(clave)) continue
       vistas.add(clave)
       unicas.push(mg)
     }
-    guias = unicas
-    // La VARIABLE sólo se nombra cuando el MISMO molde+diseño sale en más de una.
-    const rep = new Map()
-    const claveRep = (mg) => JSON.stringify([mg.nombre ?? null, mg.diseno ?? null])
-    for (const mg of guias) rep.set(claveRep(mg), (rep.get(claveRep(mg)) || 0) + 1)
-    guias.forEach((mg, iMg) => {
-      // la guía de este molde: su PDF se abre UNA vez y todas sus piezas lo comparten
+    // cada guía abre SU PDF una vez y sus piezas lo llevan (`_guia`): así las tarjetas de un bloque a medida
+    // pueden venir de guías distintas (MAPA 666)
+    guias = compactarAMedida(unicas.map((mg) => {
       let guiaDoc = null
       const bg = aBytes(mg.pdf_guia)
       if (bg && bg.length) {
@@ -667,8 +740,18 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
           ctx.guias.push(guiaDoc)
         } catch { guiaDoc = null }
       }
-      const piezas = (mg.piezas || []).map((p) => (guiaDoc ? { ...p, _guia: guiaDoc } : p))
-      const tituloMg = `MOLDE GUÍA · ${'nombre' in mg ? fstr(mg.nombre) : ''}` + (verdad(mg.diseno) ? `  ·  ${fstr(mg.diseno)}` : '')
+      return guiaDoc ? { ...mg, piezas: (mg.piezas || []).map((p) => ({ ...p, _guia: guiaDoc })) } : mg
+    }))
+    // La VARIABLE sólo se nombra cuando el MISMO molde+diseño sale en más de una.
+    const rep = new Map()
+    const claveRep = (mg) => JSON.stringify([mg.nombre ?? null, mg.diseno ?? null])
+    for (const mg of guias) rep.set(claveRep(mg), (rep.get(claveRep(mg)) || 0) + 1)
+    guias.forEach((mg, iMg) => {
+      const piezas = mg.piezas || []        // (ya llevan su guía abierta, ver arriba)
+      const comp = verdad(mg.compacta)
+      const hc = comp ? hCardAMedida(mg.aspecto) : null
+      const tituloMg = comp ? `${fstr(mg.nombre)} · a medida`
+        : `MOLDE GUÍA · ${'nombre' in mg ? fstr(mg.nombre) : ''}` + (verdad(mg.diseno) ? `  ·  ${fstr(mg.diseno)}` : '')
       // Línea gris de abajo: la variable (si distingue), QUÉ OPCIONES lleva y cuántas piezas son.
       const varn = pyStrip(pyStr(oVacio(mg.variante)))
       const detalle = []
@@ -676,7 +759,7 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
       if (pyStrip(pyStr(oVacio(mg.opciones)))) detalle.push(pyStrip(String(mg.opciones)))
       detalle.push(`${piezas.length} pieza` + (piezas.length !== 1 ? 's' : ''))
       const detalleTxt = detalle.join('  ·  ')
-      if (y + 210 > A4_H - MARGEN) {          // no entra ni el título + una fila → página nueva
+      if (y + (hc ? hc + 80 : 210) > A4_H - MARGEN) {   // no entra ni el título + una fila → página nueva
         pg = nuevaPagina(ctx); y = 78
       } else {
         y += 24
@@ -686,9 +769,13 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
         }
       }
       y = seccion(ctx, pg, y, tituloMg)
-      y += 11
-      texto(ctx, pg, MARGEN, y, detalleTxt, 8, GRIS, false, A4_W - 2 * MARGEN)
-      y += 9
+      if (comp) {
+        y += 2 + ((mg.fuentes || []).length ? 9 : 0)   // sin la línea de detalle (las tarjetas ya dicen todo)
+      } else {
+        y += 11
+        texto(ctx, pg, MARGEN, y, detalleTxt, 8, GRIS, false, A4_W - 2 * MARGEN)
+        y += 9
+      }
       // CON QUÉ TIPOGRAFÍA SALE ESTAMPADO cada campo, en su propia línea, partida si no entra.
       const fts = mg.fuentes || []
       if (fts.length) {
@@ -713,24 +800,27 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
         y += 9
       }
       let rest
-      ;[y, rest] = dibujarPiezas(ctx, pg, y, piezas, A4_H - MARGEN)
+      const cols = comp ? 3 : GUIA_COLS
+      ;[y, rest] = dibujarPiezas(ctx, pg, y, piezas, A4_H - MARGEN, cols, hc)
       while (rest.length) {
         pg = nuevaPagina(ctx); y = 78
         y = seccion(ctx, pg, y, tituloMg + ' (continuación)')
         y += 10
-        ;[y, rest] = dibujarPiezas(ctx, pg, y, rest, A4_H - MARGEN)
+        ;[y, rest] = dibujarPiezas(ctx, pg, y, rest, A4_H - MARGEN, cols, hc)
       }
 
       // ── MOLDE A MEDIDA: MEDIDA Y TERMINACIÓN (MAPA 643) ─────────────────────────────────
       // La medida del diseño, el total con el margen, el borde y las TIRAS. Las filas vienen
       // redactadas del servidor (`_ficha_a_medida`); acá sólo se dibujan. Gemelo de `ficha_tecnica.py`.
-      const amF = mg.a_medida || {}
+      for (const am0 of (comp ? (mg.a_medidas || []) : [mg.a_medida])) {
+      const amF = am0 || {}
       const filasAm = amF.filas || []
       if (filasAm.length) {
         const notasAm = (amF.notas || []).filter(Boolean).map(String)
         const altoAm = 22 + 13 * filasAm.length + 11 * notasAm.length
         if (y + 16 + altoAm > A4_H - MARGEN) { pg = nuevaPagina(ctx); y = 78 } else y += 16
-        y = seccion(ctx, pg, y, 'MEDIDA Y TERMINACIÓN')
+        // la misma configuración en varios diseños va UNA vez, con los diseños en el título (MAPA 665)
+        y = seccion(ctx, pg, y, 'MEDIDA Y TERMINACIÓN' + (verdad(amF.titulo_disenos) ? ` · ${amF.titulo_disenos}` : ''))
         y += 12
         for (const f of filasAm) {
           const sub = verdad(f.sub)
@@ -743,7 +833,15 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
           texto(ctx, pg, MARGEN, y, n, 8, GRIS, false, A4_W - 2 * MARGEN)
           y += 11
         }
+        // LOS DIBUJOS (MAPA 659): el plano, el doblez y los pasos — cada bloque entero en una hoja
+        for (const b of amF.dibujos || []) {
+          const alto = Number(b.alto) || 0
+          if (y + 14 + alto > A4_H - MARGEN) { pg = nuevaPagina(ctx); y = 78 } else y += 14
+          dibujarOps(ctx, pg, MARGEN, y, b.ops)
+          y += alto
+        }
       }
+      }                                       // (una o varias secciones a medida, MAPA 666)
 
       // ── LO QUE NO SE SUBLIMA ────────────────────────────────────────────────────────────
       // Los objetos marcados como TPU / Bordado / DTF: en la tela sale sólo una cruz de 3 cm, así

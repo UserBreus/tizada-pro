@@ -6,6 +6,7 @@
 // Acá se hace todo eso (`obrero.worker.js` → `fuente_analizar` / `arte_revalidar`) y el servidor
 // sólo guarda el archivo con lo que se le dice.
 import { enHiloSuelto } from '../hiloSuelto.js'
+import { catalogoConPc } from '../texto/fuentesPc.js'
 import { traerConCache, claveDe, urlDe } from '../cache.js'
 import { resolverFuente } from '../texto/fuentes.js'
 
@@ -78,7 +79,8 @@ export async function revalidarArte({ pid, rutaApi }) {
   if (modo === 'separado' && (!Object.keys(info.registro || {}).length || !Object.keys(mapeo).length)) return
   const ctx = await json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/arte_contexto`))
   // sólo el catálogo del SISTEMA, como el servidor (`validar_arte*(…, FUENTES)`)
-  const contexto = { ...ctx, fuentes: { catalogo: ((ctx.fuentes || {}).catalogo || []).filter((c) => !c.propia), alias: {} } }
+  // (+ las de esta PC, MAPA 670: una instalada no cuenta como faltante)
+  const contexto = { ...ctx, fuentes: { catalogo: await catalogoConPc(((ctx.fuentes || {}).catalogo || []).filter((c) => !c.propia)), alias: {} } }
   const arte = (await traerConCache(`arte|${pid}|${d.id}|${(d.sello || []).join(',')}`,
     rutaApi(`/api/productos/${encodeURIComponent(pid)}/arte_archivo`))).slice()
   let plantilla = null

@@ -62,13 +62,16 @@ un conjunto de piezas de una prenda. Esta lista trae las variables de las prenda
 
 - Guardar la **`clave`**: es lo que va en el pedido.
 - Dos variables con distinta `planilla` no se combinan en un mismo pedido.
-- **Prenda A MEDIDA** (banderas, banners): un rectángulo de una sola pieza, sin talles. Trae el bloque
+- **Prenda A MEDIDA** (banderas, banners, banderines): una sola pieza, sin talles, que puede ser
+  **rectángulo, círculo o triángulo** (la forma la elige cada pedido). Trae el bloque
   `a_medida` con TODO lo que hace falta para pedirla completa:
 
   ```json
   "a_medida": {
     "pieza": "Bandera",
-    "pide": "medida: {ancho_m, alto_m} = la del DISEÑO en metros (obligatoria) · tiras: {lleva, lados} (opcional)",
+    "pide": "medida: {ancho_m, alto_m} = la del DISEÑO en metros (obligatoria; en el círculo, el diámetro) · forma … · tiras …",
+    "formas": ["rectangulo", "circulo", "triangulo"], "forma_por_defecto": "rectangulo",
+    "orientaciones_triangulo": ["abajo", "arriba", "izq", "der"], "orientacion_por_defecto": "abajo",
     "medida_minima_m": 0.05, "medida_maxima_m": 50,
     "medida_de_muestra_m": { "ancho_m": 1, "alto_m": 1 },
     "margen_cm": { "arriba": 3, "abajo": 3, "izq": 3, "der": 3 },
@@ -78,15 +81,42 @@ un conjunto de piezas de una prenda. Esta lista trae las variables de las prenda
     "telas": [ { "id": "44", "nombre": "Bandera (1,60)", "ancho_mesa_cm": 157, "entra_hasta_cm": 156.7 } ],
     "regla_entra": "entra si el lado del TOTAL que va atravesado ≤ entra_hasta_cm …",
     "tiras": { "lleva_por_defecto": false, "lados_por_defecto": { "arriba": 0, "abajo": 0, "izq": 0, "der": 0 },
-               "grosor_mm": 1, "color_cmyk": [0, 0, 0, 1], "maximo_por_lado": 50, "regla": "…" } }
+               "grosor_mm": 1, "color": "negra con contorno blanco", "maximo_por_lado": 50, "regla": "…",
+               "lados_por_forma": { "rectangulo": ["arriba", "abajo", "izq", "der"],
+                                    "triangulo": ["base", "laterales"], "circulo": ["alrededor"] } } }
   ```
 
   El pedido manda la **medida del diseño** (`medida: {"ancho_m": 3, "alto_m": 1.5}`) y, si quiere,
   las **tiras** (`tiras: {"lleva": true, "lados": {"arriba": 5, "abajo": 5, "izq": 1, "der": 0}}`; cada
   número cuenta las 2 puntas). TIZADA le suma el margen (3,00 × 1,50 con 3 cm → **3,06 × 1,56**), el
   borde de corte va adentro, y las marcas de las tiras salen impresas del color y grosor del molde. La
-  ficha técnica trae «MEDIDA Y TERMINACIÓN». Si el total no entra en la tela: `tela-no-entra` (con
+  ficha técnica trae «MEDIDA Y TERMINACIÓN»: las medidas, el plano de la pieza acotado (corte, guía = doblez,
+  costura, tiras), el borde en corte paso a paso (dobladillo u overlock), la esquina o punta cortada y doblada, y los
+  pasos para terminarla con las medidas del pedido. Si el total no entra en la tela: `tela-no-entra` (con
   cuánto se pasa y lo máximo). Para saberlo ANTES de mandar: `POST /a_medida/calcular`.
+
+  **Círculo y triángulo.** Se piden con `forma` (en el molde del pedido o dentro de `medida`):
+  - **Círculo:** `"forma": "circulo", "medida": {"diametro_m": 1.2}` (o `ancho_m`). Total = diámetro + 2 ×
+    el margen. Tiras: `{"alrededor": 12}` = 12 marcas parejas por todo el borde, la primera arriba (hasta 200).
+  - **Triángulo** (isósceles): `"forma": "triangulo", "orientacion": "abajo", "medida": {"ancho_m": 1.2, "alto_m": 0.8}`
+    = el ancho y el alto de su caja; `orientacion` = hacia dónde va la **punta** (`abajo` = banderín,
+    `arriba`, `izq`, `der`). Cada lado lleva el margen y las **puntas van recortadas**: al doblar el margen por la guía las solapas se superponen sin sobrar nada (1,20 × 0,80 con 3 cm → 1,221 × 0,841).
+    El borde de corte va por dentro del total. Tiras: `{"base": 5, "laterales": 4}` (cada lateral), contando
+    las 2 puntas de cada lado; **la punta no lleva marca** (el corte ya la marca) pero cuenta para repartir las del medio, que se miden sobre la guía.
+  **Terminación del borde** (`terminacion`, en el molde o dentro de `medida`; si no viene, `terminacion_por_defecto`):
+  `dobladillo` = el margen del molde (`margen_cm`), que se dobla por la guía, con las esquinas (y las puntas del triángulo)
+  recortadas para que al doblar no sobre nada; la esquina no lleva marca de tira y las distancias se miden sobre la guía ·
+  `overlock` = la costura en el borde: la forma tal cual con `overlock_cm` parejo (el triángulo con las puntas enteras y
+  una marca de tira en cada punta) · `sin` = sin margen: la pieza es el diseño y las tiras van sólo en la ficha.
+  Con dobladillo, la plantilla (`POST /plantillas`: Illustrator, CorelDRAW y la guía .ai) trae además la **costura**: una
+  línea punteada adentro de la guía del diseño, a la misma distancia (el margen).
+  Alarma: `terminacion-invalida`. **Tiras sin marcar:** `"tiras": {"lleva": true, "marcar": false, …}` = no se imprimen
+  en la tizada pero la ficha técnica las trae (cuántas y cada cuánto); `calcular` lo dice en `tiras.marcadas_en_tizada`.
+  **Color de las marcas:** siempre **negras con contorno blanco** (se ven sobre cualquier diseño): no se elige.
+  **El arte, de ESTA medida:** se arma sobre la plantilla pedida con la misma `medida`; un arte de otra medida (su
+  mesa no es la pieza) frena con `arte-otra-medida`.
+  - En las dos el margen es **parejo**: el mayor de `margen_cm`. Una forma o punta que no existe: `forma-invalida`.
+    Se aceptan con o sin tilde («círculo», «triángulo», «izquierda», «derecha»).
 - `version` cambia cuando cambia el catálogo: conviene guardar y refrescar sólo entonces.
 
 ### `GET /variables/{clave}/foto` — la silueta de sus piezas
@@ -165,18 +195,20 @@ contesta lo mismo que su pantalla. No guarda nada.
 ```json
 POST { "variable": "v_cb7fd79", "ancho_m": 3, "alto_m": 1.5, "tela": "44",
        "tiras": { "arriba": 5, "abajo": 5, "izq": 1 } }
-200 { "medida_diseno_cm": { "ancho": 300, "alto": 150 }, "total_cm": { "ancho": 306, "alto": 156 },
+       (círculo: "forma": "circulo", "diametro_m": 1.2 · triángulo: "forma": "triangulo", "orientacion": "abajo")
+200 { "forma": "rectangulo", "orientacion": null,
+      "medida_diseno_cm": { "ancho": 300, "alto": 150 }, "total_cm": { "ancho": 306, "alto": 156 },
       "margen_cm": { … }, "borde_corte_mm": 2, "gira": true, "largo_maximo_cm": 2999.5,
       "telas": [ { "id": "44", "nombre": "Bandera (1,60)", "ancho_mesa_cm": 157, "entra_hasta_cm": 156.7,
                    "entra": true, "motivo": null } ],
       "entra_en_alguna": true,
-      "tiras": { "lleva": true, "lados": { "arriba": 5, "abajo": 5, "izq": 1, "der": 0 }, "total_marcas": 11,
-                 "grosor_mm": 1, "color_cmyk": [0, 0, 0, 1],
-                 "por_lado": [ { "lado": "arriba", "marcas": 5, "largo_del_lado_cm": 306, "cada_cm": 76.5,
+      "tiras": { "lleva": true, "lados": { "arriba": 5, "abajo": 5, "izq": 1, "der": 0 }, "total_marcas": 7,
+                 "grosor_mm": 1, "color": "negra con contorno blanco",
+                 "por_lado": [ { "lado": "arriba", "marcas": 5, "largo_del_lado_cm": 300, "cada_cm": 75,
                                  "en_el_medio": false, "largo_marca_cm": 3 }, … ] },
       "ficha": [ { "etiqueta": "Total del arte (con el margen)", "valor": "306 × 156 cm" }, … ],
       "alarmas": [] }
-422 { "alarmas": [ { "codigo": "medida-invalida", … } ] }      (o tiras-invalidas / tiras-sin-margen)
+422 { "alarmas": [ { "codigo": "medida-invalida", … } ] }      (o forma-invalida / terminacion-invalida / tiras-invalidas / tiras-sin-margen)
 404 { "error": "esa variable o molde no existe" } · 422 { "error": "ese molde no es a medida" }
 ```
 

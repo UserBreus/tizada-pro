@@ -5,12 +5,16 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
          esArrastre } from './localizar';
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
-import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas, prepararMoldeAMedida } from './motor/prepararMolde.js';
-import { leerMetros, problemaMedida, metrosTexto, margenPorBorde, margenSobreContorno, RESERVA_DEFECTO_MM, cabeEnTela, talleDeMedida, medidaPieza, segmentosTiras } from './motor/molde/aMedida.js';   // MOLDE A MEDIDA (MAPA 623)
+import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas, prepararMoldeAMedida, precalentarMoldeAMedida } from './motor/prepararMolde.js';
+import { leerMetros, problemaMedida, metrosTexto, margenPorBorde, margenSobreContorno, RESERVA_DEFECTO_MM, cabeEnTela, talleDeMedida, medidaPieza, segmentosTiras, versionGeo, geoVieja, arteDeOtraMedida,
+         TERMINACIONES, NOMBRE_TERMINACION, normTerminacion, margenDeTerminacion, OVERLOCK_DEFECTO_CM } from './motor/molde/aMedida.js';   // MOLDE A MEDIDA (MAPA 623)
+import { FORMAS, NOMBRE_FORMA, normForma, normOrientacion, margenUniforme, guiaForma, contornoForma, pathForma, cajaForma, pathCostura, trianguloCorrido } from './motor/molde/formas.js';   // círculo y triángulo (MAPA 645)
 import { guardarCache, leerCache, claveDe, soltarMoldesEnPc, soltarPaginasEnPc } from './motor/cache.js';   // el molde con diseño en la PC (MAPA 585)
 import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, calidadFoto } from './motor/vista/vista.js';
 import { previasCaminoB, previasCaminoA, cerrarMotores, validarMapeoEnNavegador, editablesEnNavegador } from './motor/arte/previa.js';
 import { fuentesEstadoLocal, fuenteCharsLocal } from './motor/arte/fuentesEstado.js';
+import { TIRA_CONTORNO_MM } from './motor/pieza/base.js';   // el contorno blanco de la marca de tira (MAPA 682)
+import { pcDisponible, permisoPc, listarPc, alCambiarPc, nombresPc, archivoPc, pedirAlPrimerClic } from './motor/texto/fuentesPc.js';   // las fuentes de esta PC (MAPA 670)
 import { analizarFuente, adjuntarAnalisis, aliasQuitados, revalidarArte } from './motor/arte/fuentesSubir.js';
 import { mesaSuelta } from './motor/mesaSuelta.js';
 import { nombreMesaDef } from './motor/pdf/mesaPorArchivo.js';   // el nombre de cada mesa (pantalla y otro sistema, MAPA 620)
@@ -1831,6 +1835,7 @@ function CrearPlantillaModal({ open, onClose, disenos, capas, term, ocupadoRef, 
   const recoRef = useRef(null);
   const ultimoRango = useRef(null);
   const cacheDatos = useRef(new Map());                   // query → promesa de `pdf_guia?datos=1`
+  const detsPedidas = useRef(new Set());                  // moldes cuya detección ya se pidió en esta apertura
   const todas = disenos.flatMap(dis => dis.variables);
   // al ABRIR: TODAS las variables de todos los diseños elegidas (no depende del diseño que se esté
   // viendo) y todo en limpio; se destildan las que no hagan falta
@@ -1839,6 +1844,10 @@ function CrearPlantillaModal({ open, onClose, disenos, capas, term, ocupadoRef, 
     setElegidas(new Set(todas.map(it => it.key)));
     setConfig('default'); setTallesSel(null); setRango([]); setGuiaRango(null); setRangos([]); setEscala(100);
     cacheDatos.current = new Map(); recoRef.current = null; setReco(null); setArchivosN(null);
+    // 🔴 la DETECCIÓN de cada molde también se vuelve a pedir (MAPA 658): un molde a medida cambia de talle
+    // («3,00x1,50» → «3,00x1,45») al cambiar la medida, y con la detección vieja la plantilla salía con la
+    // medida anterior (guías distintas a las del sistema)
+    setDets({}); detsPedidas.current = new Set();
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const sel = todas.filter(it => elegidas.has(it.key));
   // los diseños con algo elegido, cada uno con SUS variables elegidas: uno = un archivo
@@ -1847,7 +1856,8 @@ function CrearPlantillaModal({ open, onClose, disenos, capas, term, ocupadoRef, 
   useEffect(() => {
     if (!open) return;
     for (const pid of new Set(sel.map(it => it.pid))) {
-      if (dets[pid]) continue;
+      if (detsPedidas.current.has(pid)) continue;     // (no `dets[pid]`: en este render todavía es la de antes)
+      detsPedidas.current.add(pid);
       setDets(d => ({ ...d, [pid]: { cargando: true } }));
       fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(pid)}`)
         .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok || d.error) throw new Error(d.error || 'no se pudo leer el molde'); return d; })
@@ -4697,7 +4707,10 @@ function MapeadorArteVisual({ margenAMedida = null, telaAMedida = null, tirasAMe
               const k = p.w_cm ? p.pw / (p.w_cm * 10) : 1;
               const rr = (Number(telaAMedida.reservaCm) || 0) * 10 * k;
               return telaAlrededor({ x0: p.px - rr, y0: p.py - rr, w: p.pw + 2 * rr, h: p.ph + 2 * rr, k, telaCm: telaAMedida.anchoCm,
-                mgCm: telaAMedida.mgCm, girada: telaAMedida.girada, entra: telaAMedida.entra, totalCm: telaAMedida.totalCm, disenoCm: telaAMedida.disenoCm });
+                mgCm: telaAMedida.mgCm, girada: telaAMedida.girada, entra: telaAMedida.entra, totalCm: telaAMedida.totalCm, disenoCm: telaAMedida.disenoCm,
+                forma: telaAMedida.forma, orientacion: telaAMedida.orientacion, tri: telaAMedida.tri || null,
+                corte: telaAMedida.corte ? { izq: telaAMedida.corte.izq * 10 * k, der: telaAMedida.corte.der * 10 * k,
+                                             arriba: telaAMedida.corte.arriba * 10 * k, abajo: telaAMedida.corte.abajo * 10 * k } : null });
             })() : null;
             const all = [...ocupados, ...labels.map(l => l.r), ...(_tm ? [_tm.rect] : [])];
             const PAD = 6;
@@ -4855,20 +4868,16 @@ function MapeadorArteVisual({ margenAMedida = null, telaAMedida = null, tirasAMe
                           del borde de corte. Es sólo una guía de pantalla: el motor no la dibuja y el
                           diseño llega igual hasta el borde (pedido del usuario 2026-10-06). */}
                       {/* MARCAS DE TIRAS (MAPA 639): el render del motor (`pv`) ya las trae; sin él, las mismas acá */}
-                      {tirasAMedida && !pv && !telaModo && (() => {
+                      {tirasAMedida && (!pv || tirasAMedida.marcar === false) && !telaModo && (() => {
                         const k = p.w_cm ? p.pw / (p.w_cm * 10) : 1;
                         const rv = (Number(tirasAMedida.reservaCm) || 0) * 10 * k;
                         return <MarcasTirasSVG tiras={tirasAMedida} x0={ox - rv} y0={oy - rv} w={p.pw + 2 * rv} h={p.ph + 2 * rv} k={k} />;
                       })()}
                       {margenAMedida && !telaModo && (() => {
                         const kx = p.w_cm ? p.pw / (p.w_cm * 10) : 1, ky = p.h_cm ? p.ph / (p.h_cm * 10) : 1;
-                        const m = margenAMedida;
-                        const x = ox + m.izq * 10 * kx, y = oy + m.arriba * 10 * ky;
-                        const w = p.pw - (m.izq + m.der) * 10 * kx, h = p.ph - (m.arriba + m.abajo) * 10 * ky;
-                        if (!(w > 0 && h > 0)) return null;
+                        // con la FORMA de la pieza (MAPA 645): en un círculo o un triángulo, la guía redonda o en punta
                         return (<g pointerEvents="none" data-tour="arte-dobladillo">
-                          <rect x={x} y={y} width={w} height={h} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={3} vectorEffect="non-scaling-stroke" />
-                          <rect x={x} y={y} width={w} height={h} fill="none" stroke="#ffffff" strokeWidth={1.5} strokeDasharray="9 6" vectorEffect="non-scaling-stroke" />
+                          <GuiaMargenSVG m={margenAMedida} x0={ox} y0={oy} w={p.pw} h={p.ph} kx={kx} ky={ky} />
                         </g>);
                       })()}
                       {/* ETIQUETA (talle · nombre · nº) en la posición configurada — indica dónde y qué dice
@@ -5281,10 +5290,11 @@ async function esperarMoldeLeido(resp, onProgreso) {
   // guarda el servidor en ~1 s, y esperar 1,2 s fijos antes de la primera pregunta era la mitad de
   // la espera (PLAN_NAVEGADOR, «que tarde pocos segundos»). Uno que prepara el servidor tarda
   // minutos: ahí el intervalo llega a 1,2 s como antes.
-  let espera = 250;
+  // ⚡ un molde a medida lo guarda el servidor en ~0,3 s: la primera pregunta a los 120 ms (MAPA 664)
+  let espera = 120;
   for (;;) {
     await new Promise(r => setTimeout(r, espera));
-    espera = Math.min(1200, Math.round(espera * 1.5));
+    espera = Math.min(1200, Math.round(espera * 1.6));
     let d;
     try {
       const r = await fetch(rutaApi(`/api/trabajo/${resp.job}`));
@@ -5305,10 +5315,12 @@ async function esperarMoldeLeido(resp, onProgreso) {
 // (`motor/molde/aMedida.js`) y entra por el alta de siempre del camino A: el servidor sólo lo guarda
 // y crea la variable (`_a_medida_variable`). Lo usan Configuración (la plantilla y su medida de
 // muestra) y el pedido (la copia a la medida que se escribe en el paso Arte).
-async function subirMoldeAMedida(pid, { anchoM, altoM, pieza, reservaMm, margen }, avisar = () => {}) {
+async function subirMoldeAMedida(pid, { anchoM, altoM, pieza, reservaMm, margen, forma = 'rectangulo', orientacion = 'abajo', terminacion = 'dobladillo' }, avisar = () => {}) {
   // el borde de corte va ADENTRO de la medida (ver `RESERVA_DEFECTO_MM`): el rectángulo, esa reserva más chico
   // la medida es la del DISEÑO: la pieza se arma con el margen alrededor (`medidaPieza`)
-  const prep = await prepararMoldeAMedida({ anchoM, altoM, pieza, reservaMm: reservaMm ?? RESERVA_DEFECTO_MM, margen: margen || null, onA: (a) => avisar(a.texto) });
+  // la FORMA (MAPA 645): círculo o triángulo; el triángulo no se achica (su borde va por dentro)
+  const prep = await prepararMoldeAMedida({ anchoM, altoM, pieza, reservaMm: reservaMm ?? RESERVA_DEFECTO_MM, margen: margen || null,
+    forma: normForma(forma), orientacion: normOrientacion(orientacion), terminacion: normTerminacion(terminacion), onA: (a) => avisar(a.texto) });
   if (!prep || !prep.zipA) throw new Error('Esta computadora no pudo armar el molde.');
   const fd = new FormData();
   fd.append('pid', pid);
@@ -5322,6 +5334,53 @@ async function subirMoldeAMedida(pid, { anchoM, altoM, pieza, reservaMm, margen 
   if (!r.ok) throw new Error(j.error || 'No se pudo guardar el molde');
   return esperarMoldeLeido(j, avisar);
 }
+/** Cuánto se achica el contorno de un molde a medida por el borde de corte, en mm, PARA UNA FORMA (MAPA
+ *  645): el triángulo nada (su contorno es el total y el borde va por dentro); el resto, la reserva del
+ *  borde (`reserva_borde_mm`, que no depende de la forma: así se ve bien al cambiar de forma antes de que
+ *  el servidor la guarde). Gemelo: `servidor._reserva_borde_mm`. */
+const reservaAM = (am, forma) => {
+  if (normForma(forma ?? (am && am.forma)) === 'triangulo') return 0;
+  const v = am ? (am.reserva_borde_mm ?? am.reserva_mm) : null;
+  return Number(v ?? RESERVA_DEFECTO_MM) || 0;
+};
+/** La GUÍA DEL MARGEN sobre el visor (y hacia abajo): `m` = `margenSobreContorno` (cm, con la forma), la
+ *  caja del CONTORNO `x0,y0,w,h` y las unidades por mm `kx/ky`. La misma línea punteada blanca con halo
+ *  que siempre; en un círculo o un triángulo, con su forma. Gemelo de `segsDobladillo` (plantillas). */
+function GuiaMargenSVG({ m, x0, y0, w, h, kx, ky, grueso = 3, fino = 1.5 }) {
+  if (!m) return null;
+  let d = '';
+  if (m.forma && m.forma !== 'rectangulo') {
+    const u = margenUniforme(m);
+    if (!(u > 0)) return null;
+    d = pathForma(guiaForma(m.forma, m.orientacion, x0, y0, x0 + w, y0 + h, u * 10 * kx, true,
+      m.diseno ? { w: m.diseno.w, h: m.diseno.h, t: u, r: m.recorte !== false } : null));     // triángulo recortado (MAPA 649) u overlock (652)
+  } else {
+    if (!(m.arriba > 0 || m.abajo > 0 || m.izq > 0 || m.der > 0)) return null;
+    const x = x0 + m.izq * 10 * kx, y = y0 + m.arriba * 10 * ky;
+    const ww = w - (m.izq + m.der) * 10 * kx, hh = h - (m.arriba + m.abajo) * 10 * ky;
+    if (ww > 0 && hh > 0) d = `M${x} ${y}H${x + ww}V${y + hh}H${x}Z`;
+  }
+  if (!d) return null;
+  // LA COSTURA (MAPA 654, sólo dobladillo): punteada en naranja, adentro de la guía (igual que en Illustrator)
+  const dc = m.costura ? pathCostura(m, x0, y0, w, h, 10 * kx) : '';
+  return (<>
+    <path d={d} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={grueso} vectorEffect="non-scaling-stroke" />
+    <path d={d} fill="none" stroke="#ffffff" strokeWidth={fino} strokeDasharray="9 6" vectorEffect="non-scaling-stroke" />
+    {dc && <path d={dc} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={grueso} vectorEffect="non-scaling-stroke" />}
+    {dc && <path d={dc} fill="none" stroke="#fb923c" strokeWidth={fino} strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />}
+  </>);
+}
+/** El ícono de cada forma (para el selector del panel de la medida). */
+const IconoForma = ({ forma, punta = 'abajo', tam = 16, relleno = false }) => {
+  // el rectángulo, apaisado (como una bandera); círculo y triángulo, en la caja entera
+  const g = forma === 'rectangulo' ? contornoForma(forma, punta, 1.5, 4, 14.5, 12, true) : contornoForma(forma, punta, 2, 2, 14, 14, true);
+  return (
+    <svg width={tam} height={tam} viewBox="0 0 16 16" style={{ flexShrink: 0, overflow: 'visible' }}>
+      <path d={pathForma(g)} fill={relleno ? 'currentColor' : 'none'} fillOpacity={relleno ? 0.22 : 0} stroke="currentColor"
+        strokeWidth={1.4} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+};
 // El margen en la pantalla son textos (lo que se escribe); al servidor van números por borde.
 const margenAForm = (m) => {
   const x = m || {};
@@ -5375,7 +5434,8 @@ function CamposMargen({ valor, onChange }) {
  *  (`k`) y la tela; devuelve `{rect, fondo, encima}`: `rect` = lo que tiene que entrar en el encuadre,
  *  `fondo` va DEBAJO de la pieza (la franja de la tela) y `encima` ARRIBA (bordes de la tela, contorno
  *  del total y el rótulo con las tres medidas). `girada`: el ancho de la tela corre en VERTICAL. */
-function telaAlrededor({ x0, y0, w, h, k, telaCm, mgCm = 0, girada, entra = true, totalCm, disenoCm }) {
+function telaAlrededor({ x0, y0, w, h, k, telaCm, mgCm = 0, girada, entra = true, totalCm, disenoCm, forma = 'rectangulo', orientacion = 'abajo', tri = null, corte = null }) {
+  const _f = normForma(forma);
   const T = Number(telaCm) * 10 * k, mg = (Number(mgCm) || 0) * 10 * k;
   const t1 = (x) => String(Math.round(x * 10) / 10).replace('.', ',');
   const largo = girada ? w : h;
@@ -5403,13 +5463,14 @@ function telaAlrededor({ x0, y0, w, h, k, telaCm, mgCm = 0, girada, entra = true
   const encima = (
     <g pointerEvents="none" data-tour="arte-medida-visor">
       {linea(a)}{linea(b)}
-      <rect x={x0} y={y0} width={w} height={h} fill="none" stroke={entra ? '#22d3ee' : '#f87171'} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      {/* el TOTAL con la forma de la pieza (MAPA 645): círculo o triángulo, no la caja */}
+      <path d={pathForma(contornoForma(_f, orientacion, x0, y0, x0 + w, y0 + h, true, tri, corte))} fill="none" stroke={entra ? '#22d3ee' : '#f87171'} strokeWidth={2} vectorEffect="non-scaling-stroke" />
       <text x={rotT.x} y={rotT.y} fill={col} fontSize={fs} textAnchor="middle" fontFamily="sans-serif"
         transform={rotT.rot ? `rotate(${rotT.rot} ${rotT.x} ${rotT.y})` : undefined}>tela {t1(Number(telaCm))} cm</text>
       <text x={capX} y={capY} fontSize={fs} textAnchor="middle" fontFamily="sans-serif" fontWeight="700">
-        <tspan fill={entra ? '#22d3ee' : '#f87171'}>total del arte {t1(totalCm.anchoCm)} × {t1(totalCm.altoCm)} cm</tspan>
+        <tspan fill={entra ? '#22d3ee' : '#f87171'}>total del arte {_f === 'circulo' ? `Ø ${t1(totalCm.anchoCm)}` : `${t1(totalCm.anchoCm)} × ${t1(totalCm.altoCm)}`} cm</tspan>
         <tspan fill="rgba(255,255,255,0.4)">{'   ·   '}</tspan>
-        <tspan fill="#fff">guía del diseño {t1(disenoCm.w)} × {t1(disenoCm.h)} cm</tspan>
+        <tspan fill="#fff">guía del diseño {_f === 'circulo' ? `Ø ${t1(disenoCm.w)}` : `${t1(disenoCm.w)} × ${t1(disenoCm.h)}`} cm</tspan>
       </text>
     </g>
   );
@@ -5420,9 +5481,10 @@ function telaAlrededor({ x0, y0, w, h, k, telaCm, mgCm = 0, girada, entra = true
  *  paso Arte (no aparte) y dibuja lo mismo que ése con el molde armado (`telaAlrededor`): la tela, el TOTAL
  *  del arte (medida + margen, `medidaPieza`) como lo pone el armado (girado si así entra) y adentro la
  *  GUÍA DEL DISEÑO punteada (la medida escrita). Si no entra, en rojo pasándose de la tela. En cm reales. */
-function VisorMedida({ anchoM, altoM, margen, tela, r, gira, margenNestingMm = 0, tiras = null }) {
+function VisorMedida({ anchoM, altoM, margen, tela, r, gira, margenNestingMm = 0, tiras = null, forma = 'rectangulo', orientacion = 'abajo', terminacion = 'dobladillo' }) {
   const m = margenPorBorde(margen);
-  const total = medidaPieza(anchoM, altoM, margen);
+  const f = normForma(forma);
+  const total = medidaPieza(anchoM, altoM, margen, f, orientacion, terminacion);
   const { anchoCm: w, altoCm: h } = total;
   // así la pone el armado: girada si entra girada; si no entra, del lado que se midió (con giro, el corto)
   const girada = r ? (r.cabe ? !!r.girada : (gira && h < w)) : (gira && h < w);
@@ -5430,20 +5492,41 @@ function VisorMedida({ anchoM, altoM, margen, tela, r, gira, margenNestingMm = 0
   // el dibujo va con la bandera DERECHA (como el arte): con giro, la tela corre en horizontal
   const k = 0.1;                       // 1 mm = 0,1 unidades (el dibujo en cm)
   const T = tela ? Number(tela.ancho_cm) || 0 : 0;
+  // el triángulo en INGLETE (MAPA 649): contorno y guía salen del diseño
+  const tri = f === 'triangulo' ? { w: anchoM * 100, h: altoM * 100, t: margenUniforme(m), r: normTerminacion(terminacion) !== 'overlock' } : null;
+  // el rectángulo con dobladillo: las esquinas recortadas (MAPA 653)
+  const corte = f === 'rectangulo' && normTerminacion(terminacion) === 'dobladillo' ? m : null;
   const ta = T ? telaAlrededor({ x0: 0, y0: 0, w, h, k, telaCm: T, mgCm: (Number(margenNestingMm) || 0) / 10, girada,
-                                 entra, totalCm: total, disenoCm: { w: anchoM * 100, h: altoM * 100 } }) : null;
+                                 entra, totalCm: total, disenoCm: { w: anchoM * 100, h: altoM * 100 }, forma: f, orientacion, tri, corte }) : null;
+  // CÍRCULO / TRIÁNGULO (MAPA 645): el total con su forma y la guía = la forma corrida el margen parejo
+  const dTotal = pathForma(contornoForma(f, orientacion, 0, 0, w, h, true, tri, corte));
+  const dGuia = f === 'rectangulo' ? `M${m.izq} ${m.arriba}h${anchoM * 100}v${altoM * 100}h${-anchoM * 100}Z`
+    : pathForma(guiaForma(f, orientacion, 0, 0, w, h, margenUniforme(m), true, tri));
+  // LA COSTURA (MAPA 654, sólo dobladillo): la guía corrida el margen hacia adentro
+  const dCostura = normTerminacion(terminacion) !== 'dobladillo' ? '' : (() => {
+    if (f === 'rectangulo') {
+      const cw = anchoM * 100 - m.izq - m.der, ch = altoM * 100 - m.arriba - m.abajo;
+      return (cw > 0 && ch > 0) ? `M${2 * m.izq} ${2 * m.arriba}h${cw}v${ch}h${-cw}Z` : '';
+    }
+    const mu = margenUniforme(m), g = guiaForma(f, orientacion, 0, 0, w, h, mu, true, tri);
+    if (!g || !(mu > 0)) return '';
+    if (g.tipo === 'circulo') return g.r - mu > 0 ? pathForma({ ...g, r: g.r - mu }) : '';
+    return pathForma({ tipo: 'poligono', pts: trianguloCorrido(g.pts, -mu) });
+  })();
   const caja = ta ? ta.rect : { x: 0, y: 0, w, h };
   const pad = Math.max(caja.w, caja.h) * 0.04;
   const vb = `${caja.x - pad} ${caja.y - pad} ${caja.w + 2 * pad} ${caja.h + 2 * pad}`;
   return (
     <svg viewBox={vb} preserveAspectRatio="xMidYMid meet" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}>
       {ta && ta.fondo}
-      <rect x={0} y={0} width={w} height={h} fill={entra ? 'rgba(34,211,238,0.10)' : 'rgba(248,113,113,0.14)'} />
+      <path d={dTotal} fill={entra ? 'rgba(34,211,238,0.10)' : 'rgba(248,113,113,0.14)'} />
       {/* la guía del diseño: la misma línea punteada blanca que el visor dibuja sobre el arte */}
-      <rect x={m.izq} y={m.arriba} width={anchoM * 100} height={altoM * 100} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={3} vectorEffect="non-scaling-stroke" />
-      <rect x={m.izq} y={m.arriba} width={anchoM * 100} height={altoM * 100} fill="none" stroke="#ffffff" strokeWidth={1.5} strokeDasharray="9 6" vectorEffect="non-scaling-stroke" />
+      {dGuia && <path d={dGuia} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={3} vectorEffect="non-scaling-stroke" />}
+      {dGuia && <path d={dGuia} fill="none" stroke="#ffffff" strokeWidth={1.5} strokeDasharray="9 6" vectorEffect="non-scaling-stroke" />}
+      {dCostura && <path d={dCostura} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={3} vectorEffect="non-scaling-stroke" />}
+      {dCostura && <path d={dCostura} fill="none" stroke="#fb923c" strokeWidth={1.5} strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />}
       <MarcasTirasSVG tiras={tiras} x0={0} y0={0} w={w} h={h} k={0.1} />
-      {ta ? ta.encima : <rect x={0} y={0} width={w} height={h} fill="none" stroke="#22d3ee" strokeWidth={2} vectorEffect="non-scaling-stroke" />}
+      {ta ? ta.encima : <path d={dTotal} fill="none" stroke="#22d3ee" strokeWidth={2} vectorEffect="non-scaling-stroke" />}
     </svg>
   );
 }
@@ -5451,24 +5534,32 @@ function VisorMedida({ anchoM, altoM, margen, tela, r, gira, margenNestingMm = 0
 /** El estado de la medida que se está escribiendo (MAPA 634): lo usan el panel (`TarjetaMedida`) y el
  *  visor del paso Arte, así los dos dicen lo mismo. `am` = lo que publica el servidor del molde a medida;
  *  `telas` = las del molde; `telaId` = la tela elegida; `esCopia` = el molde del pedido ya armado. */
-function estadoMedida({ am, anchoTxt, altoTxt, telas, telaId, esCopia }) {
-  const a = leerMetros(anchoTxt), h = leerMetros(altoTxt);
+function estadoMedida({ am, anchoTxt, altoTxt, telas, telaId, esCopia, forma = 'rectangulo', orientacion = 'abajo', terminacion }) {
+  // LA TERMINACIÓN de este pedido (MAPA 652) y el margen que rige con ella
+  const te = normTerminacion(terminacion ?? (am && am.terminacion));
+  const mg = margenDeTerminacion(am, te);
+  // la FORMA de este pedido (MAPA 645): el círculo tiene UNA medida (el diámetro, en «ancho»)
+  const f = normForma(forma), o = normOrientacion(orientacion);
+  const a = leerMetros(anchoTxt), h = f === 'circulo' ? a : leerMetros(altoTxt);
   const prob = problemaMedida(a, h);
   const n = (am && am.nesting) || {};
   const gira = n.rotacion === '90' || n.rotacion === 'libre';
-  const cabe = (t) => cabeEnTela({ anchoM: a, altoM: h, margen: am.margen, bordeMm: am.borde_mm, anchoCm: t.ancho_cm,
-    largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion, resolucionMm: n.resolucion_mm });
+  const cabe = (t) => cabeEnTela({ anchoM: a, altoM: h, margen: mg, bordeMm: am.borde_mm, anchoCm: t.ancho_cm,
+    largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion, resolucionMm: n.resolucion_mm, forma: f, orientacion: o, terminacion: te });
   const conTela = (telas || []).map(t => ({ t, r: prob ? null : cabe(t) }));
   const tela = (telas || []).find(t => String(t.id) === String(telaId)) || null;
   // la medida ya armada (copia del pedido): «Aplicar» sólo si cambió
-  const igualArmada = !!esCopia && !prob && Math.abs(a - Number(am.ancho_m)) < 1e-9 && Math.abs(h - Number(am.alto_m)) < 1e-9;
+  const igualArmada = !!esCopia && !prob && Math.abs(a - Number(am.ancho_m)) < 1e-9 && Math.abs(h - Number(am.alto_m)) < 1e-9
+    && normForma(am.forma) === f && (f !== 'triangulo' || normOrientacion(am.orientacion) === o)
+    && (Number(am.geo_v) || 1) === versionGeo(f)         // armada con la geometría de HOY (MAPA 651)
+    && normTerminacion(am.terminacion) === te;
   const rTela = tela && !prob ? cabe(tela) : null;
   const entra = conTela.filter(x => x.r && x.r.cabe), hayTelas = (telas || []).length > 0;
   // SE ARMA SOLA (pedido del usuario 2026-10-07: «no lo separes en 2»): con una medida válida que entra
   // en la tela elegida (o, sin tela todavía, en alguna del molde) y distinta de la ya armada
   const listaParaArmar = !prob && !igualArmada && (tela ? !!(rTela && rTela.cabe) : (!hayTelas || entra.length > 0));
-  return { a, h, prob, n, gira, conTela, tela, rTela, igualArmada, entra, hayTelas, listaParaArmar,
-           pz: prob ? null : medidaPieza(a, h, am && am.margen) };
+  return { a, h, f, o, te, mg, prob, n, gira, conTela, tela, rTela, igualArmada, entra, hayTelas, listaParaArmar,
+           pz: prob ? null : medidaPieza(a, h, mg, f, o, te) };
 }
 
 /** MOLDE A MEDIDA (MAPA 623, 634) en el paso Arte: el PANEL de la izquierda del visor (en lugar de los
@@ -5476,23 +5567,35 @@ function estadoMedida({ am, anchoTxt, altoTxt, telas, telaId, esCopia }) {
  *  total del arte, guía del diseño). Dice en vivo en qué telas entra (regla del usuario: si no entra, esa
  *  tela no se puede elegir) y, si no, cuánto se pasa y lo máximo. El dibujo NO va acá: es el visor del
  *  paso (pedido del usuario 2026-10-07: «usá la misma visual, no lo separes en 2 espacios»). */
-function TarjetaMedida({ am, est, anchoTxt, altoTxt, onAncho, onAlto, onArmar, ocupado, esCopia, tiras = null, onTiras = null }) {
-  const { a, h, prob, tela, rTela, entra, hayTelas, pz, listaParaArmar } = est;
+function TarjetaMedida({ am, est, anchoTxt, altoTxt, onAncho, onAlto, onArmar, ocupado, esCopia, tiras = null, onTiras = null, onForma = null, onTerminacion = null, arteOtra = null }) {
+  const { a, h, f, o, te, mg, prob, tela, rTela, entra, hayTelas, pz, listaParaArmar } = est;
+  const esCirculo = f === 'circulo';
   const sinTelas = !prob && hayTelas && entra.length === 0;
   const puedeArmar = listaParaArmar && !ocupado;
-  const m = margenPorBorde(am && am.margen);
+  const m = margenPorBorde(mg);
   const igual = m.arriba === m.abajo && m.abajo === m.izq && m.izq === m.der;
   const t1 = (x) => String(Math.round(x * 10) / 10).replace('.', ',');
   const inp = (v, set) => (
     <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
       <input type="text" inputMode="decimal" value={v} onChange={(e) => set(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && puedeArmar) onArmar(a, h); }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && puedeArmar) onArmar(a, h, f, o, te); }}
         style={{ width: '100%', minWidth: 0, padding: '7px 6px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)',
           color: '#fff', fontSize: 15, fontWeight: 800, fontFamily: 'monospace', textAlign: 'center' }} />
       <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>m</span>
     </span>
   );
-  const sw = (c, dash) => <span style={{ width: 14, height: 9, flexShrink: 0, borderRadius: 2, border: `2px ${dash ? 'dashed' : 'solid'} ${c}` }} />;
+  // LA MUESTRA DE CADA LÍNEA tal cual la dibuja el visor (MAPA 655, pedido del usuario: «mostrame real cómo se ve
+  // cada guía, en color y punteado»): mismo color, grosor, halo y rayas que `telaAlrededor`/`GuiaMargenSVG`
+  const sw = (tipo, color) => (
+    <svg width={26} height={10} viewBox="0 0 26 10" style={{ flexShrink: 0 }}>
+      {(tipo === 'guia' || tipo === 'costura') && <line x1={1} y1={5} x2={25} y2={5} stroke="rgba(0,0,0,0.55)" strokeWidth={3} />}
+      {tipo === 'tira' && <line x1={1} y1={5} x2={25} y2={5} stroke="#ffffff" strokeWidth={4} />}
+      <line x1={1} y1={5} x2={25} y2={5} stroke={color} strokeWidth={tipo === 'total' ? 2 : 1.5}
+        strokeDasharray={tipo === 'guia' ? '9 6' : tipo === 'costura' ? '5 4' : undefined} />
+    </svg>
+  );
+  // la costura (sólo dobladillo, MAPA 654): a la misma distancia de la guía que el margen
+  const cosTxt = f !== 'rectangulo' ? `${t1(margenUniforme(m))} cm` : igual ? `${t1(m.arriba)} cm` : `${t1(m.arriba)} · ${t1(m.abajo)} · ${t1(m.izq)} · ${t1(m.der)} cm`;
   return (
     <div data-tour="arte-medida" style={{ width: 270, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', padding: 12,
       display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 0 }}>
@@ -5500,34 +5603,92 @@ function TarjetaMedida({ am, est, anchoTxt, altoTxt, onAncho, onAlto, onArmar, o
         <span style={{ flex: 1, fontSize: 12.5, fontWeight: 800 }}>Medida del diseño · {am && am.pieza}</span>
         <Ayuda ancho={320}>Este molde es <b>a medida</b>: escribí el <b>ancho</b> y el <b>alto del diseño</b> en metros (lo que queda a la
           vista, adentro de la línea punteada) y elegí la <b>tela</b>. La pieza se arma con el <b>margen</b> (dobladillo) alrededor: con 1 cm
-          por lado, una de 3,00 × 1,50 sale de 3,02 × 1,52. El visor muestra en vivo la tela, el total del arte y la guía del diseño; si no
-          entra, dice cuánto se pasa y lo máximo que se puede pedir en esa tela.</Ayuda>
+          por lado, una de 3,00 × 1,50 sale de 3,02 × 1,52. La <b>forma</b> se elige acá: rectángulo, <b>círculo</b> (se escribe el
+          diámetro) o <b>triángulo</b> (el ancho y el alto de su caja, y hacia dónde va la punta); en esas dos el margen va parejo (el mayor).
+          La medida se aplica <b>sola</b> al dejar de escribir (o con Enter) y la tela se elige con «Asignar telas».
+          <b>Tiras:</b> cada número cuenta las 2 puntas (0 = ese lado sin tiras; en el círculo, parejas alrededor empezando arriba); el
+          la marca es <b>negra con contorno blanco</b> (se ve sobre cualquier diseño) y su grosor es el del molde (Ajustes › Marcas de
+          tiras). El visor muestra en vivo la tela, el total del arte y la guía del diseño; si no
+          entra, dice cuánto se pasa y lo máximo que se puede pedir en esa tela.
+          <b>Arte de otra medida:</b> el arte se arma sobre la plantilla, y la plantilla tiene la medida del momento en que se creó. Si
+          después se cambia la medida, sus guías ya no coinciden con la pieza y el diseño no la cubre: creá la plantilla de nuevo con
+          esta medida y armá el arte ahí.</Ayuda>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <span data-tour="arte-medida-ancho" style={{ display: 'flex', flex: 1, minWidth: 0 }} title="Ancho del diseño">{inp(anchoTxt, onAncho)}</span>
-        <span style={{ color: 'var(--text-muted)', fontSize: 16 }}>×</span>
-        <span data-tour="arte-medida-alto" style={{ display: 'flex', flex: 1, minWidth: 0 }} title="Alto del diseño">{inp(altoTxt, onAlto)}</span>
-      </div>
-      {prob && <div style={{ fontSize: 12, color: '#fbbf24' }}>{prob}</div>}
-      {pz && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11.5, color: 'var(--text-secondary)' }}>
-          {tela && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{sw('rgba(255,255,255,0.5)')}Tela: <b style={{ color: '#fff' }}>{t1(Number(tela.ancho_cm))} cm</b> de ancho</span>}
-          <span data-tour="arte-medida-terminada" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{sw(rTela && !rTela.cabe ? '#f87171' : '#22d3ee')}Total del arte: <b style={{ color: '#fff' }}>{t1(pz.anchoCm)} × {t1(pz.altoCm)} cm</b></span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{sw('#f0abfc', true)}Guía del diseño: <b style={{ color: '#fff' }}>{t1(a * 100)} × {t1(h * 100)} cm</b></span>
-          <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Margen: {igual ? `${t1(m.arriba)} cm por lado` : `arriba ${t1(m.arriba)} · abajo ${t1(m.abajo)} · izq. ${t1(m.izq)} · der. ${t1(m.der)} cm`}</span>
+      {/* LA FORMA de este pedido (MAPA 645, pedido del usuario 2026-10-08): rectángulo, círculo o triángulo */}
+      {onForma && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* tres tarjetas, sólo la figura (sin letras; el nombre va en el `title`) */}
+          <div data-tour="arte-medida-forma" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            {FORMAS.map(x => (
+              <button key={x} type="button" className={'forma-tile' + (f === x ? ' on' : '')} onClick={() => onForma(x, o)}
+                title={NOMBRE_FORMA[x]} aria-label={NOMBRE_FORMA[x]} aria-pressed={f === x}>
+                <IconoForma forma={x} punta={x === 'triangulo' ? o : 'abajo'} tam={34} relleno={f === x} /></button>
+            ))}
+          </div>
+          {/* la PUNTA del triángulo: cuatro triangulitos en fila, sin contenedor (MAPA 647) */}
+          {f === 'triangulo' && (
+            <div data-tour="arte-medida-punta" style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+              {['izq', 'arriba', 'abajo', 'der'].map((k) => (
+                <button key={k} type="button" className={'punta-btn' + (o === k ? ' on' : '')} onClick={() => onForma('triangulo', k)}
+                  aria-pressed={o === k} title={{ abajo: 'Punta abajo', arriba: 'Punta arriba', izq: 'Punta a la izquierda', der: 'Punta a la derecha' }[k]}>
+                  <IconoForma forma="triangulo" punta={k} tam={22} relleno={o === k} /></button>
+              ))}
+            </div>
+          )}
         </div>
       )}
+      {/* LA TERMINACIÓN del borde (MAPA 652): dobladillo · overlock · sin margen */}
+      {onTerminacion && (
+        <div data-tour="arte-medida-terminacion" style={{ display: 'flex', padding: 3, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)' }}>
+          {TERMINACIONES.map(x => (
+            <button key={x} type="button" onClick={() => onTerminacion(x)} aria-pressed={te === x}
+              style={{ flex: 1, height: 28, borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 700,
+                background: te === x ? 'var(--accent)' : 'transparent', color: te === x ? '#001016' : 'var(--text-secondary)' }}>{NOMBRE_TERMINACION[x]}</button>
+          ))}
+        </div>
+      )}
+      {esCirculo ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 700 }}>Ø</span>
+          <span data-tour="arte-medida-ancho" style={{ display: 'flex', flex: 1, minWidth: 0 }} title="Diámetro del diseño">{inp(anchoTxt, onAncho)}</span>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span data-tour="arte-medida-ancho" style={{ display: 'flex', flex: 1, minWidth: 0 }} title="Ancho del diseño">{inp(anchoTxt, onAncho)}</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 16 }}>×</span>
+          <span data-tour="arte-medida-alto" style={{ display: 'flex', flex: 1, minWidth: 0 }} title="Alto del diseño">{inp(altoTxt, onAlto)}</span>
+        </div>
+      )}
+      {prob && <div style={{ fontSize: 12, color: '#fbbf24' }}>{prob}</div>}
+      {/* EL ARTE ES DE OTRA MEDIDA (MAPA 658): sólo el dato; el porqué va en el «?» */}
+      {arteOtra && (
+        <div data-tour="arte-medida-otra" style={{ fontSize: 12, fontWeight: 700, color: '#f87171', lineHeight: 1.45 }}>
+          ⚠ Arte de {t1(arteOtra.arte.w)} × {t1(arteOtra.arte.h)} cm · pieza {t1(arteOtra.molde.w)} × {t1(arteOtra.molde.h)} cm</div>
+      )}
+      {pz && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11.5, color: 'var(--text-secondary)' }}>
+          {tela && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{sw('tela', 'rgba(255,255,255,0.6)')}Tela: <b style={{ color: '#fff' }}>{t1(Number(tela.ancho_cm))} cm</b> de ancho</span>}
+          <span data-tour="arte-medida-terminada" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{sw('total', rTela && !rTela.cabe ? '#f87171' : '#22d3ee')}Total del arte: <b style={{ color: '#fff' }}>{esCirculo ? `Ø ${t1(pz.anchoCm)}` : `${t1(pz.anchoCm)} × ${t1(pz.altoCm)}`} cm</b></span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{sw('guia', '#ffffff')}Guía del diseño: <b style={{ color: '#fff' }}>{esCirculo ? `Ø ${t1(a * 100)}` : `${t1(a * 100)} × ${t1(h * 100)}`} cm</b></span>
+          {te === 'dobladillo' && (m.arriba > 0 || m.abajo > 0 || m.izq > 0 || m.der > 0) && (
+            <span data-tour="arte-medida-costura" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{sw('costura', '#fb923c')}Costura: <b style={{ color: '#fff' }}>{cosTxt}</b> adentro de la guía</span>
+          )}
+          {tiras && tiras.activo && !(te === 'sin') && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{tiras.marcar === false ? sw('guia', '#ffffff') : sw('tira', '#000000')}Tiras{tiras.marcar === false ? ': sólo guía' : ''}</span>
+          )}
+          <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{te === 'sin' ? 'Sin margen' : `${NOMBRE_TERMINACION[te]}: `}{te === 'sin' ? '' : f !== 'rectangulo'
+            ? `${t1(margenUniforme(m))} cm`
+            : igual ? `${t1(m.arriba)} cm` : `${t1(m.arriba)} · ${t1(m.abajo)} · ${t1(m.izq)} · ${t1(m.der)} cm`}</span>
+        </div>
+      )}
+      {/* SIN TEXTO EXPLICATIVO (regla del usuario 2026-10-09, MAPA 648): sólo el estado; lo que explica va en el «?» */}
       {!prob && tela && rTela && (rTela.cabe
-        ? <div style={{ fontSize: 12, fontWeight: 700, color: '#34d399' }}>✓ Entra en {tela.nombre}{rTela.girada ? ' (girada)' : ''}</div>
+        ? <div data-tour="arte-medida-tela" style={{ fontSize: 12, fontWeight: 700, color: '#34d399' }}>✓ {tela.nombre}{rTela.girada ? ' (girada)' : ''}</div>
         : <div style={{ fontSize: 11.5, color: '#fbbf24', lineHeight: 1.45 }}>{rTela.motivo}</div>)}
-      {!prob && !tela && hayTelas && (sinTelas
-        ? <div style={{ fontSize: 12, fontWeight: 700, color: '#f87171' }}>Con esta medida no entra en ninguna tela de este molde.</div>
-        : <div data-tour="arte-medida-tela" style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>Entra en {entra.map(x => x.t.nombre).join(', ')}.
-            {esCopia ? ' Elegí la tela con «Asignar telas», como siempre.' : ''}</div>)}
+      {!prob && !tela && sinTelas && <div style={{ fontSize: 12, fontWeight: 700, color: '#f87171' }}>No entra en ninguna tela</div>}
       {/* TIRAS (MAPA 640): si este pedido lleva tiras y cuántas marcas por lado; el visor las dibuja al instante */}
       {esCopia && tiras && onTiras && (() => {
-        const sinMg = !(margenPorBorde(am && am.margen).arriba > 0 || margenPorBorde(am && am.margen).abajo > 0
-          || margenPorBorde(am && am.margen).izq > 0 || margenPorBorde(am && am.margen).der > 0);
+        const sinMg = !(m.arriba > 0 || m.abajo > 0 || m.izq > 0 || m.der > 0);
         const nn = (v) => Math.max(0, Math.min(50, Math.trunc(Number(String(v).replace(',', '.')) || 0)));
         const inpT = { width: '100%', minWidth: 0, padding: '6px 6px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)',
           color: '#fff', fontSize: 14, fontWeight: 800, fontFamily: 'monospace', textAlign: 'center' };
@@ -5541,17 +5702,22 @@ function TarjetaMedida({ am, est, anchoTxt, altoTxt, onAncho, onAlto, onArmar, o
               </span>
             </button>
             {tiras.activo && (
-              <LadosTiras lados={tiras.lados} ancla="arte-tiras-lados" onChange={(lados) => onTiras({ lados })} />
+              <LadosTiras lados={tiras.lados} forma={f} ancla="arte-tiras-lados" onChange={(lados) => onTiras({ lados })} />
             )}
-            {tiras.activo && <div style={{ fontSize: 10.5, color: sinMg ? '#fbbf24' : 'var(--text-muted)', lineHeight: 1.4 }}>
-              {sinMg ? 'Este molde no tiene margen: sin guía no hay hasta dónde llevar la marca.'
-                : 'Color y grosor: los del molde (Ajustes › Marcas de tiras).'}</div>}
+            {/* MARCAR EN LA TIZADA (MAPA 652): apagado, no se imprimen pero salen en la ficha; sin margen, sólo ficha */}
+            {tiras.activo && (sinMg
+              ? <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sólo en la ficha</div>
+              : <button type="button" data-tour="arte-tiras-marcar" onClick={() => onTiras({ marcar: tiras.marcar === false })}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 9px', borderRadius: 9, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)', cursor: 'pointer', color: '#fff' }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 700 }}>Marcar en la tizada</span>
+                  <span style={{ width: 34, height: 20, borderRadius: 999, background: tiras.marcar !== false ? 'var(--accent)' : 'rgba(255,255,255,0.16)', position: 'relative', transition: 'all .2s', flexShrink: 0 }}>
+                    <span style={{ position: 'absolute', top: 2, left: tiras.marcar !== false ? 16 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'all .2s' }} />
+                  </span>
+                </button>)}
           </div>
         );
       })()}
       {/* sin botón: la medida se arma SOLA al dejar de escribir (o con Enter) — ver el efecto `amAutoRef` */}
-      {listaParaArmar && <div data-tour="arte-medida-armar" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-        {ocupado ? 'Aplicando la medida… (el visor ya la muestra)' : 'Se aplica sola al dejar de escribir (o con Enter).'}</div>}
     </div>
   );
 }
@@ -5583,7 +5749,7 @@ function VariablesAMedida({ prod, pidCfg, onCambio, avisar, avisarError, procesa
         body: JSON.stringify({ id: pidCfg, ancho_m: aM, alto_m: alM, ...(cambioPieza ? { pieza: piezaOk } : {}) }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'No se pudo guardar');
-      await subirMoldeAMedida(pidCfg, { anchoM: aM, altoM: alM, pieza: piezaOk, reservaMm: am.reserva_mm, margen: am.margen }, (t) => procesando(t));
+      await subirMoldeAMedida(pidCfg, { anchoM: aM, altoM: alM, pieza: piezaOk, reservaMm: am.reserva_mm, margen: am.margen, forma: am.forma, orientacion: am.orientacion }, (t) => procesando(t));
       avisar('Molde rehecho ✓');
       await onCambio(true);
     } catch (e) { avisarError(e.message); } finally { procesando(null); setOcupado(false); }
@@ -5635,9 +5801,15 @@ function MargenAMedida({ prod, pidCfg, onMargenEnVivo, onCambio, avisar, avisarE
   const am = (prod && prod.a_medida) || {};
   const [margen, setMargen] = React.useState(() => margenAForm(am.margen));
   const [ocupado, setOcupado] = React.useState(false);
+  // LA TERMINACIÓN (MAPA 652): la medida del overlock y la terminación con la que arranca cada pedido
+  const txtOv = (v) => String(v ?? OVERLOCK_DEFECTO_CM).replace('.', ',');
+  const [overlock, setOverlock] = React.useState(() => txtOv(am.overlock_cm));
+  const [termDef, setTermDef] = React.useState(() => normTerminacion(am.terminacion));
   React.useEffect(() => {
     const f = margenAForm(am.margen);
     setMargen(f);
+    setOverlock(txtOv(am.overlock_cm));
+    setTermDef(normTerminacion(am.terminacion));
     onMargenEnVivo?.(margenDeForm(f));
   }, [pidCfg]);   // eslint-disable-line react-hooks/exhaustive-deps
   const handleMargenChange = (nuevo) => {
@@ -5648,7 +5820,8 @@ function MargenAMedida({ prod, pidCfg, onMargenEnVivo, onCambio, avisar, avisarE
     setOcupado(true);
     try {
       const r = await fetch('/api/productos/a_medida', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: pidCfg, margen: margenDeForm(margen) }) });
+        body: JSON.stringify({ id: pidCfg, margen: margenDeForm(margen), terminacion: termDef,
+          overlock_cm: Math.max(0, Number(String(overlock).replace(',', '.')) || 0) }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'No se pudo guardar el margen');
       // la medida es la del DISEÑO y la pieza lleva el margen alrededor (2026-10-07): cambiar el margen
@@ -5656,17 +5829,35 @@ function MargenAMedida({ prod, pidCfg, onMargenEnVivo, onCambio, avisar, avisarE
       procesando('Rehaciendo el molde con el margen nuevo…');
       await pintarYa();
       await subirMoldeAMedida(pidCfg, { anchoM: am.ancho_m || 1, altoM: am.alto_m || 1, pieza: am.pieza,
-        reservaMm: am.reserva_mm, margen: margenDeForm(margen) }, (t) => procesando(t));
+        reservaMm: am.reserva_mm, margen: margenDeForm(margen), forma: am.forma, orientacion: am.orientacion }, (t) => procesando(t));
       avisar('Margen guardado ✓');
       await onCambio(true);
     } catch (e) { avisarError(e.message); } finally { procesando(null); setOcupado(false); }
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-        Margen del borde hacia adentro (el dobladillo). El <b>texto y el número</b> nunca pasan de esta línea.
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>Dobladillo (cm)</span>
+        <Ayuda ancho={320}>El <b>dobladillo</b> es el margen que se dobla por la guía (en el triángulo, con las puntas recortadas para que
+          al doblar no sobre nada). El <b>overlock</b> es la costura en el borde: la forma tal cual con esa medida alrededor. <b>Sin margen</b>:
+          la pieza es el diseño. En cada pedido se elige una; acá va con cuál arranca. El texto y el número nunca pasan de la guía.</Ayuda>
       </div>
       <CamposMargen valor={margen} onChange={handleMargenChange} />
+      <label data-tour="a-medida-overlock" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
+        <span style={{ flex: 1 }}>Overlock (cm)</span>
+        <input type="text" inputMode="decimal" value={overlock} onChange={(e) => setOverlock(e.target.value)}
+          style={{ width: 80, padding: '6px 8px', borderRadius: 7, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13, textAlign: 'center' }} />
+      </label>
+      <div data-tour="a-medida-terminacion" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>Por defecto en los pedidos</span>
+        <div style={{ display: 'flex', padding: 3, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)' }}>
+          {TERMINACIONES.map(x => (
+            <button key={x} type="button" onClick={() => setTermDef(x)} aria-pressed={termDef === x}
+              style={{ flex: 1, height: 28, borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 700,
+                background: termDef === x ? 'var(--accent)' : 'transparent', color: termDef === x ? '#001016' : 'var(--text-secondary)' }}>{NOMBRE_TERMINACION[x]}</button>
+          ))}
+        </div>
+      </div>
       <button className="btn primary" data-tour="a-medida-margen-guardar" disabled={ocupado} onClick={guardarMargen}
         style={{ fontSize: 12, alignSelf: 'flex-start' }}>Guardar margen</button>
     </div>
@@ -5682,36 +5873,62 @@ const cmykCss = (c) => {
  *  (`verticales`/`horizontales` sin las puntas) se traduce como `servidor._tiras_limpias`: N + 2. */
 const ladosTiras = (t) => {
   const x = t || {};
+  // rectángulo: los 4 lados · triángulo: base y laterales · círculo: alrededor (MAPA 645)
+  const otros = (l) => ({ base: Number(l.base) || 0, laterales: Number(l.laterales) || 0, alrededor: Number(l.alrededor) || 0 });
   if (x.lados && typeof x.lados === 'object') {
-    return { arriba: Number(x.lados.arriba) || 0, abajo: Number(x.lados.abajo) || 0, izq: Number(x.lados.izq) || 0, der: Number(x.lados.der) || 0 };
+    return { arriba: Number(x.lados.arriba) || 0, abajo: Number(x.lados.abajo) || 0, izq: Number(x.lados.izq) || 0, der: Number(x.lados.der) || 0, ...otros(x.lados) };
   }
   const v = ('verticales' in x) ? (Number(x.verticales) || 0) + 2 : 0, h = ('horizontales' in x) ? (Number(x.horizontales) || 0) + 2 : 0;
-  return { arriba: h, abajo: h, izq: v, der: v };
+  return { arriba: h, abajo: h, izq: v, der: v, ...otros({}) };
 };
-const TIRAS_DEFECTO = { activo: false, lados: { arriba: 0, abajo: 0, izq: 0, der: 0 }, color: [0, 0, 0, 1], grosor_mm: 1 };
+const TIRAS_DEFECTO = { activo: false, lados: { arriba: 0, abajo: 0, izq: 0, der: 0, base: 0, laterales: 0, alrededor: 0 }, color: [0, 0, 0, 1], grosor_mm: 1, marcar: true };
 /** Las MARCAS DE TIRAS de un molde a medida (lo guardado `a_medida.marcas_tiras` + su margen) como las
  *  lee el motor (`servidor._tiras_de`): `{lados, color, grosor_mm, margen}` o null. */
-const tirasDeMolde = (am, marcas) => {
+const tirasDeMolde = (am, marcas, forma, orientacion, anchoM, altoM, terminacion) => {
   const t = marcas || (am && am.marcas_tiras);
+  // sin marcar en la tizada también vuelven (MAPA 653, pedido del usuario: «en el visor las tengo que ver,
+  // como guía»): `marcar` falso → el visor las dibuja como GUÍA (punteadas), no como marca impresa
   if (!am || !t || !t.activo) return null;
   const m = margenPorBorde(am.margen);
   const lados = ladosTiras(t);
-  if (!['arriba', 'abajo', 'izq', 'der'].some(k => lados[k] > 0 && m[k] > 0)) return null;
-  return { lados, color: t.color, grosor_mm: t.grosor_mm, margen: m };
+  // la FORMA (MAPA 645): la del pedido que se está mirando (puede no estar guardada todavía) o la del molde
+  const f = normForma(forma ?? am.forma), o = normOrientacion(orientacion ?? am.orientacion);
+  if (f === 'rectangulo') {
+    if (!['arriba', 'abajo', 'izq', 'der'].some(k => lados[k] > 0 && m[k] > 0)) return null;
+  } else if (!(margenUniforme(m) > 0) || !(f === 'circulo' ? lados.alrededor > 0 : (lados.base > 0 || lados.laterales > 0))) return null;
+  return { lados, color: t.color, grosor_mm: t.grosor_mm, margen: m, forma: f, orientacion: o,
+           // la medida del DISEÑO (el triángulo recortado arma sus marcas desde ahí, MAPA 649)
+           diseno_cm: [Number(anchoM ?? am.ancho_m ?? 1) * 100, Number(altoM ?? am.alto_m ?? 1) * 100],
+           recorte: normTerminacion(terminacion ?? am.terminacion) !== 'overlock', marcar: t.marcar !== false };
 };
 /** LOS CUATRO LADOS de las tiras (MAPA 641, pedido del usuario 2026-10-08: «tiras en un solo lado, en
  *  varios, en ninguno o en todos; si pongo 5 en un lado son 5 contando las 2 de la punta»). Cada casilla
  *  va en su lado del rectángulo; 0 = ese lado sin tiras. «Todos» pone el mismo número en los cuatro. */
-function LadosTiras({ lados, onChange, ancla = 'tiras-lados' }) {
+function LadosTiras({ lados, onChange, ancla = 'tiras-lados', forma = 'rectangulo' }) {
   const L = ladosTiras({ lados });
-  const nn = (v) => Math.max(0, Math.min(50, Math.trunc(Number(String(v).replace(',', '.')) || 0)));
-  const caja = (k, titulo) => (
-    <input type="number" min="0" max="50" value={L[k]} title={titulo} aria-label={titulo}
-      onChange={(e) => onChange({ ...L, [k]: nn(e.target.value) })}
+  const nn = (v, max = 50) => Math.max(0, Math.min(max, Math.trunc(Number(String(v).replace(',', '.')) || 0)));
+  const caja = (k, titulo, max = 50) => (
+    <input type="number" min="0" max={max} value={L[k]} title={titulo} aria-label={titulo}
+      onChange={(e) => onChange({ ...L, [k]: nn(e.target.value, max) })}
       style={{ width: 52, padding: '5px 4px', borderRadius: 7, background: 'rgba(0,0,0,0.3)', border: `1px solid ${L[k] > 0 ? 'var(--accent)' : 'var(--border-light)'}`,
         color: '#fff', fontSize: 14, fontWeight: 800, fontFamily: 'monospace', textAlign: 'center' }} />
   );
   const iguales = L.arriba === L.abajo && L.abajo === L.izq && L.izq === L.der;
+  // CÍRCULO y TRIÁNGULO (MAPA 645, pedido del usuario: «círculo: N alrededor · triángulo: por lado»)
+  const fila = (k, rotulo, max) => (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--text-secondary)' }}>
+      <span style={{ flex: 1 }}>{rotulo}</span>{caja(k, rotulo, max)}
+    </label>
+  );
+  const formas = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {forma === 'todas' && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginTop: 4 }}>Si el pedido es triángulo o círculo</span>}
+      {(forma === 'triangulo' || forma === 'todas') && fila('base', forma === 'todas' ? 'Triángulo · base' : 'Base')}
+      {(forma === 'triangulo' || forma === 'todas') && fila('laterales', forma === 'todas' ? 'Triángulo · cada lateral' : 'Cada lateral')}
+      {(forma === 'circulo' || forma === 'todas') && fila('alrededor', forma === 'todas' ? 'Círculo · alrededor' : 'Alrededor', 200)}
+    </div>
+  );
+  if (forma === 'triangulo' || forma === 'circulo') return <div data-tour={ancla} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{formas}</div>;
   return (
     <div data-tour={ancla} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gridTemplateRows: 'auto auto auto', alignItems: 'center', justifyItems: 'center', gap: 4 }}>
@@ -5724,10 +5941,10 @@ function LadosTiras({ lados, onChange, ancla = 'tiras-lados' }) {
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-secondary)' }}>
         Todos
         <input type="number" min="0" max="50" value={iguales ? L.arriba : ''} placeholder="—"
-          onChange={(e) => { const v = nn(e.target.value); onChange({ arriba: v, abajo: v, izq: v, der: v }); }}
+          onChange={(e) => { const v = nn(e.target.value); onChange({ ...L, arriba: v, abajo: v, izq: v, der: v }); }}
           style={{ width: 52, padding: '4px 4px', borderRadius: 7, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13, fontFamily: 'monospace', textAlign: 'center' }} />
-        <span style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.35 }}>Cuenta las 2 de las puntas · 0 = sin tiras en ese lado</span>
       </label>
+      {forma === 'todas' && formas}
     </div>
   );
 }
@@ -5738,16 +5955,29 @@ function MarcasTirasSVG({ tiras, x0, y0, w, h, k }) {
   if (!tiras) return null;
   const mg = tiras.margen || {};
   const m = { arriba: (mg.arriba || 0) * 10 * k, abajo: (mg.abajo || 0) * 10 * k, izq: (mg.izq || 0) * 10 * k, der: (mg.der || 0) * 10 * k };
-  const segs = segmentosTiras(w, h, m, tiras.lados);
+  const dis = Array.isArray(tiras.diseno_cm) ? [tiras.diseno_cm[0] * 10 * k, tiras.diseno_cm[1] * 10 * k] : null;
+  const segs = segmentosTiras(w, h, m, tiras.lados, tiras.forma, tiras.orientacion, dis, tiras.recorte !== false);   // con la forma (MAPA 645, 649, 652)
   if (!segs.length) return null;
   const sw = Math.max(0.1, Number(tiras.grosor_mm) || 1) * k;
-  const col = cmykCss(tiras.color);
+  const swb = sw + 2 * TIRA_CONTORNO_MM * k;      // el contorno blanco, como lo imprime el motor (MAPA 682)
+  const col = '#000000';
   const L = segs.map(([x1, y1, x2, y2]) => [x0 + x1, y0 + h - y1, x0 + x2, y0 + h - y2]);
   // en pantalla: un halo claro debajo (el visor es oscuro y la marca suele ser negra) y un mínimo de
   // 1,4 px para que se vea a cualquier zoom; encima, la marca con su grosor REAL y su color
+  // SIN MARCAR EN LA TIZADA (MAPA 653): se ven como GUÍA (la misma línea punteada blanca de la guía del
+  // diseño), no como la marca impresa — se ve dónde van, pero no sale
+  if (tiras.marcar === false) {
+    return (
+      <g pointerEvents="none" data-tour="tiras-visor" strokeLinecap="butt">
+        {L.map(([a, b, c, d], i) => <line key={'h' + i} x1={a} y1={b} x2={c} y2={d} stroke="rgba(0,0,0,0.55)" strokeWidth={3} vectorEffect="non-scaling-stroke" />)}
+        {L.map(([a, b, c, d], i) => <line key={'g' + i} x1={a} y1={b} x2={c} y2={d} stroke="#ffffff" strokeWidth={1.5} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" />)}
+      </g>
+    );
+  }
   return (
     <g pointerEvents="none" data-tour="tiras-visor" strokeLinecap="butt">
-      {L.map(([a, b, c, d], i) => <line key={'h' + i} x1={a} y1={b} x2={c} y2={d} stroke="rgba(255,255,255,0.75)" strokeWidth={3.4} vectorEffect="non-scaling-stroke" />)}
+      {L.map(([a, b, c, d], i) => <line key={'h' + i} x1={a} y1={b} x2={c} y2={d} stroke="#ffffff" strokeWidth={3.4} vectorEffect="non-scaling-stroke" />)}
+      {L.map(([a, b, c, d], i) => <line key={'b' + i} x1={a} y1={b} x2={c} y2={d} stroke="#ffffff" strokeWidth={swb} />)}
       {L.map(([a, b, c, d], i) => <line key={'m' + i} x1={a} y1={b} x2={c} y2={d} stroke={col} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />)}
       {L.map(([a, b, c, d], i) => <line key={'r' + i} x1={a} y1={b} x2={c} y2={d} stroke={col} strokeWidth={sw} />)}
     </g>
@@ -5761,7 +5991,7 @@ function MarcasTirasSVG({ tiras, x0, y0, w, h, k }) {
  *  para que el visor de Ajustes lo muestre al instante. */
 function TirasAMedida({ prod, pidCfg, onVivo, onCambio, avisar, avisarError }) {
   const am = (prod && prod.a_medida) || {};
-  const inicial = () => { const t = { ...TIRAS_DEFECTO, ...(am.marcas_tiras || {}) }; return { activo: !!t.activo, lados: ladosTiras(t), color: t.color, grosor_mm: t.grosor_mm }; };
+  const inicial = () => { const t = { ...TIRAS_DEFECTO, ...(am.marcas_tiras || {}) }; return { activo: !!t.activo, lados: ladosTiras(t), color: t.color, grosor_mm: t.grosor_mm, marcar: t.marcar !== false }; };
   const [f, setF] = React.useState(inicial);
   const [ocupado, setOcupado] = React.useState(false);
   const [grosorTxt, setGrosorTxt] = React.useState(() => String(inicial().grosor_mm).replace('.', ','));
@@ -5793,12 +6023,12 @@ function TirasAMedida({ prod, pidCfg, onVivo, onCambio, avisar, avisarError }) {
   return (
     <div data-tour="tiras-panel" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ flex: 1, fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>Marcas para coser las tiras: van del <b>borde</b> hasta la <b>guía del diseño</b>.</span>
+        <span style={{ flex: 1 }} />
         <Ayuda ancho={320}>Elegí cuántas marcas van en <b>cada lado</b> (arriba, abajo, izquierda, derecha): en uno solo, en varios, en
           todos o en ninguno (0). El número <b>cuenta las dos puntas</b>: con 5 en un lado van una en cada esquina y 3 en el medio, a
           distancias iguales. La de la esquina va en diagonal, del vértice de la pieza al de la guía; con 1, una sola en el medio.
-          Salen <b>impresas</b> en la tizada, del <b>grosor</b> y el <b>color</b> que elijas acá (valen para todos los pedidos de este
-          molde); si lleva o no y cuántas por lado se puede cambiar en cada pedido.</Ayuda>
+          Salen <b>impresas</b> en la tizada: <b>negras con contorno blanco</b> (se ven sobre cualquier diseño), del <b>grosor</b> que
+          elijas acá (vale para todos los pedidos de este molde); si lleva o no y cuántas por lado se puede cambiar en cada pedido.</Ayuda>
       </div>
       {/* CÓMO SALEN (siempre a la vista): el grosor y el color son del molde y valen para todos sus pedidos */}
       <div style={sec}>Cómo salen impresas</div>
@@ -5818,20 +6048,6 @@ function TirasAMedida({ prod, pidCfg, onVivo, onCambio, avisar, avisarError }) {
           })}
         </div>
       </div>
-      <div>
-        <label style={lbl} data-tour="tiras-color">Color (CMYK %)</label>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-          {['C', 'M', 'Y', 'K'].map((l, i) => (
-            <div key={l} style={{ textAlign: 'center' }}>
-              <input type="number" min="0" max="100" value={Math.round(((f.color || [])[i] || 0) * 100)}
-                onChange={(e) => { const c = [...(f.color || [0, 0, 0, 1])]; c[i] = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) / 100; poner({ color: c }); }}
-                style={{ ...inp, width: 56 }} />
-              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4, fontWeight: 700 }}>{l}</div>
-            </div>
-          ))}
-          <div title="Aproximación en pantalla" style={{ width: 42, height: 42, borderRadius: 9, border: '1px solid var(--border-light)', marginLeft: 6, background: cmykCss(f.color), flexShrink: 0 }} />
-        </div>
-      </div>
       {/* POR DEFECTO EN LOS PEDIDOS: si lleva y en qué lados (cada pedido lo puede cambiar) */}
       <div style={{ ...sec, borderTop: '1px solid var(--border-light)', paddingTop: 12 }}>Por defecto en los pedidos</div>
       <button type="button" data-tour="tiras-activo" onClick={() => poner({ activo: !f.activo })}
@@ -5844,7 +6060,16 @@ function TirasAMedida({ prod, pidCfg, onVivo, onCambio, avisar, avisarError }) {
       {f.activo && sinMargen && (
         <div style={{ fontSize: 12, color: '#fbbf24', lineHeight: 1.45 }}>Este molde no tiene margen: sin guía no hay hasta dónde llevar la marca. Poné el margen en «Margen».</div>
       )}
-      {f.activo && <LadosTiras lados={f.lados} ancla="tiras-lados" onChange={(lados) => poner({ lados })} />}
+      {f.activo && <LadosTiras lados={f.lados} forma="todas" ancla="tiras-lados" onChange={(lados) => poner({ lados })} />}
+      {f.activo && (
+        <button type="button" data-tour="tiras-marcar" onClick={() => poner({ marcar: f.marcar === false })}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)', cursor: 'pointer', color: '#fff' }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Marcar en la tizada</span>
+          <span style={{ width: 40, height: 23, borderRadius: 999, background: f.marcar !== false ? 'var(--accent)' : 'rgba(255,255,255,0.16)', position: 'relative', transition: 'all .2s', flexShrink: 0 }}>
+            <span style={{ position: 'absolute', top: 2.5, left: f.marcar !== false ? 19 : 2.5, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'all .2s' }} />
+          </span>
+        </button>
+      )}
       <button className="btn primary" data-tour="tiras-guardar" disabled={ocupado} onClick={guardar} style={{ fontSize: 12, alignSelf: 'flex-start' }}>Guardar marcas</button>
     </div>
   );
@@ -7914,6 +8139,20 @@ export default function App() {
   // «Seguir de todos modos» (regla del usuario 2026-08-21). Sólo recuerda lo que va a pasar.
   const [fuenteAvanzar, setFuenteAvanzar] = useState(false);
   const [fuenteSubiendo, setFuenteSubiendo] = useState(false);
+  // LAS TIPOGRAFÍAS DE ESTA PC (MAPA 670): 'granted' | 'prompt' | 'denied' | 'no' (este navegador no puede)
+  const [pcPermiso, setPcPermiso] = useState('no');
+  const _pcRecargar = useRef(null);
+  const _pvCache = React.useRef({});        // clave(pid|diseño|variable|talle|mapeo|edits) → piezas
+  // 🔴 LA GENERACIÓN DEL CACHÉ (MAPA 674, «cargo el arte y no se cambia»): vaciar el caché no alcanzaba —
+  // un dibujo que ya estaba EN CAMINO (con el arte anterior, el borde anterior…) llegaba DESPUÉS del vaciado
+  // y se guardaba con la clave de ahora: el visor seguía mostrando lo viejo hasta recargar. Cada vaciado
+  // sube la generación (`_pvLimpiar`) y cada dibujo anota la suya al arrancar: si cambió, no se guarda ni
+  // se muestra.
+  const _pvGen = React.useRef(0);
+  const _pvLimpiar = () => { _pvCache.current = {}; _pvGen.current++; };
+  const [pcLista, setPcLista] = useState([]);     // las tipografías de esta PC (sólo nombres) para Configuración
+  const [pcVer, setPcVer] = useState(60);         // cuántas se dibujan (Windows trae cientos)
+  const [pcSubiendo, setPcSubiendo] = useState(''); // la que se está cargando al sistema
   const [fuenteArchivo, setFuenteArchivo] = useState(null);      // .ttf/.otf elegido, esperando «Cargar»/«Cargar y guardar»
   const [fuentePrueba, setFuentePrueba] = useState('');          // texto de prueba: se dibuja EN VIVO con cada fuente del catálogo
   const [fuenteBuscar, setFuenteBuscar] = useState('');          // filtro de la lista por nombre
@@ -7938,6 +8177,43 @@ export default function App() {
     _reintentosFuentes.current[k] = n;
     setTimeout(fn, 6000);
   };
+  // LAS TIPOGRAFÍAS DE ESTA PC (MAPA 670): qué permiso hay y, cuando llega la lista (al dar el permiso o al entrar
+  // con el permiso ya dado), se vuelve a mirar qué fuentes faltan y se redibujan las previas con la de la PC
+  useEffect(() => {
+    if (!pcDisponible()) return undefined;
+    permisoPc().then(setPcPermiso);
+    // sin tener que buscar el botón: el permiso se pide al primer clic de la página (una sola vez)
+    pedirAlPrimerClic();
+    const fuera = alCambiarPc(() => {
+      permisoPc().then(setPcPermiso);
+      nombresPc().then(setPcLista);
+      if (_pcRecargar.current) _pcRecargar.current();
+    });
+    // con el permiso ya dado de antes, la lista llega sola (sin preguntar nada)
+    nombresPc().then(setPcLista);
+    return fuera;
+  }, []);
+  const pedirFuentesPc = async () => { await listarPc({ pedir: true }); setPcPermiso(await permisoPc()); };
+  // EL BOTÓN «USAR LAS DE ESTA PC» con su estado: va en el modal de fuentes del Arte, en el cartel de
+  // «Tipografía no encontrada» y en Configuración → Fuentes (ahí es donde se las va a buscar).
+  const botonFuentesPc = () => pcPermiso === 'no' ? null : (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      {pcPermiso !== 'granted' ? (
+        <button type="button" className="btn ghost" data-tour="arte-fuente-pc" style={{ fontSize: 12.5 }}
+          disabled={pcPermiso === 'denied'} onClick={pedirFuentesPc}>
+          Usar las de esta PC
+        </button>
+      ) : (
+        <span data-tour="arte-fuente-pc" style={{ fontSize: 12, color: 'var(--success)', fontWeight: 700 }}>✓ Fuentes de esta PC</span>
+      )}
+      {pcPermiso === 'denied' && <span style={{ fontSize: 11.5, color: 'var(--warning, #f5a524)' }}>Permiso bloqueado en el navegador</span>}
+      <Ayuda ancho={300}>Chrome y Edge pueden usar las <b>tipografías instaladas en esta computadora</b>: no hace falta cargarlas.
+        La primera vez el navegador pide permiso (aparece al primer clic); después se reconocen solas. Las <b>cargadas</b> (al
+        sistema o al pedido) tienen prioridad. Las de la PC sirven sólo en esta computadora: para que otra PC (o un pedido que
+        llega por la API) pueda estampar con ellas, hay que cargarlas (Configuración → Fuentes → «Cargar al sistema»). Si el
+        permiso quedó bloqueado, se habilita desde el candado de la barra de direcciones («Fuentes»).</Ayuda>
+    </div>
+  );
   const cargarFuentesEstado = async (reemplOverride) => {
     const pid = pidCfg || productosCat.activo; if (!pid) return;
     // `prod_default` es el activo DE ARRANQUE (antes de que llegue la lista), no un molde: pedir sus
@@ -8314,7 +8590,7 @@ export default function App() {
         return m;
       });
       // el render cacheado del visor incluye qué objetos salen del diseño → hay que rehacerlo
-      _pvCache.current = {}; setPreviewPiezas({}); cargarPreviewPiezas();
+      _pvLimpiar(); setPreviewPiezas({}); cargarPreviewPiezas();
       const _n = MARCAS_PROC.find(x => x.k === marca)?.t || marca;
       // el aviso tiene que decir la verdad: si el objeto está en «sin marca», no sale ninguna cruz
       const _sinM = nueva && nombres.every(nm => sinMarcaDe(nm));
@@ -9213,7 +9489,7 @@ export default function App() {
         : 'Listo: este molde en este diseño usa esa tipografía ✓ (los demás moldes no cambian)');
       await cargarFuentesEstado(_nuevo);        // el cartel se va apenas queda resuelta
       cargarFuentesTodas(_nuevo);               // …y en los demás artes del pedido también
-      _pvCache.current = {}; setPreviewPiezas({}); cargarPreviewPiezas(null, _nuevo);
+      _pvLimpiar(); setPreviewPiezas({}); cargarPreviewPiezas(null, _nuevo);
     } catch (e) { showError('No se pudo: ' + (e.message || e)); }
     finally { setFuenteSubiendo(false); }
   };
@@ -12200,13 +12476,14 @@ export default function App() {
     // terminarse de fondo). Si el visor todavía no eligió ninguno, el primero de la lista.
     const _guia = String((etqData?.talle_ref != null && talles.includes(String(etqData.talle_ref)))
       ? etqData.talle_ref : talles[0]);
-    const _kEnCurso = `${pid}|${clave}|${dis}|${talles.join(',')}`;
+    const _gen = _pvGen.current;   // un arte nuevo (o cualquier vaciado) deja vieja a esta pasada
+    const _kEnCurso = `${pid}|${clave}|${dis}|${talles.join(',')}|${_gen}`;
     if (_asignEnCurso.current[_kEnCurso]) return _asignEnCurso.current[_kEnCurso];
     let _fin;
     _asignEnCurso.current[_kEnCurso] = new Promise(r => { _fin = r; });
     _prefetchTok.current++;   // esta pasada manda: abortar cualquier precarga de fondo previa
     // si en el medio se toca «Nuevo pedido», nada de esta pasada llega al pedido nuevo
-    const _epoca = _pedidoEpoca.current, _vigente = () => _epoca === _pedidoEpoca.current;
+    const _epoca = _pedidoEpoca.current, _vigente = () => _epoca === _pedidoEpoca.current && _gen === _pvGen.current;
     const _tIni = Date.now();   // para mostrar los segundos: así SIEMPRE hay algo moviéndose
     setAsignando({ hecho: 0, total: talles.length, talle: '', piezas: 0, fase: 'arrancando', seg: 0 });
     const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -12216,8 +12493,9 @@ export default function App() {
       // (`_esB` de otras partes de la pantalla NO existe acá: usarlo tiraba «_esB is not defined» al
       // cargar un diseño y los talles no se preparaban — bug del 2026-09-18, lo destapó el linter.)
       const _moldeConDiseno = ((productosCat.productos || []).find(x => x.id === pid) || {}).origen === 'con_diseno';
+      const _kGuia = _pvKeyCon(mapeo, _guia, fuentesReempl);   // la clave AL ARRANCAR, no al terminar
       const _local = !_moldeConDiseno && (await previasCaminoA({ pid, diseno: dis, variante: clave, talle: _guia, rutaApi, mapeo, reemplazos: _reemplDe(dis, pid) })
-        .then((d) => { if (d && d.piezas && _vigente()) _pvGuardar(_pvKeyCon(mapeo, _guia, fuentesReempl), d.piezas); return !!d; })
+        .then((d) => { if (d && d.piezas && _vigente()) _pvGuardar(_kGuia, d.piezas, _gen); return !!d; })
         .catch((e) => { console.warn('[arte] el navegador no pudo dibujar el talle', _guia, '→ lo dibuja el servidor:', e); return false; }));
       // GENERACIÓN EN PARALELO en el server (ProcessPool): las piezas del talle van a la vez.
       // PyMuPDF no es thread-safe → multiproceso. `talles` acota el trabajo al talle guía.
@@ -12256,7 +12534,7 @@ export default function App() {
         if (!_pvCache.current[k] && _local) {
           try {
             const d = await previasCaminoA({ pid, diseno: dis, variante: clave, talle: t, rutaApi, mapeo, reemplazos: _reemplDe(dis, pid) });
-            if (d && d.piezas && _vigente()) _pvGuardar(k, d.piezas);
+            if (d && d.piezas && _vigente()) _pvGuardar(k, d.piezas, _gen);
           } catch { /* ese talle se dibuja cuando se lo toque */ }
         } else if (!_pvCache.current[k]) {
           try {
@@ -12264,7 +12542,7 @@ export default function App() {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, sin_prewarm: true, fuentes_reemplazo: _reemplDe(dis, pid) })
             });
-            if (res.ok) { const d = await res.json(); if (d.piezas && _vigente()) _pvGuardar(k, d.piezas); }
+            if (res.ok) { const d = await res.json(); if (d.piezas && _vigente()) _pvGuardar(k, d.piezas, _gen); }
           } catch { /* sigue con el próximo talle */ }
         }
         if (!_talleDetCache.current[`${pid}|${t}`]) {
@@ -12297,15 +12575,15 @@ export default function App() {
   // PRECARGA TOTAL DE TALLES: los renders reales de TODOS los talles se guardan en MEMORIA
   // (además del caché en disco del server) y la geometría del molde por talle también →
   // cambiar de talle es un intercambio instantáneo, sin fetch y sin contornos vacíos.
-  const _pvCache = React.useRef({});        // clave(pid|diseño|variable|talle|mapeo|edits) → piezas
   const _talleDetCache = React.useRef({});  // `${pid}|${talle}` → /api/plantilla/deteccion de ese talle
   const _detArteCache = React.useRef({});   // `${pid}|${diseño}|${variable}` → /api/arte/deteccion (mapeador)
   const _prefetchTok = React.useRef(0);     // aborta una precarga vieja si cambió el contexto
   // ⚠️ La TIPOGRAFÍA elegida entra en la clave: sin ella, cambiarla devolvía el render cacheado
   // con la anterior y parecía que no pasaba nada (mismo mapeo, mismo talle → mismo hit).
-  const _pvKeyCon = (mapeo, talle, reempl) => `${productosCat.activo}|${JSON.stringify(((productosCat.productos || []).find(x => x.id === (pidCfg || productosCat.activo)) || {}).a_medida?.marcas_tiras || null)}|${disenoActivo}|${verVariante}|${talle}|${JSON.stringify(mapeo || {})}|${JSON.stringify(editorTfs || {})}|${JSON.stringify(_reemplDe(disenoActivo, pidCfg || productosCat.activo, reempl))}`;
+  const _pvKeyCon = (mapeo, talle, reempl) => `${productosCat.activo}|${JSON.stringify((a => (a ? [a.marcas_tiras || null, a.forma || null, a.orientacion || null] : null))(((productosCat.productos || []).find(x => x.id === (pidCfg || productosCat.activo)) || {}).a_medida))}|${disenoActivo}|${verVariante}|${talle}|${JSON.stringify(mapeo || {})}|${JSON.stringify(editorTfs || {})}|${JSON.stringify(_reemplDe(disenoActivo, pidCfg || productosCat.activo, reempl))}`;
   const _pvKeyDe = (talle) => _pvKeyCon(mapeoValores, talle);
-  const _pvGuardar = (k, piezas) => {
+  const _pvGuardar = (k, piezas, gen) => {
+    if (gen != null && gen !== _pvGen.current) return;   // dibujo de antes de un vaciado: viejo
     if (Object.keys(_pvCache.current).length > 300) _pvCache.current = {};   // tope de memoria
     _pvCache.current[k] = piezas;
   };
@@ -12329,6 +12607,7 @@ export default function App() {
       .sort((a, b) => a.d - b.d).map(x => x.t);
     if (!talles.length) return;
     const tok = ++_prefetchTok.current;
+    const gen = _pvGen.current;
     (async () => {
       for (const t of talles) {
         if (tok !== _prefetchTok.current) return;         // cambió variable/mapeo/talle → abortar
@@ -12354,7 +12633,7 @@ export default function App() {
             }
             if (tok !== _prefetchTok.current) return;   // llegó tarde (otro talle, o «Nuevo pedido»)
             if (!d || d.preparando) return;             // no se puede acá (o el molde se está preparando)
-            if (d.piezas) _pvGuardar(k, d.piezas);
+            if (d.piezas) _pvGuardar(k, d.piezas, gen);
           } catch { return; }                            // el motor de acá falló: no insistir con los demás
         }
         if (tok !== _prefetchTok.current) return;
@@ -12389,33 +12668,43 @@ export default function App() {
       return;
     }
     const req = ++_pvReq.current;
+    const gen = _pvGen.current;
+    const _vale = () => req === _pvReq.current && gen === _pvGen.current;
     // CAMINO B (PLAN_NAVEGADOR, etapa 3): las previas se arman ACÁ, con el mismo motor de la
     // tizada; el servidor sólo entrega el molde desplegado y las tipografías. Si no se puede
     // (molde sin diseño adentro, servidor con esto apagado, navegador sin hilos), sigue el servidor.
-    try {
-      const _prodB = (productosCat.productos || []).find(p => p.id === pid);
-      if (_prodB && _prodB.origen === 'con_diseno') {
-        const _d = await previasCaminoB({ pid, variante: clave, talle, rutaApi, reemplazos: _reemplDe(disenoActivo, pid, _reempl) });
-        if (req !== _pvReq.current) return;
-        if (_d) {
-          if (_d.preparando) { _reintentoFuentes('pv|' + k, () => cargarPreviewPiezas()); return; }
-          setPreviewPiezas(_d.piezas || {}); if (_d.piezas) _pvGuardar(k, _d.piezas);
-          return;
+    // 🔴 DOS INTENTOS ACÁ antes de caer al servidor (MAPA 674): al cargar un arte nuevo el hilo del molde se
+    // rearma (`motorDe`: cambió el sello del arte) y el dibujo que lo estaba usando sale «cancelado». Caer al
+    // servidor con eso daba 409 («las piezas las arma tu computadora») y el visor se quedaba con el arte de antes.
+    let _errLocal = null;   // por qué no se pudo dibujar ACÁ (es lo que se le dice a la persona, no lo del servidor)
+    for (let _intento = 0; _intento < 2; _intento++) {
+      try {
+        const _prodB = (productosCat.productos || []).find(p => p.id === pid);
+        if (_prodB && _prodB.origen === 'con_diseno') {
+          const _d = await previasCaminoB({ pid, variante: clave, talle, rutaApi, reemplazos: _reemplDe(disenoActivo, pid, _reempl) });
+          if (!_vale()) return;
+          if (_d) {
+            if (_d.preparando) { _reintentoFuentes('pv|' + k, () => cargarPreviewPiezas()); return; }
+            setPreviewPiezas(_d.piezas || {}); if (_d.piezas) _pvGuardar(k, _d.piezas, gen);
+            return;
+          }
+        } else if (_prodB) {
+          // CAMINO A (PLAN_NAVEGADOR 1b): el molde pelado + el arte separado, con el mismo motor
+          const _d = await previasCaminoA({ pid, diseno: disenoActivo, variante: clave, talle, rutaApi, mapeo,
+                                            editables: { [clave || '*']: editorTfs }, reemplazos: _reemplDe(disenoActivo, pid, _reempl) });
+          if (!_vale()) return;
+          if (_d) { setPreviewPiezas(_d.piezas || {}); if (_d.piezas) _pvGuardar(k, _d.piezas, gen); _prefetchTalles(mapeo, talle, _reempl); return; }
         }
-      } else if (_prodB) {
-        // CAMINO A (PLAN_NAVEGADOR 1b): el molde pelado + el arte separado, con el mismo motor
-        const _d = await previasCaminoA({ pid, diseno: disenoActivo, variante: clave, talle, rutaApi, mapeo,
-                                          editables: { [clave || '*']: editorTfs }, reemplazos: _reemplDe(disenoActivo, pid, _reempl) });
-        if (req !== _pvReq.current) return;
-        if (_d) { setPreviewPiezas(_d.piezas || {}); if (_d.piezas) _pvGuardar(k, _d.piezas); _prefetchTalles(mapeo, talle, _reempl); return; }
+        break;   // este molde no se dibuja acá (sin camino A/B): lo dibuja el servidor
+      } catch (e) {
+        // si el pedido cambió mientras tanto (Nuevo pedido cierra los hilos y esto sale «cancelado»),
+        // no se le pide nada al servidor: sería dibujar el arte del pedido que ya no existe
+        if (!_vale()) return;
+        _errLocal = e;
+        console.warn(_intento ? 'previa de piezas en esta computadora: cae al servidor' : 'previa de piezas en esta computadora: se reintenta', e);
       }
-    } catch (e) {
-      // si el pedido cambió mientras tanto (Nuevo pedido cierra los hilos y esto sale «cancelado»),
-      // no se le pide nada al servidor: sería dibujar el arte del pedido que ya no existe
-      if (req !== _pvReq.current) return;
-      console.warn('previa de piezas en esta computadora: cae al servidor', e);
     }
-    if (req !== _pvReq.current) return;
+    if (!_vale()) return;
     try {
       const res = await fetch('/api/arte/preview_piezas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -12426,12 +12715,20 @@ export default function App() {
         const d = await res.json();
         // molde con diseño que todavía se está preparando: no se cachea el vacío y se vuelve a pedir
         if (d.preparando) { _reintentoFuentes('pv|' + k, () => cargarPreviewPiezas()); return; }
-        if (req === _pvReq.current) { setPreviewPiezas(d.piezas || {}); if (d.piezas) _pvGuardar(k, d.piezas); _prefetchTalles(mapeo, talle, _reempl); }
+        if (_vale()) { setPreviewPiezas(d.piezas || {}); if (d.piezas) _pvGuardar(k, d.piezas, gen); _prefetchTalles(mapeo, talle, _reempl); }
       } else {
         // El server dice POR QUÉ no puede (falta arte/registro/producto): avisar UNA vez y
         // NO precargar los demás talles (era el loop de 409 en la consola, 2026-08-20).
         try {
           const d = await res.json();
+          // 🔴 «El servidor no calcula» (MAPA 675): su respuesta («las piezas del Arte las arma tu computadora:
+          // recargá la página») no le dice nada a la persona — el problema fue ACÁ. Se avisa el motivo de acá,
+          // con palabras de la pantalla, una vez.
+          if (d.solo_navegador) {
+            const _m = 'El visor del arte no pudo dibujar este talle' + (_errLocal && _errLocal.message ? ` (${_errLocal.message})` : '') + '. Tocá otro talle y volvé.';
+            if (_pvErrAviso.current !== _m) { _pvErrAviso.current = _m; showError(_m); }
+            return;
+          }
           // `falta: 'arte'` es el estado NORMAL de este paso (se viene a cargarlo): no se grita.
           // Los otros dos —sin molde, sin piezas registradas— sí son un problema y se avisan.
           if (d.error && d.falta !== 'arte' && _pvErrAviso.current !== d.error) {
@@ -12479,7 +12776,9 @@ export default function App() {
     if (pedidoPaso !== 'arte' || !verVariante) return;
     const id = setTimeout(() => cargarPreviewPiezas(), 700);
     return () => clearTimeout(id);
-  }, [mapeoValores, verVariante, disenoActivo, pedidoPaso, productosCat.activo, editorTfs]);
+    // `arteCargado`: cada carga de un arte lo renueva (aunque sea el mismo diseño otra vez) → el visor
+    // pide el dibujo del arte NUEVO aunque el mapeo haya quedado igual (MAPA 674)
+  }, [mapeoValores, verVariante, disenoActivo, pedidoPaso, productosCat.activo, editorTfs, arteCargado]);
   // Ver cómo queda el diseño en una VARIANTE (talle): re-detecta el molde a ese talle.
   // PRECARGA TOTAL: si geometría y render del talle destino YA están en memoria, el cambio es
   // un intercambio en el MISMO frame (sin fetch). Si no, el visor sigue mostrando el diseño
@@ -13020,7 +13319,7 @@ export default function App() {
       const bytes = await enHiloSuelto('guia_archivo', { capas_data: d.capas_data, formato: 'ai',
         opciones: { config: d.config, rango: d.rango || [], titulo: d.titulo || 'Molde', capas: capasArteNombres(), editables: null,
           // MOLDE A MEDIDA: la guía del margen (dobladillo) además del contorno
-          dobladillo: prodCfg?.a_medida ? margenSobreContorno(prodCfg.a_medida.margen, prodCfg.a_medida.reserva_mm) : null } }, [], 'guia');
+          dobladillo: prodCfg?.a_medida ? margenSobreContorno(prodCfg.a_medida.margen, reservaAM(prodCfg.a_medida), prodCfg.a_medida.forma, prodCfg.a_medida.orientacion, prodCfg.a_medida.ancho_m, prodCfg.a_medida.alto_m, prodCfg.a_medida.terminacion) : null } }, [], 'guia');
       const slug = String(d.titulo || 'guia').replace(/[^A-Za-z0-9._-]/g, '_').replace(/^_+|_+$/g, '') || 'guia';
       await descargarBlob(new Blob([bytes], { type: 'application/postscript' }), `guia_${slug}.ai`, { avisar: showError });
     } catch (e) { showError('No se pudo generar la guía .ai: ' + (e.message || e)); }
@@ -13056,6 +13355,9 @@ export default function App() {
   // Illustrator» (que así no los vuelve a pedir). La clave lleva los nombres de las piezas: si se
   // renombra algo, se piden de nuevo.
   const _guiaIllu = useRef(new Map());          // clave → promesa (las últimas 30)
+  // 🔴 el dibujo del molde cambió (se subió de nuevo, se rearmó a otra medida…): la clave no lleva la versión del
+  // archivo, así que se tira todo — si no, «Crear en Illustrator» armaba la plantilla del archivo anterior (MAPA 658)
+  useEffect(() => { _guiaIllu.current = new Map(); }, [moldeReload]);
   const _tallesSelIllu = () => (configMedida === 'talle' && tallesIllu ? tallesMolde.filter(t => tallesIllu.includes(t)) : null);
   const _claveDatosIllu = (tSel, rg = null) => {
     // la MISMA pedida que la guía .ai: modo, rango, guía del rango y sólo la variable en curso
@@ -13133,7 +13435,7 @@ export default function App() {
       referencia: d.referencia || 'alto', posiciones: _posVisor, talleVisor: etqData?.talle_ref || null,
       acomodoGuia: _acomodoGuardado,
       // MOLDE A MEDIDA (MAPA 623): el margen (dobladillo) punteado en la plantilla
-      dobladillo: prodCfg?.a_medida ? margenSobreContorno(prodCfg.a_medida.margen, prodCfg.a_medida.reserva_mm) : null };
+      dobladillo: prodCfg?.a_medida ? margenSobreContorno(prodCfg.a_medida.margen, reservaAM(prodCfg.a_medida), prodCfg.a_medida.forma, prodCfg.a_medida.orientacion, prodCfg.a_medida.ancho_m, prodCfg.a_medida.alto_m, prodCfg.a_medida.terminacion) : null };
   };
   // ACOMODAR LAS MESAS A MANO (opcional; ver `EditorAcomodoMesas`): se guarda por VARIABLE en el
   // molde y, si está, manda sobre el acomodo automático — en la recomendación y al crear.
@@ -13366,7 +13668,7 @@ export default function App() {
       let data;
       try { data = JSON.parse(res.text || '{}'); } catch { data = {}; }
       if (!res.ok) throw new Error(data.error || 'Error al procesar el diseño');
-      _pvCache.current = {}; _detArteCache.current = {}; _prefetchTok.current++;   // arte NUEVO → tirar precargas (serían del arte viejo)
+      _pvLimpiar(); _detArteCache.current = {}; _prefetchTok.current++; _pvReq.current++;   // arte NUEVO → tirar precargas y dibujos en curso (serían del arte viejo)
       setArteCargado(prev => ({ ...prev, [disenoActivo + '|' + id]: true }));
       cargarFuentesDeArte(disenoActivo, id);   // ¿este arte trae alguna tipografía que no tenemos?
       // El panel de telas vuelve a la vista de «Telas asignadas»: cargar el arte tarda, y si queda
@@ -13712,6 +14014,22 @@ export default function App() {
     .map(v => v.moldeId))].length;
   const varByClave = (clave) => variablesDisponibles.find(v => v.clave === clave) || null;
   const varsDeDiseno = (did) => disenoVars[did] || [];
+  // 🔴 EL MOLDE A MEDIDA ELEGIDO SIGUE ELEGIDO (MAPA 677, bug del usuario 2026-10-12: «lo selecciono y se
+  // deselecciona; lo toco de nuevo y queda dos veces»). Apenas un molde a medida entra al diseño se arma SU
+  // copia de fondo (MAPA 663) y la copia toma el lugar de la variable de la plantilla en ese diseño. La
+  // tarjeta del paso Moldes es la de la PLANTILLA (las copias no se listan), así que se apagaba; tocarla de
+  // nuevo metía la plantilla otra vez → otra copia → dos veces el mismo molde. Para elegir y mostrar, la
+  // variable de una copia cuenta como la de su plantilla (`_claveOrigen`).
+  const _claveOrigen = (cl) => {
+    const v = varByClave(cl);
+    const a = v && _amDe(v.moldeId);
+    if (a && a.de) {
+      const o = variablesDisponibles.filter(x => x.moldeId === a.de);
+      if (o.length === 1) return o[0].clave;
+    }
+    return cl;
+  };
+  const varsVistasDe = (did) => [...new Set(varsDeDiseno(did).map(_claveOrigen))];
   // Pool de variables ELEGIDAS en el pedido (unión de todos los diseños) → lo que ofrece la planilla.
   const variablesPlanilla = [...new Set(Object.values(disenoVars).flat())].map(varByClave).filter(Boolean);
   const hayVariablesPlanilla = variablesPlanilla.length > 0;
@@ -13729,7 +14047,9 @@ export default function App() {
     if (!did) { showError('Primero escribí un diseño.'); return; }
     const nv = { ...disenoVars };
     const s = new Set(nv[did] || []);
-    if (s.has(clave)) s.delete(clave); else s.add(clave);
+    // elegida = ella o una copia a medida suya: tocarla la SACA (con todas sus copias); si no, entra una vez
+    const _suyas = [...s].filter(c => _claveOrigen(c) === clave);
+    if (_suyas.length) _suyas.forEach(c => s.delete(c)); else s.add(clave);
     nv[did] = [...s];
     setDisenoVars(nv);
     const nm = { ...disenoMoldes };
@@ -13744,6 +14064,34 @@ export default function App() {
   // ¿Este molde no ofrece variables? (los propios del usuario: se eligen ENTEROS y el motor
   // genera todas sus piezas, que es justo lo que se quiere para un artículo propio).
   const moldeSinVariables = (mid) => !variablesDisponibles.some(v => v.moldeId === mid);
+  // …y lo que ya quedó DOBLE (MAPA 677): un diseño con la plantilla Y su copia, o con dos copias de la misma
+  // plantilla, se deja con UNA sola — la primera copia (la que puede tener el arte); la plantilla repetida no se
+  // vuelve a armar. Los moldes que ya no usa ninguna variable salen del diseño.
+  React.useEffect(() => {
+    let cambio = false;
+    const nv = {};
+    for (const [did, lst] of Object.entries(disenoVars)) {
+      const porOrigen = new Map();
+      (lst || []).forEach(c => { const o = _claveOrigen(c); if (!porOrigen.has(o)) porOrigen.set(o, []); porOrigen.get(o).push(c); });
+      const queda = [];
+      for (const [o, cs] of porOrigen) {
+        if (cs.length < 2) { queda.push(...cs); continue; }
+        cambio = true;
+        queda.push(cs.find(c => c !== o) || cs[0]);
+      }
+      nv[did] = (lst || []).filter(c => queda.includes(c));
+    }
+    if (!cambio) return;
+    setDisenoVars(nv);
+    setDisenoMoldes(prev => {
+      const n = { ...prev };
+      for (const did of Object.keys(nv)) {
+        const usados = new Set(nv[did].map(cl => varByClave(cl)?.moldeId).filter(Boolean));
+        n[did] = (n[did] || []).filter(m => usados.has(m) || moldeSinVariables(m));
+      }
+      return n;
+    });
+  }, [disenoVars, productosCat]);
   // (elegir/soltar un MOLDE ENTERO en el diseño → `toggleMoldeEnDiseno`, más abajo: ya existía)
   // Si el molde tiene variables, cada fila DEBE tener una (si no, el motor generaría
   // TODAS las piezas). La variable de cada fila sale de su DISEÑO (como antes el molde) —
@@ -14213,7 +14561,7 @@ export default function App() {
         setBordeConfig(await r.json());
         // el borde cambia el RENDER de cada pieza (LEY arte=tizada): los previews cacheados
         // quedaron viejos — se tiran y el paso Arte los repide con la config nueva.
-        _pvCache.current = {}; setPreviewPiezas({});
+        _pvLimpiar(); setPreviewPiezas({});
         showMsg('Borde de corte guardado ✓');
         // MOLDE A MEDIDA: el borde va adentro de la medida → el rectángulo depende de su ancho: se rehace
         // la muestra de Configuración con la reserva nueva (los pedidos la rehacen al armar su medida)
@@ -14225,7 +14573,7 @@ export default function App() {
             const _am = prodCfg.a_medida;
             const _bn = await (await fetch(`/api/productos/borde_corte?pid=${pid}`)).json().catch(() => ({}));
             const _res = _bn && _bn.activo !== false ? Math.max(0.2, Number(_bn.ancho_mm) || 2) : 2;
-            await subirMoldeAMedida(pid, { anchoM: _am.ancho_m || 1, altoM: _am.alto_m || 1, pieza: _am.pieza, reservaMm: _res, margen: _am.margen }, (t) => setProcesando(t));
+            await subirMoldeAMedida(pid, { anchoM: _am.ancho_m || 1, altoM: _am.alto_m || 1, pieza: _am.pieza, reservaMm: _res, margen: _am.margen, forma: _am.forma, orientacion: _am.orientacion }, (t) => setProcesando(t));
             await fetchProductos(); invalidarNido(); setSembrarGen(v => v + 1); setMoldeReload(v => v + 1);
           } catch (e) { throw new Error('El borde se guardó, pero no se pudo rehacer el molde: ' + (e.message || e)); }
           finally { setProcesando(null); }
@@ -14310,7 +14658,7 @@ export default function App() {
         body: JSON.stringify({ pid: _mid, diseno: editableDiseno, nombre, variante: verVariante || '*', color }),
       });
       if (!r.ok) { const d = await r.json().catch(() => ({})); showError(d.error || 'No se pudo guardar el color.'); return; }
-      _pvCache.current = {};                                   // color fuera de la clave de memoria → invalidar todo
+      _pvLimpiar();                                   // color fuera de la clave de memoria → invalidar todo
       await cargarEditablesPedido(_mid, editableDiseno, verVariante);   // recarga _o.color
       cargarPreviewPiezas();                                   // re-render con el color nuevo (LEY arte=tizada)
     } catch { showError('No se pudo guardar el color.'); }
@@ -14571,7 +14919,7 @@ export default function App() {
         setEtiquetaConfig(prev => ({ ...prev, ...d,
           piezas: (d.piezas && d.piezas.length) ? d.piezas : prev?.piezas,
           piezas_gen: (d.piezas_gen && d.piezas_gen.length) ? d.piezas_gen : prev?.piezas_gen }));
-        _pvCache.current = {}; setPreviewPiezas({});   // la etiqueta también vive en el render
+        _pvLimpiar(); setPreviewPiezas({});   // la etiqueta también vive en el render
         showMsg('Etiqueta guardada ✓'); return;
       }
       // Mostrar el MOTIVO que devuelve el server (antes era un genérico y no se sabía qué pasaba).
@@ -14705,7 +15053,14 @@ export default function App() {
     //    2026-09-16): se cierra lo que hubiera abierto (una moldería en Configuración, el mapeo
     //    visual, «Mi molde», la vista del camino elegido) y se vuelve a la pantalla de Pedidos.
     //    Y se tapa TODO con el cartel hasta que el servidor confirme el borrado.
-    setBorrandoPedido('Borrando el pedido anterior…');
+    // ⚡ SIN CARTEL (MAPA 661, «que sea instantáneo»): el pedido nuevo arranca YA; lo del servidor (los moldes
+    // de este pedido, sus tizadas, sus tipografías) se borra de fondo. Es seguro: el barrido de huérfanos
+    // reintenta cada minuto y el servidor nunca se lleva una copia creada hace menos de 20 minutos (la del
+    // pedido nuevo). Los moldes de este pedido salen YA de la lista de la pantalla.
+    {
+      const _sacar = new Set(efimerosDelPedido());
+      if (_sacar.size) setProductosCat(c => ({ ...c, productos: (c.productos || []).filter(p => !_sacar.has(p.id)) }));
+    }
     setActivoTab('pedidos'); setVistaDiseno(null); setMapeandoOperario(false);
     setMolderiaAbierta(null); setTabAjustesMolde('menu'); setModoMiMolde(null); setAdminSubView('dashboard');
     // 1) lo que se elige en el pedido
@@ -14751,9 +15106,7 @@ export default function App() {
         await fetchProductos();
       } catch { /* el barrido del servidor los junta igual cuando pasen las horas */ }
     })();
-    // El cartel se va cuando TERMINARON las tres limpiezas (o a los 90 s, si el servidor no
-    // contesta: la pantalla no puede quedar tapada para siempre).
-    const _fin = setTimeout(() => setBorrandoPedido(null), 90000);
+    // Las otras dos limpiezas, de fondo y después de la de los moldes (la pantalla ya no las espera).
     (async () => {
       try {
       await _efPromesa;
@@ -14776,10 +15129,7 @@ export default function App() {
           await fetch('/api/pedido/fuentes_pedido_limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pids: _pids }) });
         } catch { /* si falla, sólo quedan archivos de más: no rompe el pedido nuevo */ }
       }
-      } finally {
-        clearTimeout(_fin);
-        setBorrandoPedido(null);
-      }
+      } catch { /* de fondo: si algo queda, el barrido lo junta */ }
     })();
     setMapeoData(null); setMapeoValores({}); setSelectedPiezaMapeo('');
     setEtqData(null); setEtqNombres({}); setVerVariante(null);
@@ -14796,7 +15146,7 @@ export default function App() {
     // 6) CACHÉS EN MEMORIA (render de piezas, geometría por talle y detección del arte). Están
     //    indexadas por molde/diseño/variable, pero si el pedido nuevo usa el mismo molde con otro
     //    arte mostrarían el anterior hasta recargar la página.
-    _pvCache.current = {}; _talleDetCache.current = {}; _detArteCache.current = {};
+    _pvLimpiar(); _talleDetCache.current = {}; _detArteCache.current = {};
     // 🔴 …Y LOS DIBUJOS QUE TODAVÍA ESTABAN EN CAMINO (reporte 2026-09-18: «puse nuevo pedido y me
     //    sigue saliendo el arte del pedido anterior en el molde»). Un dibujo del pedido viejo que
     //    llegaba DESPUÉS del reinicio se pintaba en el visor del nuevo: `cargarPreviewPiezas` sólo
@@ -14853,7 +15203,7 @@ export default function App() {
       if (!r.ok) { showError(d.error || 'No se pudo guardar'); return; }
       setLimiteTexto(d);
       // cambia cómo se estampa el nombre/número (LEY arte = tizada): los previews cacheados quedaron viejos
-      _pvCache.current = {}; setPreviewPiezas({});
+      _pvLimpiar(); setPreviewPiezas({});
       showMsg('Texto y número guardados ✓');
     } catch { showError('No se pudo guardar'); }
   };
@@ -14926,7 +15276,7 @@ export default function App() {
       variables.push({ key, pid: it.moldeId, clave: claveEfectiva, label: (variable && variable.label) || it.label || p.nombre || 'Molde',
         molde: p.nombre || 'Molde', variable, acomodo: p.acomodo_illustrator || {},
         // MOLDE A MEDIDA (MAPA 623): el margen (dobladillo) punteado en la plantilla del diseñador
-        dobladillo: p.a_medida ? margenSobreContorno(p.a_medida.margen, p.a_medida.reserva_mm) : null });
+        dobladillo: p.a_medida ? margenSobreContorno(p.a_medida.margen, reservaAM(p.a_medida), p.a_medida.forma, p.a_medida.orientacion, p.a_medida.ancho_m, p.a_medida.alto_m, p.a_medida.terminacion) : null });
     }
     return { did: d.id, nombre: d.nombre || d.id, variables };
   }).filter(d => d.variables.length);
@@ -15329,7 +15679,7 @@ export default function App() {
       setCfgConDiseno(d);
       // El preview de las piezas incluye el borde y la etiqueta: sin tirar el caché del navegador,
       // el paso Arte seguiría mostrando la medida vieja (la tizada ya saldría con la nueva).
-      _pvCache.current = {};
+      _pvLimpiar();
       showMsg(d.moldes
         ? `Guardado. Vale para ${d.moldes} molde${d.moldes === 1 ? '' : 's'} con diseño, también los ya cargados.`
         : 'Guardado.');
@@ -15701,11 +16051,18 @@ export default function App() {
   // que cambiar la medida sea INSTANTÁNEO. El visor ya muestra la medida nueva al tipear (`_layoutVivo`) y
   // esto rehace el archivo de fondo; mientras dura, sólo se traba lo que dependería de él («A la planilla»,
   // «Cargar arte»). Llamado a mano (Enter) va igual: el gesto es el mismo.
-  const armarAMedida = async (did, it, anchoM, altoM, { silencioso = true } = {}) => {
+  // con qué versión de la geometría quedó armado el archivo (MAPA 651): si después cambia el dibujo de la
+  // forma, el paso Arte lo rearma solo (`geoVieja`)
+  // al llegar la lista de fuentes de esta PC (MAPA 670): qué falta, de nuevo, y las previas con la de la PC
+  _pcRecargar.current = () => { cargarFuentesEstado(); cargarFuentesTodas(); _pvLimpiar(); cargarPreviewPiezas(); };
+  const armarAMedida = async (did, it, anchoM, altoM, { silencioso = true, forma, orientacion, terminacion } = {}) => {
     const mid = it.moldeId;
     const p = moldeById(mid) || {};
     const am = p.a_medida;
     if (!am) return;
+    // la FORMA de este pedido (MAPA 645): la elegida en el panel o, si no, la que ya tiene
+    const fo = normForma(forma ?? am.forma), or_ = normOrientacion(orientacion ?? am.orientacion);
+    const te = normTerminacion(terminacion ?? am.terminacion);     // la TERMINACIÓN (MAPA 652)
     const prob = problemaMedida(anchoM, altoM);
     if (prob) { showError(prob); return; }
     const avisar = silencioso ? () => {} : (t) => setProcesando(t);
@@ -15714,25 +16071,30 @@ export default function App() {
     try {
       if (am.de) {
         const r = await fetch('/api/productos/a_medida', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: mid, ancho_m: anchoM, alto_m: altoM }) });
+          // ⚡ la versión de la geometría va en el MISMO pedido (MAPA 664): antes era un POST más al final (otra
+          // escritura del catálogo entero en la base)
+          body: JSON.stringify({ id: mid, ancho_m: anchoM, alto_m: altoM, forma: fo, orientacion: or_, terminacion: te, geo_v: versionGeo(fo) }) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error || 'No se pudo cambiar la medida');
-        await subirMoldeAMedida(mid, { anchoM, altoM, pieza: am.pieza, reservaMm: am.reserva_mm, margen: am.margen }, avisar);
+        // el margen que rige lo calcula el servidor con la terminación (`_margen_de_terminacion`)
+        await subirMoldeAMedida(mid, { anchoM, altoM, pieza: am.pieza, reservaMm: reservaAM(am, fo), margen: (j.a_medida && j.a_medida.margen) || am.margen,
+          forma: fo, orientacion: or_, terminacion: te }, avisar);
         _talleDetCache.current = {};                 // el dibujo del molde cambió
         invalidarNido(); setMoldeReload(v => v + 1);
         await fetchProductos();
         if (arteCargado[did + '|' + mid]) cargarMapeadorOperario(mid); else cargarMoldeOperario(mid);
-        return;
+        return true;                                 // salió bien (el armado automático se olvida del intento)
       }
       const nombre = `${p.nombre || 'Molde'} ${talleDeMedida(anchoM, altoM)}`;
       const r = await fetch('/api/productos/crear', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nombre, efimero: true, planilla_template_id: p.planilla_template_id || plantillaComun || undefined,
-                               a_medida_de: mid, ancho_m: anchoM, alto_m: altoM }) });
+                               a_medida_de: mid, ancho_m: anchoM, alto_m: altoM, forma: fo, orientacion: or_, terminacion: te, geo_v: versionGeo(fo) }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || 'No se pudo armar el molde a medida');
       // del pedido YA (ver `subirMoldesConDiseno`): que el barrido de huérfanos no se lo lleve a mitad del alta
       setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now(), subiendo: true } }));
-      await subirMoldeAMedida(d.id, { anchoM, altoM, pieza: am.pieza, reservaMm: am.reserva_mm, margen: am.margen }, avisar);
+      await subirMoldeAMedida(d.id, { anchoM, altoM, pieza: am.pieza, reservaMm: reservaAM(am, fo), margen: (d.a_medida && d.a_medida.margen) || margenDeTerminacion(am, te),
+        forma: fo, orientacion: or_, terminacion: te }, avisar);
       setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now() } }));
       await fetchProductos();
       const nuevaClave = d.a_medida && d.a_medida.variable;
@@ -15742,8 +16104,10 @@ export default function App() {
       // la tela que se eligió con la medida (guardada con la plantilla) pasa a la copia
       setTelaPrincipalPed(pp => { const v = pp[_claveTelaDis(did, mid)]; return v ? { ...pp, [_claveTelaDis(did, d.id)]: v } : pp; });
       setAmForm(f => { const n = { ...f }; delete n[did + '|' + mid]; return n; });
+      return true;
     } catch (e) {
       showError(e.message);
+      return false;
     } finally {
       setAmArmando(null);
       if (!silencioso) setProcesando(null);
@@ -15755,24 +16119,72 @@ export default function App() {
   // (`estadoMedida().listaParaArmar`, que el paso Arte deja en `amAutoRef`). `amIntentoRef` evita
   // reintentar en bucle la misma medida si el armado falla (el error ya se mostró).
   const amIntentoRef = useRef('');
+  const amFondoRef = useRef(new Set());      // «diseño|molde» ya armados (o intentados) de fondo (MAPA 662)
   const amTimerRef = useRef(null);
   // Corre en CADA render (sin dependencias): `amAutoRef` lo llena el paso Arte cuando ya tiene los datos
   // (catálogo, telas), y eso puede ser varios renders después de entrar al paso; con dependencias fijas el
   // efecto miraba una sola vez, antes de tiempo, y no armaba nunca (visto en el sandbox 2026-10-07).
   // El temporizador NO se reinicia mientras la medida sea la misma (cualquier render lo postergaría).
   useEffect(() => {
-    const st = amAutoRef.current;
+    // `amAutoRef` lo llena el paso Arte: fuera de él puede quedar el de antes (no sirve)
+    const st = pedidoPaso === 'arte' ? amAutoRef.current : null;
     // la PLANTILLA (molde recién elegido) se arma enseguida con la medida predeterminada: el paso Arte se ve
     // completo de entrada (visor, «Cargar arte», «Asignar telas») — pedido del usuario 2026-10-07, MAPA 637.
     // La copia ya armada sólo se re-arma cuando se escribe otra medida.
-    const ok = pedidoPaso === 'arte' && !procesando && !amArmando && !!st && st.lista && !(st.esCopia && !amForm[st.clave]);
-    const firma = ok ? `${st.clave}|${st.a}|${st.h}` : '';
+    const ok = pedidoPaso === 'arte' && !procesando && !amArmando && !!st && st.lista && !(st.esCopia && !amForm[st.clave] && !st.vieja);
+    const firma = ok ? `${st.clave}|${st.a}|${st.h}|${st.f}|${st.o}|${st.te}` : '';
     if (amTimerRef.current && amTimerRef.current.firma !== firma) { clearTimeout(amTimerRef.current.t); amTimerRef.current = null; }
+    // ⚡ LOS OTROS DISEÑOS, DE FONDO (MAPA 662, «¿por qué carga cuando paso de un diseño a otro? tiene que ser
+    // instantáneo»): cada diseño tiene SU copia de la bandera y se armaba recién al entrar a ese diseño (con el
+    // cartel). Ahora, mientras el que se ve no tiene nada que armar, se arman sin cartel —de a una— las copias
+    // de los demás diseños con la medida predeterminada (ya preparada en memoria, `precalentarMoldeAMedida`):
+    // al pasar de diseño ya está. El que se ve siempre va primero (si tiene algo que armar, esto espera).
+    // 🔴 Y DESDE QUE EL MOLDE ENTRA AL PEDIDO, NO DESDE EL PASO ARTE (MAPA 663, «no quiero más ese cargador
+    // cuando elegís un molde a medida»): la copia de cada diseño se arma de fondo mientras se eligen los demás
+    // moldes o se pasa de paso, así que al llegar al Arte ya está — sin cartel y sin la pantalla a medias.
+    if (!ok && pedidoPaso && pedidoPaso !== 'diseno' && !procesando && !amArmando && !amTimerRef.current) {
+      for (const did of Object.keys(disenoMoldes || {})) {
+        for (const it of itemsArteDe(did)) {
+          const am = (moldeById(it.moldeId) || {}).a_medida;
+          const k = did + '|' + it.moldeId;
+          if (!am || am.de || amFondoRef.current.has(k) || (st && st.clave === k)) continue;
+          amFondoRef.current.add(k);              // una vez por diseño y molde (si falla, se arma al entrar)
+          const fo = normForma(am.forma), a = leerMetros(metrosTexto(am.ancho_m || 1));
+          armarAMedida(did, it, a, fo === 'circulo' ? a : leerMetros(metrosTexto(am.alto_m || 1)),
+            { forma: fo, orientacion: normOrientacion(am.orientacion), terminacion: normTerminacion(am.terminacion), silencioso: true });
+          return;
+        }
+      }
+    }
     if (!ok || amIntentoRef.current === firma || amTimerRef.current) return;
-    const t = setTimeout(() => { amTimerRef.current = null; amIntentoRef.current = firma; armarAMedida(st.did, st.it, st.a, st.h); },
-      st.esCopia ? 1500 : 50);
+    // 🔴 el «ya lo intenté» vale SÓLO si falló (MAPA 660): si salió bien se olvida. Antes quedaba anotado
+    // también al salir bien, y tras «Nuevo pedido» la misma bandera con la misma medida tenía la MISMA firma
+    // → no se armaba al entrar al paso Arte y el visor quedaba con la medida sin armar hasta tocar la medida.
+    const t = setTimeout(() => {
+      amTimerRef.current = null; amIntentoRef.current = firma;
+      // 🔴 SIN CARTEL, NUNCA (MAPA 663, el usuario: «no quiero más ese cargador»). El cartel de la 660 se va: la
+      // copia ya viene armada de fondo desde que el molde entró al pedido (arriba), y si todavía no terminó,
+      // el panel de la medida ya se ve y en un momento aparece el resto.
+      armarAMedida(st.did, st.it, st.a, st.h, { forma: st.f, orientacion: st.o, terminacion: st.te, silencioso: true })
+        .then((bien) => { if (bien && amIntentoRef.current === firma) amIntentoRef.current = ''; });
+    }, st.esCopia ? 1500 : 50);
     amTimerRef.current = { firma, t };
   });
+  // y al salir del paso Arte (otro paso, «Nuevo pedido»), un intento fallido tampoco queda: al volver, se reintenta
+  useEffect(() => { if (pedidoPaso !== 'arte') { amIntentoRef.current = ''; amFondoRef.current = new Set(); } }, [pedidoPaso]);
+  // ⚡ PRECALENTAR (MAPA 661, «que sea instantáneo»): apenas un molde a medida entra al pedido se prepara en
+  // esta computadora el molde de su medida predeterminada (lo mismo que va a pedir `armarAMedida` al entrar
+  // al paso Arte, con los mismos datos). No sube nada: queda en memoria (`prepararMoldeAMedida`), y al
+  // entrar sólo falta crear la copia y guardarla (menos de un segundo).
+  useEffect(() => {
+    for (const mid of new Set(Object.values(disenoMoldes || {}).flat())) {
+      const am = (moldeById(mid) || {}).a_medida;
+      if (!am || am.de) continue;
+      const fo = normForma(am.forma), te = normTerminacion(am.terminacion);
+      precalentarMoldeAMedida({ anchoM: leerMetros(metrosTexto(am.ancho_m || 1)), altoM: fo === 'circulo' ? leerMetros(metrosTexto(am.ancho_m || 1)) : leerMetros(metrosTexto(am.alto_m || 1)),
+        pieza: am.pieza, reservaMm: reservaAM(am, fo), margen: margenDeTerminacion(am, te), forma: fo, orientacion: normOrientacion(am.orientacion), terminacion: te });
+    }
+  }, [disenoMoldes, productosCat]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // TIRAS EN EL PEDIDO (MAPA 640, pedido del usuario 2026-10-08: «no veo dónde poner si lleva o no tiras, y
   // en el visor tendría que verlas»): se eligen en el panel de la medida y se guardan en la COPIA del pedido
@@ -15787,7 +16199,7 @@ export default function App() {
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error || 'No se pudieron guardar las tiras');
         await fetchProductos();
-        _pvCache.current = {}; cargarPreviewPiezas();      // el render del motor, ya con las marcas nuevas
+        _pvLimpiar(); cargarPreviewPiezas();      // el render del motor, ya con las marcas nuevas
       } catch (e) { showError(e.message); }
     }, 500);
   };
@@ -17786,6 +18198,12 @@ export default function App() {
             )}
             <input ref={fuenteFileRef} type="file" accept=".ttf,.otf" style={{ display: 'none' }}
               onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setFuenteArchivo(f); }} />
+            {/* LAS DE ESTA PC (MAPA 670): conviven con las cargadas (las cargadas ganan). La primera vez el
+                navegador pide permiso; después se reconocen solas. Sólo dato + botón; el porqué, en el «?». */}
+            {botonFuentesPc()}
+            {(fuentesEstado?.de_pc || []).length > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>De esta PC: <b style={{ color: '#fff' }}>{fuentesEstado.de_pc.join(' · ')}</b></div>
+            )}
             {!(fuentesEstado?.faltantes || []).length && (
               <div style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 700 }}>✓ Todas las fuentes del arte están resueltas.</div>
             )}
@@ -18576,11 +18994,11 @@ export default function App() {
                   )}
                   <div style={{ display: pedidoTabMoldes === 'catalogo' ? 'grid' : 'none', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
                       {filtrarBusqueda(buscarVariable, varsCatalogo, v => [v.label, v.moldeNombre, `${v.moldeNombre} ${v.label}`]).map(({ item: v }) => {
-                        const susDisenos = disenosPedido.filter(d => varsDeDiseno(d.id).includes(v.clave));
+                        const susDisenos = disenosPedido.filter(d => varsVistasDe(d.id).includes(v.clave));
                         // Marcada = está en el diseño que se está armando. Que otro diseño la use
                         // no la marca acá: cada diseño lleva la suya, aunque sea la misma.
                         const _dDest = disenoDestino();
-                        const enActivo = !!_dDest && varsDeDiseno(_dDest).includes(v.clave);
+                        const enActivo = !!_dDest && varsVistasDe(_dDest).includes(v.clave);
                         const tplBase = variablesPlanilla.length ? variablesPlanilla[0].planilla : v.planilla;
                         const distintaPlanilla = variablesPlanilla.length > 0 && !variablesPlanilla.some(x => x.clave === v.clave) && v.planilla !== tplBase;
                         const nPz = (v.valores || []).filter(x => x.pieza_idx != null).length;
@@ -18668,8 +19086,20 @@ export default function App() {
                                                minWidth: 'min(100%, 780px)', marginLeft: 'auto', marginRight: 'auto' }}>
                   {/* Título + (al lado contrario) aviso de caracteres que la fuente NO tiene */}
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-                    <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                       <div className="card-title" style={{ marginBottom: 2 }}>Cargá la planilla</div>
+                      {/* ESCANEANDO (MAPA 683, pedido del usuario 2026-10-12: «que no quede sobre nada ni mueva los campos»):
+                          una etiqueta chica AL LADO DEL TÍTULO, en el renglón que ya existe — antes era un cartel ancho
+                          encima de la planilla que la empujaba para abajo al aparecer y la subía al irse. Enviar sigue
+                          frenado mientras dura; el detalle, en el `title`. */}
+                      {escaneando && filas.length > 0 && (
+                        <span data-tour="planilla-escaneando" title="Revisando si algún texto o número no entra en su pieza"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 9px', borderRadius: 999, whiteSpace: 'nowrap',
+                            background: 'rgba(0,216,245,0.08)', border: '1px solid rgba(0,216,245,0.3)', fontSize: 11, fontWeight: 700, color: 'var(--accent)', lineHeight: '16px' }}>
+                          <span style={{ width: 10, height: 10, border: '2px solid rgba(0,216,245,0.25)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'perfilSpin 0.8s linear infinite', flexShrink: 0 }} />
+                          Escaneando planilla…
+                        </span>
+                      )}
                     </div>
                     {/* NO ES UN ERROR: la tizada sale igual. Esos caracteres no están en la
                         tipografía del diseño y se estampan con la predeterminada (regla del
@@ -18692,14 +19122,6 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  {/* ESCANEANDO: mientras se mide la planilla (Enviar queda frenado hasta que termina) */}
-                  {escaneando && filas.length > 0 && (
-                    <div data-tour="planilla-escaneando" style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 13px', borderRadius: 10, marginBottom: 8,
-                      background: 'rgba(0,216,245,0.07)', border: '1px solid rgba(0,216,245,0.35)', fontSize: 12, color: 'var(--text-secondary)' }}>
-                      <span style={{ width: 14, height: 14, border: '2px solid rgba(0,216,245,0.25)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'perfilSpin 0.8s linear infinite', flexShrink: 0 }} />
-                      <b style={{ color: 'var(--accent)' }}>Escaneando planilla…</b> revisando si algún texto o número no entra en su pieza.
-                    </div>
-                  )}
                   {/* «SE ACHICARÁ» (MAPA 601): textos que no entran en el límite de su pieza y salen más chicos */}
                   {!escaneando && _resumenAchiques.filasN > 0 && (() => {
                     const _colA = _resumenAchiques.malas ? 'var(--danger, #ef4444)' : 'var(--warning, #e0a020)';
@@ -19468,6 +19890,9 @@ export default function App() {
                 // sin nada escrito: la medida ya armada o, en la plantilla, la PREDETERMINADA de Ajustes (MAPA 637)
                 const _amF = amForm[_amKey] || (_amIt
                   ? { ancho: metrosTexto(_amIt.ancho_m || 1), alto: metrosTexto(_amIt.alto_m || 1) } : { ancho: '', alto: '' });
+                // la FORMA elegida en este pedido (MAPA 645): lo tocado en el panel o la de la copia ya armada
+                const _amFo = normForma(_amF.forma ?? (_amIt && _amIt.forma)), _amOr = normOrientacion(_amF.orient ?? (_amIt && _amIt.orientacion));
+                const _amTe = normTerminacion(_amF.term ?? (_amIt && _amIt.terminacion));       // la TERMINACIÓN (MAPA 652)
                 // VER VARIANTE en el pedido: las variantes del sistema (las de Variables) CON piezas. Al elegir
                 // una en las tarjetas, el visor muestra SOLO sus piezas acomodadas (mismo acomodo que en Variables).
                 // VARIABLE-FIRST estricto: si hay una variable activa NUNCA se cae a dibujar el molde
@@ -19520,40 +19945,54 @@ export default function App() {
                 // armada (o se está cambiando) el visor la muestra en vivo (`VisorMedida`); armada, el visor real
                 // dibuja la misma tela alrededor del arte (`telaAMedida` → `telaAlrededor`).
                 const _amEst = _amIt ? estadoMedida({ am: _amIt, anchoTxt: _amF.ancho, altoTxt: _amF.alto, telas: _telasMol,
-                  telaId: _principalDe(disenoActivo, _id), esCopia: !!_amIt.de }) : null;
+                  telaId: _principalDe(disenoActivo, _id), esCopia: !!_amIt.de, forma: _amFo, orientacion: _amOr, terminacion: _amTe }) : null;
+                const _amRes = _amIt ? reservaAM(_amIt, _amFo) : 0;      // la reserva del borde PARA ESTA FORMA (mm)
                 const _amVivo = !!_amIt && (!_amIt.de || !_amEst.igualArmada);
+                const _amSinArmar = !!_amIt && !_amIt.de;   // la copia de este diseño todavía no está (se arma de fondo)
+                // ¿EL ARTE ES DE OTRA MEDIDA? (MAPA 658): la mesa del arte de la pieza contra el contorno de la medida
+                // escrita (total − la reserva del borde). Un arte hecho con la plantilla de otra medida no la cubre.
+                const _amArteOtra = (_amIt && _amIt.de && _amEst.pz && mapeoData && arteCargado[disenoActivo + '|' + _id]) ? (() => {
+                  const _ms = mapeoData.mesas || [];
+                  const _nm = (s) => String(s || '').trim().toLowerCase();
+                  const _idx = Number((mapeoValores || {})[_amIt.pieza]);
+                  const _me = _ms.find(m => m.mesa === _idx) || _ms.find(m => _nm(m.nombre_detectado || m.rotulo) === _nm(_amIt.pieza)) || (_ms.length === 1 ? _ms[0] : null);
+                  return arteDeOtraMedida(_me, { w: _amEst.pz.anchoCm - 2 * _amRes / 10, h: _amEst.pz.altoCm - 2 * _amRes / 10 });
+                })() : null;
                 // TIRAS DEL PEDIDO (MAPA 640): lo elegido en el panel (si todavía no volvió guardado) o lo de la copia
                 const _amTirasGuard = _amIt ? (() => { const t = { ...TIRAS_DEFECTO, ...(_amIt.marcas_tiras || {}) };
-                  return { activo: !!t.activo, lados: ladosTiras(t), color: t.color, grosor_mm: t.grosor_mm }; })() : null;
+                  return { activo: !!t.activo, lados: ladosTiras(t), color: t.color, grosor_mm: t.grosor_mm, marcar: t.marcar !== false }; })() : null;
                 const _amTiras = _amIt ? (amTirasForm[_amKey] || _amTirasGuard) : null;
                 const _amTirasPend = !!(_amIt && amTirasForm[_amKey] && JSON.stringify(amTirasForm[_amKey]) !== JSON.stringify(_amTirasGuard));
-                const _amTirasVer = _amIt ? tirasDeMolde(_amIt, _amTiras) : null;
+                const _amTirasVer = _amIt ? tirasDeMolde({ ..._amIt, margen: _amEst.mg }, _amTiras, _amFo, _amOr, _amEst.a, _amEst.h, _amTe) : null;
                 // lo que mira el armado automático (efecto de `amAutoRef`): qué ítem y si la medida escrita se puede armar
                 amAutoRef.current = _amIt ? { clave: _amKey, did: disenoActivo, it: itActual, a: _amEst.a, h: _amEst.h, lista: _amEst.listaParaArmar,
-                                              esCopia: !!_amIt.de } : null;
+                                              esCopia: !!_amIt.de, f: _amFo, o: _amOr, te: _amTe, vieja: geoVieja(_amIt) } : null;
                 const _panelMedida = _amIt ? (
                   <TarjetaMedida am={_amIt} est={_amEst} anchoTxt={_amF.ancho} altoTxt={_amF.alto}
-                    onAncho={(v) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, ancho: v } }))}
+                    onAncho={(v) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, ancho: v, ...(_amFo === 'circulo' ? { alto: v } : {}) } }))}
                     onAlto={(v) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, alto: v } }))}
+                    onForma={(fo, or_) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, forma: fo, orient: or_,
+                      // el círculo tiene una sola medida: el diámetro es el ancho (el alto lo acompaña)
+                      ...(fo === 'circulo' ? { alto: _amF.ancho } : {}) } }))}
                     ocupado={!!procesando || (!!amArmando && amArmando.clave === _amKey)} esCopia={!!_amIt.de}
                     tiras={_amTiras} onTiras={(cambio) => {
                       const v = { ..._amTiras, ...cambio };
                       setAmTirasForm(f => ({ ...f, [_amKey]: v }));
                       guardarTirasPedido(_id, _amKey, v);
                     }}
-                    onArmar={(a, h) => armarAMedida(disenoActivo, itActual, a, h)} />
+                    onTerminacion={(te) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, term: te } }))} arteOtra={_amArteOtra}
+                    onArmar={(a, h, fo, or_, te) => armarAMedida(disenoActivo, itActual, a, h, { forma: fo, orientacion: or_, terminacion: te })} />
                 ) : null;
                 const _visorMedida = _amIt ? (
                   <div style={{ position: 'absolute', inset: 12 }}>
                     {_amEst.pz
-                      ? <VisorMedida anchoM={_amEst.a} altoM={_amEst.h} margen={_amIt.margen} tela={_amEst.tela} r={_amEst.rTela}
-                          gira={_amEst.gira} margenNestingMm={_amEst.n.margen_mm} tiras={_amTirasVer} />
-                      : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--text-muted)' }}>
-                          Escribí la medida del diseño para verla en la tela</div>}
-                    {_amIt.de && _amEst.pz && (
+                      ? <VisorMedida anchoM={_amEst.a} altoM={_amEst.h} margen={_amEst.mg} tela={_amEst.tela} r={_amEst.rTela}
+                          gira={_amEst.gira} margenNestingMm={_amEst.n.margen_mm} tiras={_amTirasVer} forma={_amFo} orientacion={_amOr} terminacion={_amTe} />
+                      : null}
+                    {_amIt.de && _amEst.pz && !_amEst.listaParaArmar && (
                       <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', fontSize: 12, fontWeight: 700, color: '#fbbf24',
                         background: 'rgba(0,0,0,0.75)', border: '1px solid rgba(251,191,36,0.4)', borderRadius: 8, padding: '5px 10px', whiteSpace: 'nowrap' }}>
-                        {_amEst.listaParaArmar ? 'Medida nueva · se arma sola al dejar de escribir' : 'Medida nueva · así no se puede armar'}</div>
+                        No se puede armar</div>
                     )}
                   </div>
                 ) : null;
@@ -19563,13 +20002,21 @@ export default function App() {
                 // de la medida vieja (sería otra medida estirada): el diseño va como el visor lo pone siempre
                 // antes de tener ese render. Cuando el armado termina, el molde real lo reemplaza (es igual).
                 const _amCont = (_amIt && _amIt.de && _amEst.pz)
-                  ? { w: _amEst.pz.anchoCm - 2 * (Number(_amIt.reserva_mm) || 0) / 10, h: _amEst.pz.altoCm - 2 * (Number(_amIt.reserva_mm) || 0) / 10 } : null;
+                  ? { w: _amEst.pz.anchoCm - 2 * _amRes / 10, h: _amEst.pz.altoCm - 2 * _amRes / 10 } : null;
                 const _amP0 = canvasLayout?.layout?.[0];
-                const _amDesfase = !!(_amCont && _amP0 && _amP0.w_cm && (Math.abs(_amP0.w_cm - _amCont.w) > 0.05 || Math.abs(_amP0.h_cm - _amCont.h) > 0.05));
+                // también cuando cambió la FORMA o la punta (MAPA 645): el contorno armado es otro
+                const _amOtraForma = !!(_amIt && _amIt.de && (normForma(_amIt.forma) !== _amFo || (_amFo === 'triangulo' && normOrientacion(_amIt.orientacion) !== _amOr)
+                  || (normForma(_amIt.forma) === _amFo && geoVieja(_amIt)) || normTerminacion(_amIt.terminacion) !== _amTe));
+                const _amDesfase = !!(_amCont && _amP0 && _amP0.w_cm && (_amOtraForma || Math.abs(_amP0.w_cm - _amCont.w) > 0.05 || Math.abs(_amP0.h_cm - _amCont.h) > 0.05));
                 const _layoutVivo = _amDesfase ? { ...canvasLayout, layout: canvasLayout.layout.map(pz => {
                   const k = pz.w_cm ? pz.pw / (pz.w_cm * 10) : 1;
                   const pw = _amCont.w * 10 * k, ph = _amCont.h * 10 * k;
-                  return { ...pz, pw, ph, w_cm: _amCont.w, h_cm: _amCont.h, path_svg: `M${pz.px} ${pz.py}H${pz.px + pw}V${pz.py + ph}H${pz.px}Z` };
+                  return { ...pz, pw, ph, w_cm: _amCont.w, h_cm: _amCont.h,
+                    path_svg: pathForma(contornoForma(_amFo, _amOr, pz.px, pz.py, pz.px + pw, pz.py + ph, true,
+                      _amFo === 'triangulo' ? { w: _amEst.a * 100, h: _amEst.h * 100, t: margenUniforme(margenPorBorde(_amEst.mg)), r: _amTe !== 'overlock' } : null,
+                      // el rectángulo con dobladillo: las esquinas recortadas, del tamaño del margen (MAPA 653)
+                      (_amFo === 'rectangulo' && _amTe === 'dobladillo') ? (() => { const q = margenPorBorde(_amEst.mg);
+                        return { izq: q.izq * 10 * k, der: q.der * 10 * k, arriba: q.arriba * 10 * k, abajo: q.abajo * 10 * k }; })() : null)) };
                 }) } : null;
                 // el render del motor sólo si es de ESTA medida (uno de la medida vieja se vería estirado)
                 const _pvMedida = (_amIt && _amIt.de && previewPiezas) ? ((_amDesfase || _amTirasPend) ? null : Object.fromEntries(Object.entries(previewPiezas)
@@ -19577,8 +20024,10 @@ export default function App() {
                 const _telaVisor = (_amIt && _amIt.de && _amEst.tela && _amEst.pz) ? {
                   anchoCm: Number(_amEst.tela.ancho_cm), mgCm: (Number(_amEst.n.margen_mm) || 0) / 10,
                   girada: _amEst.rTela ? (_amEst.rTela.cabe ? !!_amEst.rTela.girada : (_amEst.gira && _amEst.pz.altoCm < _amEst.pz.anchoCm)) : false,
-                  entra: !_amEst.rTela || _amEst.rTela.cabe, reservaCm: (Number(_amIt.reserva_mm) || 0) / 10,
-                  totalCm: _amEst.pz, disenoCm: { w: _amEst.a * 100, h: _amEst.h * 100 } } : null;
+                  entra: !_amEst.rTela || _amEst.rTela.cabe, reservaCm: _amRes / 10,
+                  totalCm: _amEst.pz, disenoCm: { w: _amEst.a * 100, h: _amEst.h * 100 }, forma: _amFo, orientacion: _amOr,
+                  tri: _amFo === 'triangulo' ? { w: _amEst.a * 100, h: _amEst.h * 100, t: margenUniforme(margenPorBorde(_amEst.mg)), r: _amTe !== 'overlock' } : null,
+                  corte: _amFo === 'rectangulo' && _amTe === 'dobladillo' ? margenPorBorde(_amEst.mg) : null } : null;
                 // SIN TELA BASE: cada pieza debe tener SÍ O SÍ una tela asignada (no hay default).
                 // `piezasArteGen` = las piezas que se VEN en el visor (misma fuente que se toca/pinta),
                 // así «asignar a todas» y el aviso de faltantes hablan exactamente de lo mismo.
@@ -20020,6 +20469,14 @@ export default function App() {
                             <div style={{ marginTop: 2 }}>· y {fuentesFaltantesItems.length - 3} más</div>
                           )}
                         </div>
+                        {/* si la tipografía está instalada en esta PC, alcanza con el permiso (MAPA 673): el botón
+                            va acá, a la vista, y no escondido en la ventana «Fuentes» */}
+                        {pcPermiso === 'prompt' && (
+                          <button type="button" className="btn primary" data-tour="arte-fuente-pc" onClick={pedirFuentesPc}
+                            style={{ flexShrink: 0, padding: '6px 12px', fontSize: 12, fontWeight: 700 }}>
+                            Usar las de esta PC
+                          </button>
+                        )}
                         <button className="btn" style={{ flexShrink: 0, padding: '6px 12px', fontSize: 12, fontWeight: 700 }}
                           onClick={() => { const x = fuentesFaltantesItems[0];
                                            irAlArte(x.did, x);
@@ -20070,30 +20527,21 @@ export default function App() {
                       (MAPA 597, COREL_REFERENCIA.md). */}
                   <input type="file" ref={fileInputArteRef} accept=".ai,.pdf" onChange={(e) => cargarDisenoWizard(e.target.files[0])} hidden />
                   {/* La navegación de arriba YA es por variable → el visor muestra solo sus piezas (vfArte). */}
-                  {/* MOLDE A MEDIDA (MAPA 623): sin medida todavía (o cambiándola), la tarjeta de la medida */}
-                  {(_amIt && !_amIt.de) ? (
-                    <div className="card" style={{ padding: 14, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <span style={{ width: 9, height: 9, borderRadius: '50%', background: colAct, flexShrink: 0 }} />
-                        <span style={{ fontSize: 15, fontWeight: 800 }}>{vObjActual?.label || _m?.nombre || 'Variable'}</span>
-                        <span style={{ fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>· {_m?.nombre} · {disenosPedido.find(d => d.id === disenoActivo)?.nombre}</span>
-                      </div>
-                      <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}>
-                        {_panelMedida}
-                        <div style={{ position: 'relative', flex: 1, minWidth: 0, background: '#0c0c0e', border: '1px solid var(--border-light)', borderRadius: 10 }}>
-                          {_visorMedida}
-                        </div>
-                      </div>
-                    </div>
-                  ) : _moldeListo ? (
+                  {/* 🔴 MOLDE A MEDIDA SIN ARMAR TODAVÍA (MAPA 676, reclamo del usuario 2026-10-12: «¿por qué volviste a
+                      romper este espacio? tiene que ser con las barras y los botones»): la MISMA pantalla de siempre —
+                      la cabecera con sus botones, el visor y el panel de diseños—, con la medida a la izquierda y el
+                      dibujo de la forma en el visor mientras la copia se arma de fondo. Antes era otra tarjeta, sin
+                      barra ni botones, y con la máquina lenta se quedaba así decenas de segundos. Lo que necesita la
+                      copia (cargar el arte, las telas, la plantilla) espera apagado hasta que esté. */}
+                  {(_moldeListo || (_amIt && !_amIt.de)) ? (
                     /* Tarjeta única: cabecera (nombre del molde + cargar) + [ talles | molde | diseños ] */
                     <div className="card" style={{ padding: 14, flex: 1, minHeight: 0, display: 'flex' }}>
                       <MapeadorArteVisual
-                        margenAMedida={_amIt && _amIt.de ? margenSobreContorno(_amIt.margen, _amIt.reserva_mm) : null}
+                        margenAMedida={_amIt && _amIt.de ? margenSobreContorno(_amEst.mg, _amRes, _amFo, _amOr, _amEst.a, _amEst.h, _amTe) : null}
                         telaAMedida={_telaVisor}
-                        tirasAMedida={(_amIt && _amIt.de && _amTirasVer) ? { ..._amTirasVer, reservaCm: (Number(_amIt.reserva_mm) || 0) / 10 } : null}
-                        visorReemplazo={null}
-                        canvasLayout={_layoutVivo || canvasLayout}
+                        tirasAMedida={(_amIt && _amIt.de && _amTirasVer) ? { ..._amTirasVer, reservaCm: _amRes / 10 } : null}
+                        visorReemplazo={_amSinArmar ? _visorMedida : null}
+                        canvasLayout={_amSinArmar ? null : (_layoutVivo || canvasLayout)}
                         mapeoData={mapeoData}
                         cargando={mapeoCargando}
                         mapeoValores={mapeoValores}
@@ -20111,7 +20559,7 @@ export default function App() {
                         onGuardar={guardarMapeo}
                         onCerrar={null}
                         vf={_todasBOn ? _vfTodasB : vfArte}
-                        onCargarDiseno={() => fileInputArteRef.current.click()}
+                        onCargarDiseno={_amSinArmar ? null : () => fileInputArteRef.current.click()}
                         titulo={(
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                             <span style={{ width: 9, height: 9, borderRadius: '50%', background: colAct, flexShrink: 0 }} />
@@ -20142,22 +20590,29 @@ export default function App() {
                           {/* OPCIONAL: la plantilla para el diseñador, por si no la tienen (MAPA 617).
                               Sin el «?» aparte: el modal explica todo adentro. */}
                           {!_esB && (
-                          <button className="btn ghost" data-tour="arte-crear-plantilla"style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }}
+                          <button className="btn ghost" data-tour="arte-crear-plantilla"style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} disabled={_amSinArmar}
                             title="Crear la plantilla del arte (guía .ai, Illustrator o CorelDRAW) de las variables de todos los diseños del pedido"
                             onClick={() => setPlantillaPedido(true)}>
                             <Icon name="download" style={{ width: 13, height: 13 }} /> Crear plantilla
                           </button>
                           )}
                           {!_esB && (
-                          <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} disabled={!!amArmando} title={amArmando ? 'Aplicando la medida nueva…' : undefined} onClick={() => fileInputArteRef.current.click()}>
-                            <Icon name="upload" style={{ width: 13, height: 13 }} /> {cargadoActual ? 'Cambiar arte' : 'Cargar arte'}
+                          <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} disabled={!!amArmando || _amSinArmar} title={(amArmando || _amSinArmar) ? 'Se está armando el molde a esta medida' : undefined} onClick={() => fileInputArteRef.current.click()}>
+                            {/* MIENTRAS SE ARMA LA MEDIDA (MAPA 678, reclamo del usuario 2026-10-12: «queda apagado un rato y no
+                                me dice por qué»): el botón dice QUÉ está pasando, con el giro, en vez de quedar mudo y apagado */}
+                            {(amArmando || _amSinArmar) ? (<>
+                              <span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.25)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+                              Armando la medida…
+                            </>) : (<>
+                              <Icon name="upload" style={{ width: 13, height: 13 }} /> {cargadoActual ? 'Cambiar arte' : 'Cargar arte'}
+                            </>)}
                           </button>
                           )}
                           {/* El botón depende SÓLO de que haya telas en el sistema. Antes miraba la
                               lista ya filtrada por la selección: con telas asignadas sólo por pieza
                               (o al seleccionar piezas sin telas en común) desaparecía en pleno uso. */}
                           {(telasReg.telas || []).length > 0 && (
-                            <button className="btn ghost" data-tour="arte-telas" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); setTelaAviso(''); }} title="Asignar la tela de cada pieza (por defecto, una para todas)">
+                            <button className="btn ghost" data-tour="arte-telas" disabled={_amSinArmar} style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); setTelaAviso(''); }} title="Asignar la tela de cada pieza (por defecto, una para todas)">
                               <Icon name="telaRollo" style={{ width: 13, height: 13 }} /> Asignar telas
                             </button>
                           )}
@@ -20180,7 +20635,7 @@ export default function App() {
                         onPiezaFuera={(gen) => togglePiezaFuera(disenoActivo, _id, gen)}
                         onPiezasFueraTodas={(gens, apagar) => piezasFueraTodas(disenoActivo, _id, gens, apagar)}
                         piezasBloqueo={_esB && _sinNombreB.length ? 'Primero nombrá todas las piezas (panel «Piezas y etiqueta»)' : null}
-                        panelIzquierdo={(_amIt && _amIt.de) ? _panelMedida : estado?.talles?.length > 0 ? (
+                        panelIzquierdo={_amIt ? _panelMedida : estado?.talles?.length > 0 ? (
                           <div style={{ width: 150, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)', padding: '11px 12px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 6 }}>
                               <span style={{ flex: 1 }}>{_esB && etqPickB ? 'Talle guía' : (term.variante === 'Talle' ? 'Talles' : term.variante)}</span>
@@ -24562,7 +25017,19 @@ export default function App() {
                               // ES EL MARGEN (la misma línea que la herramienta «Margen»); el contorno es el tamaño
                               // completo. Gemelo: `cajaGuia` de motor/molde/herramientas.js (guía .ai / PDF).
                               if (prodCfg?.a_medida && p.w_cm && p.h_cm) {
-                                const mb = margenSobreContorno(prodCfg.a_medida.margen, prodCfg.a_medida.reserva_mm);
+                                const _amP = prodCfg.a_medida;
+                                const mb = margenSobreContorno(_amP.margen, reservaAM(_amP), _amP.forma, _amP.orientacion, _amP.ancho_m, _amP.alto_m, _amP.terminacion);
+                                // CÍRCULO / TRIÁNGULO (MAPA 645): la guía con su forma; la medida, la de su caja
+                                if (mb.forma) {
+                                  const g = guiaForma(mb.forma, mb.orientacion, p.px, p.py, p.px + p.pw, p.py + p.ph, margenUniforme(mb) * pxcm, true,
+                                    mb.diseno ? { w: mb.diseno.w, h: mb.diseno.h, t: margenUniforme(mb), r: mb.recorte !== false } : null);
+                                  const bx = cajaForma(g);
+                                  if (bx) {
+                                    const rw = bx[2] - bx[0], rh = bx[3] - bx[1];
+                                    return { nombrePz, ancho: Math.round(rw / pxcm * 10) / 10, alto: Math.round(rh / pxcm * 10) / 10, rectW: rw, rectH: rh,
+                                      cx: bx[0] + rw / 2, cy: bx[1] + rh / 2, rx: bx[0], ry: bx[1], formaD: pathForma(g) };
+                                  }
+                                }
                                 const aw = p.w_cm - mb.izq - mb.der, ah = p.h_cm - mb.arriba - mb.abajo;
                                 if (aw > 0 && ah > 0) {
                                   const rw = aw * pxcm, rh = ah * pxcm, rx0 = p.px + mb.izq * pxcm, ry0 = p.py + mb.arriba * pxcm;
@@ -24596,7 +25063,7 @@ export default function App() {
                               {/* Sin fondo ráster (rectángulo gris): las siluetas vectoriales + cajas flotan en el espacio. */}
                               {canvasLayout.dibujo.map((p) => {
                                 if (vf && !vf.show.has(p.idx)) return null;   // VER VARIANTE: solo las piezas de la variante
-                                const { nombrePz, ancho, alto, rectW, rectH, cx, cy, rx, ry } = cajaDe(p);
+                                const { nombrePz, ancho, alto, rectW, rectH, cx, cy, rx, ry, formaD } = cajaDe(p);
                                 const esTalle = configMedida === 'talle';
                                 // resaltar la dimensión de referencia (como el default), salvo en 'talle por talle'
                                 const hlAncho = !esTalle && guiaEsAncho, hlAlto = !esTalle && !guiaEsAncho;
@@ -24607,7 +25074,9 @@ export default function App() {
                                         constante (non-scaling-stroke) para que se vea nítido a cualquier zoom. */}
                                     <path d={p.path_svg} vectorEffect="non-scaling-stroke" style={esTalle ? { fill: 'rgba(0,243,255,0.07)', stroke: 'var(--accent)', strokeWidth: 1.5 } : { fill: 'rgba(255,255,255,0.04)', stroke: 'rgba(255,255,255,0.25)', strokeWidth: 1.2 }} />
                                     {/* RECUADRO del diseño (SIEMPRE, también en 'talle': el recuadro va por fuera de la pieza) */}
-                                    <rect x={rx} y={ry} width={rectW} height={rectH} vectorEffect="non-scaling-stroke" fill={esTalle ? 'none' : 'rgba(0,243,255,0.08)'} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="6 4" />
+                                    {formaD
+                                      ? <path d={formaD} vectorEffect="non-scaling-stroke" fill={esTalle ? 'none' : 'rgba(0,243,255,0.08)'} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="6 4" />
+                                      : <rect x={rx} y={ry} width={rectW} height={rectH} vectorEffect="non-scaling-stroke" fill={esTalle ? 'none' : 'rgba(0,243,255,0.08)'} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="6 4" />}
                                     {/* ancho (arriba del recuadro) */}
                                     <g transform={`translate(${cx}, ${ry - 11})`}>
                                       <rect x={-38} y={-9} width={76} height={18} rx={4} fill="rgba(0,0,0,0.9)" stroke="var(--accent)" strokeWidth={0.75} />
@@ -25503,25 +25972,20 @@ export default function App() {
                                     {/* MOLDE A MEDIDA (MAPA 623): el margen (dobladillo) punteado en tiempo real */}
                                     {prodCfg?.a_medida && (() => {
                                       const mRaw = (tabAjustesMolde === 'margen' && margenVivo) ? margenVivo : prodCfg.a_medida.margen;
-                                      const m = margenSobreContorno(mRaw, prodCfg.a_medida.reserva_mm);
+                                      const _amC = prodCfg.a_medida;
+                                      const m = margenSobreContorno(mRaw, reservaAM(_amC), _amC.forma, _amC.orientacion, _amC.ancho_m, _amC.alto_m);
                                       const tieneMargen = (m.arriba > 0 || m.abajo > 0 || m.izq > 0 || m.der > 0);
                                       if (!tieneMargen) return null;
                                       const kx = p.w_cm ? p.pw / (p.w_cm * 10) : 1;
                                       const ky = p.h_cm ? p.ph / (p.h_cm * 10) : 1;
-                                      const x = p.px + m.izq * 10 * kx;
-                                      const y = p.py + m.arriba * 10 * ky;
-                                      const w = p.pw - (m.izq + m.der) * 10 * kx;
-                                      const h = p.ph - (m.arriba + m.abajo) * 10 * ky;
-                                      if (!(w > 0 && h > 0)) return null;
                                       // MARCAS DE TIRAS (MAPA 639): las del motor, en vivo mientras se editan
-                                      const _rv = (Number(prodCfg.a_medida.reserva_mm) || 0) * kx;
-                                      const _tr = tirasDeMolde({ ...prodCfg.a_medida, margen: mRaw }, (tabAjustesMolde === 'tiras' && tirasVivo)
+                                      const _rv = reservaAM(_amC) * kx;
+                                      const _tr = tirasDeMolde({ ..._amC, margen: mRaw }, (tabAjustesMolde === 'tiras' && tirasVivo)
                                         // con la herramienta abierta y apagadas, igual se ven (3 por lado, de muestra) para mirar el grosor y el color
-                                        ? (tirasVivo.activo ? tirasVivo : { ...tirasVivo, activo: true, lados: { arriba: 3, abajo: 3, izq: 3, der: 3 } }) : null);
+                                        ? (tirasVivo.activo ? tirasVivo : { ...tirasVivo, activo: true, lados: { arriba: 3, abajo: 3, izq: 3, der: 3, base: 3, laterales: 3, alrededor: 8 } }) : null);
                                       return (
                                         <g pointerEvents="none" data-tour="arte-dobladillo">
-                                          <rect x={x} y={y} width={w} height={h} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={spx(3)} vectorEffect="non-scaling-stroke" />
-                                          <rect x={x} y={y} width={w} height={h} fill="none" stroke="#ffffff" strokeWidth={spx(1.5)} strokeDasharray="9 6" vectorEffect="non-scaling-stroke" />
+                                          <GuiaMargenSVG m={m} x0={p.px} y0={p.py} w={p.pw} h={p.ph} kx={kx} ky={ky} grueso={spx(3)} fino={spx(1.5)} />
                                           <MarcasTirasSVG tiras={_tr} x0={p.px - _rv} y0={p.py - _rv} w={p.pw + 2 * _rv} h={p.ph + 2 * _rv} k={kx} />
                                         </g>
                                       );
@@ -27085,6 +27549,73 @@ export default function App() {
                     )}
                   </div>
                 </div>
+
+                {/* LAS TIPOGRAFÍAS INSTALADAS EN ESTA PC (MAPA 672): se usan solas en el pedido (sin cargarlas) y
+                    acá se ven y se pueden CARGAR AL SISTEMA, para que sirvan en otra PC o en un pedido por la API.
+                    La muestra la dibuja el navegador con la tipografía instalada (`local()`): nada se sube para verla. */}
+                {pcPermiso !== 'no' && (() => {
+                  const q = _sinTildes(buscarFuente).trim();
+                  const enSistema = new Set((estado?.fuentes || []).flatMap(f => [f.ps, f.completo]).filter(Boolean));
+                  const lista = q ? pcLista.filter(f => _sinTildes(f.completo).includes(q) || _sinTildes(f.ps).includes(q)) : pcLista;
+                  const vista = lista.slice(0, pcVer);
+                  const fam = (f) => 'tzpc_' + String(f.ps).replace(/[^a-zA-Z0-9]/g, '');
+                  const txt = muestraGlobal.trim() ? muestraGlobal : MUESTRA_DEF;
+                  return (
+                    <div className="card" data-tour="fuentes-pc" style={{ margin: '0 0 20px', padding: 24 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                        <div className="card-title" style={{ margin: 0 }}>
+                          Tipografías de esta PC{pcPermiso === 'granted' ? ` (${pcLista.length})` : ''}
+                        </div>
+                        {botonFuentesPc()}
+                      </div>
+                      {pcPermiso === 'granted' && (
+                        <>
+                          <style>{vista.map(f => `@font-face{font-family:'${fam(f)}';src:local('${String(f.completo).replace(/'/g, "\\'")}'),local('${String(f.ps).replace(/'/g, "\\'")}');}`).join('')}</style>
+                          {!lista.length ? (
+                            <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{q ? `Ninguna coincide con “${buscarFuente}”.` : 'Sin tipografías.'}</div>
+                          ) : (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                              {vista.map(f => {
+                                const ya = enSistema.has(f.ps) || enSistema.has(f.completo);
+                                return (
+                                  <div key={f.ps} style={{ border: '1px solid var(--border-light)', borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 14px', borderBottom: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)' }}>
+                                      <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.completo || f.ps}</div>
+                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.ps}</div>
+                                      </div>
+                                      {ya ? (
+                                        <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: 'var(--success)' }}>✓ En el sistema</span>
+                                      ) : (
+                                        <button type="button" className="btn ghost" disabled={!!pcSubiendo}
+                                          style={{ flexShrink: 0, fontSize: 11.5, padding: '4px 10px', borderRadius: 7 }}
+                                          onClick={async () => {
+                                            setPcSubiendo(f.ps);
+                                            try { await handleUploadFile('fuente', await archivoPc(f.ps)); }
+                                            catch (e) { showError('No se pudo leer la tipografía de esta PC: ' + (e.message || e)); }
+                                            finally { setPcSubiendo(''); }
+                                          }}>
+                                          {pcSubiendo === f.ps ? 'Cargando…' : 'Cargar al sistema'}
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div style={{ fontFamily: `'${fam(f)}', system-ui`, fontSize: 34, lineHeight: 1.25, padding: '14px 14px 16px',
+                                      color: 'var(--text-primary, #fff)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{txt}</div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {lista.length > vista.length && (
+                            <button type="button" className="btn ghost" style={{ marginTop: 14, fontSize: 12.5 }} onClick={() => setPcVer(v => v + 60)}>
+                              Ver más ({lista.length - vista.length})
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </>
@@ -27252,6 +27783,8 @@ export default function App() {
           <div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
             <b style={{ color: '#f5b942' }}>Falta una tipografía que usa el diseño.</b> Se va a sublimar con{' '}
             <b>«Anton Regular»</b> (la predeterminada). Cargá la que usó el diseño o elegí una del catálogo.
+            {/* si está instalada en esta PC, con el permiso alcanza (MAPA 672) */}
+            {pcPermiso !== 'granted' && pcPermiso !== 'no' && <div style={{ marginTop: 8 }}>{botonFuentesPc()}</div>}
             {/* SIEMPRE con nombre y apellido: qué fuente, en qué MOLDE y en qué DISEÑO */}
             <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {fuentesFaltantesItems.map(x => (

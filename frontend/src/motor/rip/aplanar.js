@@ -327,7 +327,7 @@ function declararEstadoGrafico(doc, page) {
 }
 
 // ─── `_aplanar_un_nivel` (default) ───────────────────────────────────────────────────────────
-function aplanarUnNivel(doc, page, hechos) {
+function aplanarUnNivel(doc, page, hechos, listos = null) {
   const res = page.get('Resources')
   const xobjs = nulo(res) ? null : res.get('XObject')
   if (!nulo(xobjs)) {
@@ -335,7 +335,7 @@ function aplanarUnNivel(doc, page, hechos) {
       const xo = xobjs.get(nm)
       if (!esForm(xo)) continue
       const id = idDe(xo) || null
-      if (id !== null && hechos.has(id)) continue
+      if (id !== null && (hechos.has(id) || (listos && listos.has(id)))) continue
       const r = xo.get('Resources')
       if (!nulo(xo.get('TizadaBase')) && (nulo(r) || nulo(r.get('XObject')))) {
         // Base de la hoja compartida: nace de una página desplegada, sin marcadores de capa y con
@@ -346,7 +346,7 @@ function aplanarUnNivel(doc, page, hechos) {
       }
       const sub = flatten(doc, xo, false, hechos)          // des-anida lo de ADENTRO
       procesarContenido(doc, xo, sub, true)                // y lo sanea, una vez
-      if (id !== null) hechos.set(id, sub)
+      if (id !== null) { hechos.set(id, sub); if (listos) listos.add(id) }   // listo EN EL LUGAR (MAPA 667)
       if (!nulo(xo.get('OC'))) xo.delete('OC')
       if (!nulo(xo.get('Group'))) xo.delete('Group')       // sin grupos de transparencia
     }
@@ -466,6 +466,9 @@ export function aplanarParaRip(mupdf, bytes, opciones = {}) {
   const doc = new mupdf.PDFDocument(bytes)
   try {
     const n = doc.countPages()
+    // 🔴 los Form ya aplanados EN EL LUGAR, para todo el archivo (MAPA 667): las mesas del molde son las mismas
+    // en todas las páginas de la hoja y se rehacían en cada una. Sólo se anota QUÉ objeto (sin memoria).
+    const listos = new Set()
     for (let i = 0; i < n; i++) {
       const page = doc.findPage(i)
       // 🔴 el memo es POR PÁGINA: en la hoja cada página es una mesa independiente y así las
@@ -475,7 +478,7 @@ export function aplanarParaRip(mupdf, bytes, opciones = {}) {
         const ops = flatten(doc, page, true, hechos)      // des-anida los Form XObjects (inline)
         procesarContenido(doc, page, ops, false)           // 1 pasada, sobre las instrucciones en memoria
         declararEstadoGrafico(doc, page)
-      } else aplanarUnNivel(doc, page, hechos)
+      } else aplanarUnNivel(doc, page, hechos, listos)
     }
     unificarIcc(doc)
     // El OutputIntent (perfil de salida) se CONSERVA: le dice al RIP con qué perfil se armó.

@@ -50,9 +50,11 @@ PID = "prod_externo_a"
 ORIGEN = os.path.join(AQUI, "entrada", "prod_20260820_095558_38bc")
 DATOS_ORIGEN = os.path.join(AQUI, "datos", "productos", "prod_20260820_095558_38bc")
 ROBOT = os.path.join(AQUI, "frontend", "src", "motor", "robot", "robot.mjs")
+
 ARTE_1, ARTE_2 = "jugador", "refwerrf"        # refwerrf trae «Editable escudo»
 FUENTE = next(os.path.join(AQUI, "catalogo_fuentes", f) for f in sorted(os.listdir(os.path.join(AQUI, "catalogo_fuentes")))
               if f.lower().endswith((".ttf", ".otf")))
+_PS_FUENTE = None          # su nombre PostScript (con el que la pide el pedido para cada campo); se llena abajo
 
 
 def _puerto():
@@ -332,10 +334,17 @@ def main():
     print("\n5 · UN PEDIDO BUENO, DE PUNTA A PUNTA (el robot)")
     avisos = _servir(_Avisos)
     cli.post("/api/integracion/config", json={"aviso_url": f"http://127.0.0.1:{avisos.server_port}/aviso"})
+    global _PS_FUENTE
+    with open(FUENTE, "rb") as _fh:
+        _PS_FUENTE = S.MP.nombres_fuente(_fh.read())["ps"]
     arte1 = os.path.join(ORIGEN, "disenos", ARTE_1, "arte.ai")
     arte2 = os.path.join(ORIGEN, "disenos", ARTE_2, "arte.ai")
     bueno = pedido(referencia="OV-2026-00123",
+                   # 🔴 (MAPA 670) la tipografía del paquete se pide PARA CADA CAMPO: el arte «jugador» es el REAL del molde
+                   # del usuario y cambia (el del 2026-10-12 pide «AIKFotboll130years», que no está en ningún catálogo);
+                   # así el contrato no depende de qué fuente traiga ese arte y prueba que la del paquete se USA
                    disenos=[{"nombre": "JUGADOR", "tipografias": ["tipografias/" + os.path.basename(FUENTE)],
+                             "tipografia_por_campo": {"nombre": _PS_FUENTE, "numero": _PS_FUENTE},
                              "moldes": [{"molde": PID, "tela": "44", "telas_por_pieza": {"Cuello": "77"}, "arte": "artes/jugador.ai"}]},
                             {"nombre": "GOLERO", "arte": "artes/golero.ai",
                              "moldes": [{"molde": PID, "tela": "44", "telas_por_pieza": {"Cuello": "77"}, "editables": {"escudo": "tpu"}}]}],

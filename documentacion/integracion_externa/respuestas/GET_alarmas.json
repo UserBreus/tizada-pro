@@ -290,6 +290,69 @@
     "que_significa": "Una fila pide un talle que el molde no tiene."
    },
    {
+    "codigo": "medida-falta",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Mandar `medida: {ancho_m, alto_m}` (metros) en ese molde.",
+    "que_significa": "El molde es A MEDIDA (un rectángulo) y no trae su medida."
+   },
+   {
+    "codigo": "medida-invalida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Mandar números con punto: `{\"ancho_m\": 1.5, \"alto_m\": 0.9}`.",
+    "que_significa": "La medida tiene que ser metros, de 0,05 a 50."
+   },
+   {
+    "codigo": "tela-no-entra",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Elegir una tela más ancha o una medida menor.",
+    "que_significa": "La pieza a medida no entra en la tela elegida (su ancho imprimible o el largo máximo de la mesa)."
+   },
+   {
+    "codigo": "terminacion-invalida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "`terminacion`: dobladillo, overlock o sin (sin margen).",
+    "que_significa": "La terminación del borde de un molde a medida no se entiende."
+   },
+   {
+    "codigo": "forma-invalida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "`forma`: rectangulo, circulo o triangulo; `orientacion` (triángulo): abajo, arriba, izq o der.",
+    "que_significa": "La forma de un molde a medida no se entiende."
+   },
+   {
+    "codigo": "tiras-invalidas",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Mandar `tiras: {\"lleva\": true, \"lados\": {\"arriba\": 5, \"abajo\": 5, \"izq\": 0, \"der\": 0}}` (triángulo: `{\"base\": 5, \"laterales\": 4}`; círculo: `{\"alrededor\": 12}`).",
+    "que_significa": "Las tiras de un molde a medida no se entienden: cada lado (arriba, abajo, izq, der; en el triángulo base y laterales; en el círculo alrededor) es un número entero de 0 a 50 (alrededor, hasta 200)."
+   },
+   {
+    "codigo": "tiras-sin-margen",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Pedirlas en lados con margen (ver `a_medida.margen_cm` del molde) o no pedir tiras.",
+    "que_significa": "Se pidieron tiras en lados que no tienen margen: la marca va del borde a la guía del diseño y sin margen no hay guía."
+   },
+   {
+    "codigo": "tiras-no-a-medida",
+    "etapa": "datos",
+    "frena": false,
+    "que_hacer": "Las tiras son sólo de los moldes a medida (`a_medida` en /variables).",
+    "que_significa": "Se mandaron tiras en un molde que no es a medida: se ignoran."
+   },
+   {
+    "codigo": "talle-sin-columna",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Avisar al que administra TIZADA: ese molde necesita una planilla con columna de talle.",
+    "que_significa": "La planilla del molde no tiene columna de talle, pero el molde tiene varios talles: no se sabe de cuál es cada fila."
+   },
+   {
     "codigo": "opcion-inexistente",
     "etapa": "datos",
     "frena": true,
@@ -358,6 +421,13 @@
     "frena": true,
     "que_hacer": "Revisar esa mesa del arte o escribirle el nombre de la pieza en la capa «guias».",
     "que_significa": "Una mesa asignada a una pieza SIN nombre en la guía no tiene diseño (las mesas con el nombre de su pieza no se revisan: manda el nombre, sea del color que sea)."
+   },
+   {
+    "codigo": "arte-otra-medida",
+    "etapa": "arte",
+    "frena": true,
+    "que_hacer": "Pedir la plantilla con esta medida (POST /plantillas) y armar el arte ahí.",
+    "que_significa": "El arte de un molde a medida es de otra medida (se armó con la plantilla de otra medida): sus guías no coinciden con la pieza y el diseño no la cubre."
    },
    {
     "codigo": "arte-texto-vivo",
@@ -470,6 +540,48 @@
     "frena": false,
     "que_hacer": "Revisar la cuenta de servicio y la carpeta; reintentar.",
     "que_significa": "No se pudo subir a Google Drive: los PDF quedaron guardados en el servidor."
+   },
+   {
+    "codigo": "plantilla-sin-variables",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Mandar al menos una variable por diseño.",
+    "que_significa": "Un diseño de la plantilla no trae variables."
+   },
+   {
+    "codigo": "talles-invalidos",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar `todos`, `rango` (con `rangos`) o `por_talle` (con `talles`) y los talles que publica cada molde.",
+    "que_significa": "El modo de talles no se entiende o nombra un talle que ninguna variable tiene."
+   },
+   {
+    "codigo": "escala-invalida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Mandar uno de esos números (100 = tamaño real).",
+    "que_significa": "La escala de Illustrator tiene que ser 100, 90, 80… o 10."
+   },
+   {
+    "codigo": "plantilla-mesas-chocan",
+    "etapa": "plantilla",
+    "frena": false,
+    "que_hacer": "Si llevan diseños distintos, pedir esas variables en diseños separados.",
+    "que_significa": "En el archivo de un diseño hay dos piezas distintas con el mismo nombre de mesa: al subir el arte se usaría la primera para las dos."
+   },
+   {
+    "codigo": "plantilla-aviso",
+    "etapa": "plantilla",
+    "frena": false,
+    "que_hacer": "Leer el mensaje.",
+    "que_significa": "Aviso al armar la plantilla."
+   },
+   {
+    "codigo": "plantilla-fallo",
+    "etapa": "plantilla",
+    "frena": true,
+    "que_hacer": "Leer el mensaje; si es una falla del sistema, volver a pedirla.",
+    "que_significa": "La plantilla no se pudo armar."
    }
   ],
   "etapas": {

@@ -36,6 +36,7 @@ import pymupdf as fitz                         # noqa: E402
 import motor_pedido as MP                      # noqa: E402
 import piezas_con_diseno as PD                 # noqa: E402
 import ficha_tecnica as FT                     # noqa: E402
+import ficha_a_medida as FAM                   # noqa: E402
 
 NODE = os.path.join(AQUI, "frontend", "src", "motor", "pruebas", "ficha.mjs")
 FUENTES = os.environ.get("TIZADA_FUENTES") or os.path.join(AQUI, "catalogo_fuentes")
@@ -156,7 +157,24 @@ def main(orig):
                     {"etiqueta": "Arriba", "valor": "5 marcas contando las 2 puntas, una cada 76,5 cm · marca de 3 cm", "sub": True},
                     {"etiqueta": "Izquierda", "valor": "1 marca, en el medio (a 78 cm de cada punta) · marca de 3 cm", "sub": True}],
                     "notas": ["Cada marca va del borde de la pieza hasta la guía del diseño; las de las esquinas, en diagonal.",
-                              "Las distancias se miden sobre el borde, de punta a punta."]}}
+                              "Las distancias se miden sobre el borde, de punta a punta."],
+                    # LOS DIBUJOS (MAPA 659): polilíneas con rayas, rellenos, puntos y textos — los
+                    # calcula el servidor y las dos fichas los tienen que dibujar IGUAL
+                    "dibujos": FAM.dibujos_a_medida(
+                        "rectangulo", "abajo", "dobladillo", 300, 150, {"arriba": 3, "abajo": 3, "izq": 3, "der": 3}, 306, 156,
+                        tiras={"lados": {"arriba": 5, "abajo": 5, "izq": 1, "der": 0}, "margen": {"arriba": 3, "abajo": 3, "izq": 3, "der": 3},
+                               "marcar": True, "recorte": True, "diseno_cm": [300, 150], "color": [0, 1, 0, 0], "grosor_mm": 1.5},
+                        borde_mm=2, total_tiras=7),
+                    "titulo_disenos": "JUGADOR y GOLERO"}}
+        # MOLDE A MEDIDA EN DOS DISEÑOS (MAPA 666): el bloque compacto (un título, una tarjeta por diseño con
+        # su medida, alto justo, 3 columnas) y la sección compartida; las piezas son reales (la del buzo)
+        _pz0 = {k: v for k, v in piezas[0].items() if k != "nombre"}
+        _am = lambda dis, sec: {"nombre": "Bandera 1,00x1,00", "diseno": dis, "variante": "Bandera", "opciones": "",
+                                "piezas": [{**_pz0, "nombre": "Bandera", "tela": "Bandera (1,60)"}], "fuentes": guia["fuentes"],
+                                "procesos": [], "am": {"grupo": "tpl", "molde": "Bandera", "sub": "3,00 × 1,45 m · triángulo", "aspecto": 0.495},
+                                "a_medida": sec}
+        am_guias = [_am("JUGADOR", {"filas": [{"etiqueta": "Forma", "valor": "Triángulo, punta abajo"}], "notas": [],
+                                    "titulo_disenos": "JUGADOR y GOLERO"}), _am("GOLERO", None)]
         planilla = {"columnas": columnas, "filas": filas}
         titulo, subtitulo = "Ficha técnica", "Buzo medio cierre · 17/09/2026"
 
@@ -166,13 +184,14 @@ def main(orig):
         g_py = json.loads(json.dumps(guia, default=lambda o: None))
         g_py["piezas"] = piezas
         g_py["procesos"] = [{**proceso, "thumb": base64.b64encode(thumb_png).decode()}]
-        ruta_py = FT.generar_ficha(py_dir, titulo, subtitulo, planilla, [g_py])
+        ruta_py = FT.generar_ficha(py_dir, titulo, subtitulo, planilla, [g_py] + am_guias)
         ok(ruta_py and os.path.exists(ruta_py), "ficha del servidor escrita")
 
         print("\n3 · EL NAVEGADOR ARMA LA MISMA FICHA")
         fx = {"titulo": titulo, "subtitulo": subtitulo, "planilla": planilla,
               "moldes_guia": [{**guia, "piezas": [{**p, "pdf": base64.b64encode(p["pdf"]).decode()} for p in piezas],
-                               "procesos": [{**proceso, "thumb": base64.b64encode(thumb_png).decode()}]}]}
+                               "procesos": [{**proceso, "thumb": base64.b64encode(thumb_png).decode()}]}]
+              + [{**g, "piezas": [{**p, "pdf": base64.b64encode(p["pdf"]).decode()} for p in g["piezas"]]} for g in am_guias]}
         fxp = os.path.join(tmp, "fixture.json")
         with open(fxp, "w", encoding="utf-8") as fh:
             json.dump(fx, fh, ensure_ascii=False)

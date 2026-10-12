@@ -431,6 +431,17 @@ def correr(nombre, entrada, tmp, modos=(False, True)):
         comparar_salidas(py, js, total)
 
 
+# 🔴 EL MODO TOTAL (todo inline, no es el de producción) sólo con archivos chicos (MAPA 667): copia el dibujo de
+# cada mesa UNA VEZ POR COLOCACIÓN, y con los moldes «PR» de 100 MB (mesas de 11 MB, 220 piezas) la hoja más chica
+# de los últimos pedidos reventó la memoria de mupdf en Node. El camino real (un nivel) se prueba siempre.
+TOPE_TOTAL_MB = 6.0
+TOPE_ANIDADA_MB = 20.0           # la re-anidada (estrés): con hojas más pesadas, mupdf en Node se queda sin memoria
+
+
+def _modos(p):
+    return (False, True) if os.path.getsize(p) / 1e6 <= TOPE_TOTAL_MB else (False,)
+
+
 def entradas_por_defecto():
     """De `trabajos/` (sólo se leen): la FICHA más reciente, la HOJA más reciente y la HOJA más chica
     de los últimos pedidos (para el modo TOTAL y la re-anidada, que multiplican el contenido)."""
@@ -462,7 +473,7 @@ if __name__ == "__main__":
             ficha, hoja, chica = entradas_por_defecto()
             if ficha:
                 print(f"· {os.path.relpath(ficha, AQUI)} ({os.path.getsize(ficha) / 1e6:.1f} MB, PyMuPDF, XObjects anidados)")
-                correr("ficha", ficha, tmp)
+                correr("ficha", ficha, tmp, modos=_modos(ficha))
             if hoja:
                 # 🔴 SÓLO UN NIVEL (el camino real del servidor). En TOTAL cada `Do` de una base se
                 # inlinea una vez por colocación: con esta hoja de 8 MB el servidor tarda 2,5 min y
@@ -471,8 +482,12 @@ if __name__ == "__main__":
                 correr("hoja", hoja, tmp, modos=(False,))
             if chica and chica != hoja:
                 print(f"· {os.path.relpath(chica, AQUI)} ({os.path.getsize(chica) / 1e6:.1f} MB, la hoja más chica de los últimos pedidos)")
-                correr("hoja_chica", chica, tmp)
-            if chica:
+                correr("hoja_chica", chica, tmp, modos=_modos(chica))
+            if chica and os.path.getsize(chica) / 1e6 > TOPE_ANIDADA_MB:
+                # (MAPA 667) re-anidar una hoja de moldes «PR» (40 MB, mesas de 11 MB) revienta la memoria de mupdf en
+                # Node TAMBIÉN con el código de antes: es una prueba de estrés, no el camino real (ese ya se probó arriba)
+                print(f"· (re-anidada salteada: la hoja más chica pesa {os.path.getsize(chica) / 1e6:.1f} MB, más que el tope de {TOPE_ANIDADA_MB:g} MB)")
+            elif chica:
                 anid = os.path.join(tmp, "hoja_anidada.pdf")
                 armar_hoja_anidada(chica, anid)
                 print(f"· esa hoja chica re-anidada dos niveles adentro de una capa OCG ({os.path.getsize(anid) / 1e6:.1f} MB): contenido real sin aplanar")

@@ -344,7 +344,12 @@ _FUENTE_INTERNO = {}
 
 def registrar_fuente(ruta, interno):
     """Anota el nombre interno de una tipografía recién guardada (lo leyó el navegador con el mismo
-    MuPDF): el catálogo no la vuelve a abrir para saberlo."""
+    MuPDF): el catálogo no la vuelve a abrir para saberlo.
+    🔴 «subida» NO es un nombre (MAPA 669): una pestaña de antes del arreglo lo manda para TODA tipografía
+    (`new mupdf.Font('subida', bytes).getName()` devuelve lo que se le pasa). Se ignora y el catálogo lo lee
+    del archivo, como siempre."""
+    if not str(interno or "").strip() or str(interno).strip().lower() == "subida":
+        return
     try:
         st = os.stat(ruta)
         _FUENTE_INTERNO[(os.path.normcase(os.path.abspath(ruta)), st.st_mtime_ns, st.st_size)] = str(interno)
@@ -4394,16 +4399,183 @@ class _DocPerezoso:
 
 _LADOS_TIRAS = ("arriba", "abajo", "izq", "der")
 
+# ── FORMAS DEL MOLDE A MEDIDA (MAPA 645): gemelos EXACTOS de `frontend/src/motor/molde/formas.js` ──
+_FORMAS = ("rectangulo", "circulo", "triangulo")
+_ORIENTACIONES = ("abajo", "arriba", "izq", "der")
 
-def _segmentos_tiras(W, H, m, lados):
+
+def _norm_forma(f):
+    return f if f in _FORMAS else "rectangulo"
+
+
+def _norm_orientacion(o):
+    return o if o in _ORIENTACIONES else "abajo"
+
+
+def _margen_uniforme(m):
+    """El margen PAREJO de una forma que no es rectángulo: el mayor de los cuatro. Gemelo: `margenUniforme`."""
+    return max(float(m.get("arriba") or 0), float(m.get("abajo") or 0), float(m.get("izq") or 0), float(m.get("der") or 0))
+
+
+def _vertices_triangulo(x0, y0, x1, y1, orientacion):
+    """El triángulo isósceles que llena la caja (y hacia ARRIBA): [baseA, baseB, punta]. Gemelo: `verticesTriangulo`."""
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    o = _norm_orientacion(orientacion)
+    if o == "arriba":
+        return [(x0, y0), (x1, y0), (cx, y1)]
+    if o == "izq":
+        return [(x1, y1), (x1, y0), (x0, cy)]
+    if o == "der":
+        return [(x0, y0), (x0, y1), (x1, cy)]
+    return [(x1, y1), (x0, y1), (cx, y0)]
+
+
+def _incentro(p):
+    """(x, y, r) del incentro. Gemelo: `incentro` (sqrt, no hypot: mismo número en los dos)."""
+    A, B, C = p
+    d = lambda u, v: math.sqrt((u[0] - v[0]) * (u[0] - v[0]) + (u[1] - v[1]) * (u[1] - v[1]))
+    a, b, c = d(B, C), d(C, A), d(A, B)
+    per = a + b + c
+    ix = (a * A[0] + b * B[0] + c * C[0]) / per
+    iy = (a * A[1] + b * B[1] + c * C[1]) / per
+    area = abs((B[0] - A[0]) * (C[1] - A[1]) - (C[0] - A[0]) * (B[1] - A[1])) / 2
+    return ix, iy, area / (per / 2)
+
+
+def _triangulo_corrido(p, t):
+    """Cada lado corrido `t` (afuera +, adentro −): homotecia desde el incentro. Gemelo: `trianguloCorrido`."""
+    ix, iy, r = _incentro(p)
+    k = (r + t) / r
+    return [(ix + (x - ix) * k, iy + (y - iy) * k) for x, y in p]
+
+
+def _factor_triangulo(ancho, alto, orientacion, t):
+    """Cuánto crece la caja de un triángulo cuando cada lado se corre `t`. Gemelo: `factorTriangulo`."""
+    r = _incentro(_vertices_triangulo(0, 0, ancho, alto, orientacion))[2]
+    return (r + t) / r if r > 0 else 1.0
+
+
+def _solapa_tri(G, i, t):
+    """La SOLAPA del lado `i` (de G[i] a G[i+1]) con margen `t`: (ux, uy, nx, ny, L, ca, cb, tt) — dirección,
+    normal hacia afuera, largo, la cotangente del ángulo del recorte en cada punta (el de la punta, o la
+    mitad del hueco si la punta pasa de 120°, así las solapas vecinas no se pisan en la tela) y el alto
+    (`t`, salvo un triángulo tan chico que los dos recortes se cruzan). Sin trigonometría: mismos números
+    en los dos gemelos. Gemelo EXACTO: `solapaTri` de motor/molde/formas.js."""
+    a, b, c = G[i], G[(i + 1) % 3], G[(i + 2) % 3]
+    L = math.sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]))
+    ux, uy = (b[0] - a[0]) / L, (b[1] - a[1]) / L
+    nx, ny = -uy, ux
+    if nx * (c[0] - a[0]) + ny * (c[1] - a[1]) > 0:          # hacia AFUERA
+        nx, ny = uy, -ux
+    hc = abs(nx * (c[0] - a[0]) + ny * (c[1] - a[1]))
+    cot = lambda pv, lv: pv / hc if pv / lv >= -0.5 else -(lv + pv) / hc
+    pa = (c[0] - a[0]) * ux + (c[1] - a[1]) * uy
+    la = math.sqrt((c[0] - a[0]) * (c[0] - a[0]) + (c[1] - a[1]) * (c[1] - a[1]))
+    pb = (c[0] - b[0]) * (-ux) + (c[1] - b[1]) * (-uy)
+    lb = math.sqrt((c[0] - b[0]) * (c[0] - b[0]) + (c[1] - b[1]) * (c[1] - b[1]))
+    ca, cb = cot(pa, la), cot(pb, lb)
+    den = ca + cb
+    tt = L / den if (den > 0 and t * den > L) else t
+    return ux, uy, nx, ny, L, ca, cb, tt
+
+
+def _geo_triangulo(w, h, t, orientacion, recorte=True):
+    """🔺 El triángulo con las PUNTAS RECORTADAS (MAPA 649-650): el del diseño (la guía) con su margen `t`
+    en solapas cortadas en cada punta por el reflejo del OTRO lado: doblada por la guía, cada solapa llega
+    justo hasta el otro lado — se superpone con la vecina, pero no sobra nada hacia afuera (como la
+    esquina del rectángulo). → {pol (9 puntos), guia (3), W, H} con el origen en la esquina de la caja
+    (y hacia arriba). Gemelo EXACTO: `geoTriangulo` de motor/molde/formas.js."""
+    G = _vertices_triangulo(0.0, 0.0, w, h, orientacion)
+    pol = []
+    if t > 0 and not recorte:
+        # OVERLOCK (MAPA 652): la costura va en el borde, no se dobla → el triángulo entero corrido el margen
+        pol = list(_triangulo_corrido(G, t))
+    elif t > 0:
+        for i in range(3):
+            a, b = G[i], G[(i + 1) % 3]
+            ux, uy, nx, ny, _L, ca, cb, tt = _solapa_tri(G, i, t)
+            pol += [a, (a[0] + tt * ca * ux + tt * nx, a[1] + tt * ca * uy + tt * ny),
+                    (b[0] - tt * cb * ux + tt * nx, b[1] - tt * cb * uy + tt * ny)]
+    else:
+        pol = list(G)
+    x0, y0 = min(p[0] for p in pol), min(p[1] for p in pol)
+    x1, y1 = max(p[0] for p in pol), max(p[1] for p in pol)
+    sh = lambda p: (p[0] - x0, p[1] - y0)
+    return {"pol": [sh(p) for p in pol], "guia": [sh(p) for p in G], "W": x1 - x0, "H": y1 - y0}
+
+
+def _medio_tiras(n, L):
+    return [L / 2] if n == 1 else [L * k / (n - 1) for k in range(1, n - 1)]
+
+
+def _segmentos_tiras_forma(W, H, m, lados, forma, orientacion, diseno=None, recorte=True):
+    """Las marcas de un CÍRCULO (`lados.alrededor` repartidas parejo, empezando arriba, del borde hacia
+    el centro el margen) o de un TRIÁNGULO (`lados.base` y `lados.laterales` = cada uno de los otros dos,
+    contando las puntas; la de una esquina, del vértice de la pieza al de la guía). Gemelo: la parte de
+    formas de `segmentosTiras`."""
+    mm = _margen_uniforme(m)
+
+    def _n(k, tope=50):
+        try:
+            return max(0, min(tope, int(float(lados.get(k) or 0))))
+        except (TypeError, ValueError):
+            return 0
+    s = []
+    if mm <= 0:
+        return s
+    if forma == "circulo":
+        n = _n("alrededor", 200)
+        cx, cy, R = W / 2, H / 2, min(W, H) / 2
+        if R - mm <= 0:
+            return s
+        for k in range(n):
+            th = math.pi / 2 + 2 * math.pi * k / n
+            c, si = math.cos(th), math.sin(th)
+            s.append((cx + R * c, cy + R * si, cx + (R - mm) * c, cy + (R - mm) * si))
+        return s
+    # TRIÁNGULO EN INGLETE (MAPA 649): la geometría sale del DISEÑO (`diseno` = (w, h), mismas unidades);
+    # las puntas no llevan marca (el corte llega a la punta de la guía) pero cuentan para repartir las del
+    # medio, que van de la solapa a la guía y se angostan con el recorte cerca de la punta
+    if not diseno:
+        return s
+    g = _geo_triangulo(float(diseno[0]), float(diseno[1]), mm, orientacion, recorte)
+    if not (g["W"] > 0 and g["H"] > 0):
+        return s
+    sx, sy = W / g["W"], H / g["H"]
+    G = g["guia"]
+    nb, nl = _n("base"), _n("laterales")
+    if not recorte:
+        # OVERLOCK (MAPA 652): las puntas están enteras → una por punta, en diagonal (de la del total a la de la guía)
+        P = g["pol"]
+        for i, ok in ((0, nb >= 2 or nl >= 2), (1, nb >= 2 or nl >= 2), (2, nl >= 2)):
+            if ok:
+                s.append((P[i][0] * sx, P[i][1] * sy, G[i][0] * sx, G[i][1] * sy))
+    for i, n in ((0, nb), (1, nl), (2, nl)):
+        if n <= 0:
+            continue
+        px, py = G[i][0], G[i][1]
+        # la solapa con sus recortes (`_solapa_tri`): a `d` de la punta tiene d / ca de ancho
+        ux, uy, nx, ny, L, ca, cb, tt = _solapa_tri(G, i, mm)
+        for d in _medio_tiras(n, L):
+            an = min(tt, d / ca if ca > 0 else math.inf, (L - d) / cb if cb > 0 else math.inf) if recorte else mm
+            if not an > 0:
+                continue
+            ex, ey = px + ux * d, py + uy * d
+            s.append(((ex + nx * an) * sx, (ey + ny * an) * sy, ex * sx, ey * sy))
+    return s
+
+
+def _segmentos_tiras(W, H, m, lados, forma="rectangulo", orientacion="abajo", diseno=None, recorte=None):
     """Las marcas de una pieza de `W` × `H` (origen abajo a la izquierda, y hacia ARRIBA, como el PDF),
     con el margen `m` = {arriba, abajo, izq, der} en las mismas unidades y `lados` = cuántas marcas en
     cada lado CONTANDO LAS PUNTAS: `[(x1, y1, x2, y2), …]` del borde hacia la guía. Primero las esquinas
     (abajo-izq, abajo-der, arriba-der, arriba-izq), después lo de adentro de cada lado (izq, der, abajo,
     arriba). Un lado sin margen no lleva marcas (no hay guía hasta dónde llegar)."""
+    lados = lados if isinstance(lados, dict) else {}
+    if _norm_forma(forma) != "rectangulo":
+        return _segmentos_tiras_forma(W, H, m, lados, _norm_forma(forma), _norm_orientacion(orientacion), diseno, recorte is not False)
     mi, md = float(m.get("izq") or 0), float(m.get("der") or 0)
     ma, mb = float(m.get("arriba") or 0), float(m.get("abajo") or 0)
-    lados = lados if isinstance(lados, dict) else {}
 
     def _n(k):
         try:
@@ -4411,6 +4583,25 @@ def _segmentos_tiras(W, H, m, lados):
         except (TypeError, ValueError):
             return 0
     n_i, n_d, n_a, n_b = _n("izq"), _n("der"), _n("arriba"), _n("abajo")
+    _medio_r = lambda c, Lg: [Lg / 2] if c == 1 else [Lg * (i + 1) / (c - 1) for i in range(max(0, c - 2))]
+    if recorte is True:
+        # RECTÁNGULO CON LAS ESQUINAS RECORTADAS (MAPA 653): la esquina no lleva marca (el corte ya la marca)
+        # pero cuenta; las del medio se reparten sobre la GUÍA (el borde terminado), de esquina a esquina
+        s = []
+        gx0, gy0, Lh, Lv = mi, mb, W - mi - md, H - ma - mb
+        if mi > 0:
+            for y in _medio_r(n_i, Lv):
+                s.append((0.0, gy0 + y, mi, gy0 + y))
+        if md > 0:
+            for y in _medio_r(n_d, Lv):
+                s.append((W, gy0 + y, W - md, gy0 + y))
+        if mb > 0:
+            for x in _medio_r(n_b, Lh):
+                s.append((gx0 + x, 0.0, gx0 + x, mb))
+        if ma > 0:
+            for x in _medio_r(n_a, Lh):
+                s.append((gx0 + x, H, gx0 + x, H - ma))
+        return s
     pide = lambda n, mg: n >= 2 and mg > 0          # con 2 o más, las puntas son del lado
     s = []
     for ok, sg in ((pide(n_i, mi) or pide(n_b, mb), (0.0, 0.0, mi, mb)),
@@ -4437,22 +4628,37 @@ def _segmentos_tiras(W, H, m, lados):
     return s
 
 
-def _ops_tiras(tiras, W, H):
-    """El trazo de las marcas de tiras sobre la página de la pieza (`W` × `H` pt = el TOTAL de la pieza
-    a medida: contorno + la reserva del borde). `tiras` = lo que arma `servidor._tiras_de` (margen en cm)."""
+TIRA_CONTORNO_MM = 0.4   # el contorno blanco de la marca de tira, de cada lado (gemelo: `TIRA_CONTORNO_MM` de pieza/base.js)
+
+
+def _ops_tiras(tiras, W, H, B=0.0):
+    """El trazo de las marcas de tiras sobre la página de la pieza (`W` × `H` pt = el CONTORNO; la página
+    lo rodea con `B`). El TOTAL de la pieza a medida es la página entera (rectángulo y círculo: el
+    contorno está la reserva más adentro) salvo en el TRIÁNGULO, donde el contorno ES el total y el
+    borde va por dentro (MAPA 645). `tiras` = lo que arma `servidor._tiras_de` (margen en cm)."""
     if not isinstance(tiras, dict):
         return ""
     mg = tiras.get("margen") or {}
     m = {k: float(mg.get(k) or 0) * CM for k in ("arriba", "abajo", "izq", "der")}
-    segs = _segmentos_tiras(W, H, m, tiras.get("lados"))
+    forma = _norm_forma(tiras.get("forma"))
+    # el triángulo recortado se arma con la medida del DISEÑO (MAPA 649), en las unidades de la página
+    _dc = tiras.get("diseno_cm")
+    dis = (float(_dc[0]) * CM, float(_dc[1]) * CM) if isinstance(_dc, (list, tuple)) and len(_dc) == 2 else None
+    if forma == "triangulo":
+        segs = [(x1 + B, y1 + B, x2 + B, y2 + B) for x1, y1, x2, y2 in
+                _segmentos_tiras(W, H, m, tiras.get("lados"), forma, tiras.get("orientacion"), dis, tiras.get("recorte") is not False)]
+    else:
+        segs = _segmentos_tiras(W + 2 * B, H + 2 * B, m, tiras.get("lados"), forma, tiras.get("orientacion"), dis, tiras.get("recorte"))
     if not segs:
         return ""
-    col = " ".join(f"{float(v):g}" for v in (tiras.get("color") or [0, 0, 0, 1])[:4]) + " K"
+    # NEGRA CON CONTORNO BLANCO (MAPA 682, pedido del usuario 2026-10-12: «quitale lo de elegir el color, hacela
+    # negra con contorno blanco»): primero la misma línea en BLANCO, `TIRA_CONTORNO_MM` más ancha de cada lado, y
+    # encima la NEGRA con su grosor — se ve sobre cualquier diseño, claro u oscuro. Gemelo: `opsTiras`.
     w = max(0.1, float(tiras.get("grosor_mm") or 1.0)) * MM
-    out = f"q\n{w:.3f} w 0 J 0 j {col}\n"
-    for x1, y1, x2, y2 in segs:
-        out += f"{x1:.3f} {y1:.3f} m {x2:.3f} {y2:.3f} l\n"
-    return out + "S\nQ\n"
+    wb = w + 2 * TIRA_CONTORNO_MM * MM
+    trazo = "".join(f"{x1:.3f} {y1:.3f} m {x2:.3f} {y2:.3f} l\n" for x1, y1, x2, y2 in segs)
+    return (f"q\n{wb:.3f} w 0 J 0 j 0 0 0 0 K\n{trazo}S\nQ\n"
+            f"q\n{w:.3f} w 0 J 0 j 0 0 0 1 K\n{trazo}S\nQ\n")
 
 
 # ════════════════ NOMBRE Y NÚMERO: ALTURA Y ANCHO (2026-10-01) ════════════════
@@ -5474,7 +5680,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         _base_stream = (f"{borde}{arte_draw}{borde_post}" if _bc_alin == "fuera" else f"{arte_draw}{borde}{borde_post}")
         # MARCAS DE TIRAS (molde a medida, MAPA 639): encima del diseño y del borde, en toda la página
         # (= el total de la pieza). Gemelo: `componerBase` de motor/pieza/base.js.
-        _base_stream += _ops_tiras(_bc.get("tiras"), W + 2*B, H + 2*B)
+        _base_stream += _ops_tiras(_bc.get("tiras"), W, H, B)
         return {"out": out, "page": page, "cstream": cstream, "base_stream": _base_stream,
                 "clip": clip, "cont": cont, "W": W, "H": H, "x0": x0, "y0": y0, "x0m": x0m,
                 "y0m": y0m, "Hp": Hp, "S": S, "mesa": mesa, "_mesa_a": _mesa_a, "info": info,
@@ -6207,7 +6413,8 @@ def validar_salida(carpeta, hojas, telas_spacing):
                 if isinstance(o, pikepdf.Stream) and str(o.get("/Subtype", "")) == "/Form":
                     # una base de la hoja compartida (`/TizadaBase`) nace de una página desplegada
                     # balanceada por contrato: parsear sus 20.000 operadores no aporta nada
-                    if o.get("/TizadaBase") is None:
+                    # …y toda mesa del molde aunque anide (`/TizadaMolde`, MAPA 667)
+                    if o.get("/TizadaBase") is None and o.get("/TizadaMolde") is None:
                         chequear(o)
                 r2 = o.get("/Resources") if isinstance(o, (pikepdf.Stream, pikepdf.Dictionary)) else None
                 if r2 is not None and "/XObject" in r2:

@@ -20,6 +20,7 @@ import { traerConCache, claveDe, urlDe } from '../cache.js'
 import { pyRound } from '../py.js'
 import { puedeHacer } from '../capacidad.js'
 import { resolverFuente } from '../texto/fuentes.js'
+import { fuentesConPc, fuentesDePers } from '../texto/fuentesPc.js'
 import { claveFuenteCampo } from '../pieza/estampar.js'
 
 const CM = 28.3465
@@ -111,6 +112,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
     const puerta = puedeHacer({ tipo: 'tizada', mb, hojas: Math.max(1, plan.grupos.length) })
     if (!puerta.puede) { const e = new Error(puerta.motivo); e.capacidad = true; throw e }
   }
+  await sumarFuentesPc(plan, rutaApi)               // + las tipografías de esta PC (MAPA 670)
   // el perfil de salida (OutputIntent), una vez
   let perfil = null
   if (plan.perfil) {
@@ -118,6 +120,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
     const _pfArch = cuerpo.perfil_forzado || plan.perfil.archivo || ''
     const r = await fetch(rutaApi('/api/pedido/perfil_salida' + (_pfArch ? '?forzado=' + encodeURIComponent(_pfArch) : '')))
     if (r.ok) perfil = { icc: new Uint8Array(await r.arrayBuffer()), nombre: plan.perfil.nombre, n: plan.perfil.n }
+    else await r.text().catch(() => '')            // siempre leída (MAPA 671: una respuesta sin leer tumba al robot)
   }
   const archivos = {}            // nombre → Uint8Array
   const hojas = []
@@ -238,7 +241,8 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
       return { nombre: g.molde || md.nombre, diseno: g.diseno_nombre || 'Principal', variante: vnom ? (vnom.label || vnom.nombre) : null,
                    opciones, ejemplo: null, piezas, pdf_guia: rg.pdf, fuentes: fuentesGuia(md.pers || pers, talle, md.fuentes, resolverGuia),
                    procesos,    // TPU/Bordado/DTF y «sin marca»: el servidor dice cuáles, el dibujo es de acá
-                   a_medida: g.a_medida || null }   // molde a medida: medida, margen, borde y tiras (MAPA 643)
+                   a_medida: g.a_medida || null,   // molde a medida: medida, margen, borde y tiras (MAPA 643)
+                   am: g.am || null }               // …y su bloque compacto en la ficha (MAPA 666)
 
     } finally {
       _tGuia += (performance.now() - _t0) / 1000
@@ -271,7 +275,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
     const _procA = async (md, m) => {
       const items = [], guias = []
         // ── CAMINO A: molde pelado + arte separado, en el hilo del grupo ──
-      await mmG.pool.enviar('fuentes', await bajarFuentes(md.fuentes, md.pid, rutaApi))
+      await mmG.pool.enviar('fuentes', await bajarFuentes(md.fuentes, md.pid, rutaApi, md._pc))
       await asegurarMoldeA(m, rutaApi, md.pid, (m.info.plantilla || {}).sello, mmG)
       const { clave } = await asegurarContextoA(m, rutaApi, md.diseno, {
         mapeoArte: md.mapeo_arte || null, editablesCfg: md.editables_cfg, editablesTamano: md.editables_tamano,
@@ -320,7 +324,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
       const items = [], guias = []
       if (m.info.paginas_pendientes) throw new Error(`«${md.nombre}» todavía se está terminando de preparar`)
       // las tipografías de ESTE molde en ESTE diseño (los reemplazos son por par)
-      await m.pool.enviar('fuentes', await bajarFuentes(md.fuentes, md.pid, rutaApi))
+      await m.pool.enviar('fuentes', await bajarFuentes(md.fuentes, md.pid, rutaApi, md._pc))
       m.fuentesListas = true
       const { registro, pers } = m.info
       const bases = new Map()        // (pieza|talle|variante) → base compartida (el MISMO objeto)
@@ -460,9 +464,27 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
   return { id: d.id, resultado: d.resultado, segundos: (performance.now() - t0) / 1000, archivos }
 }
 
-async function bajarFuentes(fuentes, pid, rutaApi) {
+/**
+ * + LAS TIPOGRAFÍAS DE ESTA PC (MAPA 670): las que pide el diseño de cada molde del plan y no están subidas se
+ * suman a su catálogo (al final: una subida siempre gana) con sus bytes ya leídos (`md._pc`); la ficha, el
+ * estampado y el aviso «se achicará» las usan como a cualquier otra. Sin permiso o sin el navegador que lo
+ * permite, no cambia nada.
+ */
+async function sumarFuentesPc(plan, rutaApi) {
+  for (const md of plan.moldes) {
+    const m = await motorDe(md.pid, rutaApi)
+    const dd = m ? (m.info.disenos || []).filter((d) => d.id === (md.diseno || 'principal')) : []
+    const nombres = [...fuentesDePers(md.pers), ...fuentesDePers(m && m.info.pers), ...dd.flatMap((d) => fuentesDePers(d.pers))]
+    const r = await fuentesConPc(md.fuentes || {}, nombres)
+    md.fuentes = { ...(md.fuentes || {}), catalogo: r.catalogo, alias: r.alias }
+    md._pc = r.pc
+  }
+}
+
+async function bajarFuentes(fuentes, pid, rutaApi, pc = null) {
   const archivos = {}
   await Promise.all((fuentes.catalogo || []).map(async (f) => {
+    if (f.pc) { archivos[f.archivo] = pc.get(f.archivo).slice(); return }     // de esta PC (MAPA 670)
     const url = rutaApi(`/api/fuente/archivo/${encodeURIComponent(f.archivo)}` + (f.propia ? `?pid=${encodeURIComponent(pid)}` : ''))
     archivos[f.archivo] = await traerConCache(`fuente|${f.hash}|${f.archivo}`, url)
   }))
@@ -520,6 +542,7 @@ export async function achiquesEnNavegador(cuerpo, { rutaApi, cortado = () => fal
     plan = await json(rutaApi('/api/pedido/plan'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) })
   } catch { return null }                         // la planilla todavía no se puede fabricar: sin aviso
   if (!plan.todo_camino_b && !plan.todo_navegador) return null
+  await sumarFuentesPc(plan, rutaApi)               // mide con la MISMA tipografía que la tizada (MAPA 670)
   const out = {}
   const anotar = (pr, md, pieza, rep) => {
     const f = Number.isInteger(pr._fila) ? pr._fila : null
@@ -541,13 +564,14 @@ export async function achiquesEnNavegador(cuerpo, { rutaApi, cortado = () => fal
     if (!m || cortado()) continue
     const { registro } = m.info
     const vistos = new Set()                      // la misma fila repetida por Cantidad se mide una vez
-    const firmaMd = _firmaTxt(JSON.stringify([md.pid, md.diseno, md.pers, md.limite_texto, md.fuentes.alias, md.mapeo_arte,
+    const firmaMd = _firmaTxt(JSON.stringify([md.pid, md.diseno, md.pers, md.limite_texto, md.fuentes.alias,
+      (md.fuentes.catalogo || []).filter((f) => f.pc).map((f) => f.archivo), md.mapeo_arte,
       md.borde_corte, md.editables_cfg, md.editables_tamano, md.referencia, m.firma]))
     // el molde y sus tipografías se preparan SÓLO si hay algo que no esté medido
     let listo = null
     const preparar = async () => {
       if (listo) return listo
-      await m.pool.enviar('fuentes', await bajarFuentes(md.fuentes, md.pid, rutaApi))
+      await m.pool.enviar('fuentes', await bajarFuentes(md.fuentes, md.pid, rutaApi, md._pc))
       m.fuentesListas = true
       if (m.info.camino_a) {
         await asegurarMoldeA(m, rutaApi, md.pid, (m.info.plantilla || {}).sello)

@@ -136,10 +136,10 @@ const TAREAS = {
   },
   /** MOLDE A MEDIDA (MAPA 623): el PDF del rectángulo + su resumen (forma DXF: el nombre de la
    *  pieza viaja en `nombres` y el alta lo pone solo). */
-  async a_medida_pdf({ anchoM, altoM, pieza, reservaMm = 0, margen = null }) {
+  async a_medida_pdf({ anchoM, altoM, pieza, reservaMm = 0, margen = null, forma = 'rectangulo', orientacion = 'abajo', terminacion = 'dobladillo' }) {
     await cargar()
     const { pdfMoldeAMedida } = await import('./molde/aMedida.js')
-    const r = pdfMoldeAMedida(mupdf, { anchoM, altoM, pieza, reservaMm, margen })
+    const r = pdfMoldeAMedida(mupdf, { anchoM, altoM, pieza, reservaMm, margen, forma, orientacion, terminacion })
     return { valor: { pdf: r.pdf, resumen: r.resumen }, transfer: [r.pdf.buffer] }
   },
   /**
@@ -443,6 +443,14 @@ const TAREAS = {
     }
     return r
   },
+  /** Suelta UN contexto del arte (el visor guarda los últimos; MAPA 675) con sus bases armadas. */
+  async contexto_a_soltar({ clave }) {
+    const c = contextosA.get(clave)
+    if (c) { try { c.ctx.cerrar() } catch { /* nada */ } }
+    contextosA.delete(clave)
+    for (const k of [...basesA.keys()]) if (k.startsWith(clave + '|')) basesA.delete(k)
+    return true
+  },
   /** Cierra lo del camino A de un pedido (moldes, contextos y bases). */
   async cerrar_a() {
     for (const m of moldesA.values()) { try { m.destroy() } catch { /* nada */ } }
@@ -492,10 +500,11 @@ const TAREAS = {
   async fuente_analizar({ bytes, catalogo = [], destino = '' }) {
     await cargar()
     const { FuenteCurvas } = await import('./texto/curvas.js')
-    const { nombresFuente, identidadFuente } = await import('./texto/fuentes.js')
-    let interno
-    const f = new mupdf.Font('subida', bytes)
-    try { interno = f.getName() } finally { try { f.destroy() } catch { /* nada */ } }
+    const { nombresFuente, identidadFuente, nombreInternoMupdf } = await import('./texto/fuentes.js')
+    // 🔴 EL NOMBRE INTERNO SE CALCULA DE LOS BYTES (MAPA 669): `new mupdf.Font(nombre, bytes).getName()`
+    // devuelve el nombre que se le PASA — acá era «subida», y así quedaba toda tipografía subida desde el
+    // 2026-09-22. `nombreInternoMupdf` da lo mismo que `fitz.Font(...).name` del servidor (461 de 461).
+    const interno = nombreInternoMupdf(bytes)
     const { completo, ps } = nombresFuente(bytes)
     const fc = new FuenteCurvas(bytes, null)
     const prueba = 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ0123456789#-'

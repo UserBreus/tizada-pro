@@ -18,6 +18,7 @@ import { contornoDeDrawing, geometriaPagina, CM } from './contornos.js'
 import { dibujosDePagina } from '../pdf/dibujos.js'
 import { instrucciones, escribir, contenidoCrudo } from '../pdf/contenido.js'
 import { pyFixed } from '../py.js'
+import { segsDobladillo, segsCostura } from './formas.js'
 
 const nulo = (o) => !o || (o.isNull && o.isNull())
 const r1 = (v) => Math.round(v * 10) / 10
@@ -531,14 +532,18 @@ function nombreMesaGuia(pieza, talleP, config, rango) {
  *  es el MARGEN: el rectángulo de la pieza corrido hacia adentro (decisión del usuario 2026-10-07: la
  *  caja punteada de la guía = la línea del margen). Si el margen no deja nada, la caja de siempre. */
 export function cajaGuia(it, dobladillo) {
-  const cc = [it.ccx - it.wC / 2, it.ccy - it.hC / 2, it.ccx + it.wC / 2, it.ccy + it.hC / 2]
-  if (!dobladillo) return cc
-  const b = bboxSegs(it.segs)
-  if (!b) return cc
-  const PTCM = 72 / 2.54
-  const x0 = b[0] + (Number(dobladillo.izq) || 0) * PTCM, x1 = b[2] - (Number(dobladillo.der) || 0) * PTCM
-  const y0 = b[1] + (Number(dobladillo.abajo) || 0) * PTCM, y1 = b[3] - (Number(dobladillo.arriba) || 0) * PTCM
-  return (x1 > x0 && y1 > y0) ? [x0, y0, x1, y1] : cc
+  const g = segsGuia(it, dobladillo)
+  return bboxSegs(g) || [it.ccx - it.wC / 2, it.ccy - it.hC / 2, it.ccx + it.wC / 2, it.ccy + it.hC / 2]
+}
+
+/** La línea punteada del diseño como SEGMENTOS (pt, y hacia arriba): en un molde a medida, el margen
+ *  con la FORMA de la pieza (círculo, triángulo — MAPA 645 — o rectángulo: `segsDobladillo`); si no,
+ *  la caja de siempre. Lo dibujan la guía .ai y el PDF de medidas: la misma línea en los dos. */
+export function segsGuia(it, dobladillo) {
+  const g = dobladillo ? segsDobladillo(bboxSegs(it.segs), dobladillo, 72 / 2.54) : null
+  if (g) return g
+  const x0 = it.ccx - it.wC / 2, y0 = it.ccy - it.hC / 2, x1 = it.ccx + it.wC / 2, y1 = it.ccy + it.hC / 2
+  return [['m', x0, y0], ['l', x1, y0], ['l', x1, y1], ['l', x0, y1], ['h']]
 }
 
 /**
@@ -583,9 +588,29 @@ export function pdfGuiaMedidas(mupdf, capasData, { config = 'default', rango = [
         s += 'S Q\n'
         if (limpio) continue
         // la caja del diseño (en un molde a medida, el margen: `cajaGuia`)
-        const _cj = cajaGuia(it, it.dobladillo || dobladillo)
-        const [rx0, ry0] = T(_cj[0], _cj[1])
-        s += `q ${cyan} RG 2 w [14 8] 0 d ${g(rx0)} ${g(ry0)} ${g(_cj[2] - _cj[0])} ${g(_cj[3] - _cj[1])} re S Q\n`
+        // (con la forma de la pieza: un círculo o un triángulo llevan la línea redonda o en punta)
+        s += `q ${cyan} RG 2 w [14 8] 0 d\n`
+        for (const sg of segsGuia(it, it.dobladillo || dobladillo)) {
+          const op = sg[0]
+          if (op === 'm') { const [x, y] = T(sg[1], sg[2]); s += `${g(x)} ${g(y)} m\n` }
+          else if (op === 'l') { const [x, y] = T(sg[1], sg[2]); s += `${g(x)} ${g(y)} l\n` }
+          else if (op === 'c') { const a = T(sg[1], sg[2]), b = T(sg[3], sg[4]), c = T(sg[5], sg[6]); s += `${g(a[0])} ${g(a[1])} ${g(b[0])} ${g(b[1])} ${g(c[0])} ${g(c[1])} c\n` }
+          else if (op === 'h') s += 'h\n'
+        }
+        s += 'S Q\n'
+        // LA COSTURA (MAPA 654, sólo dobladillo): punteada fina, en naranja, adentro de la guía
+        const _cos = segsCostura(bboxSegs(it.segs), it.dobladillo || dobladillo, 72 / 2.54)
+        if (_cos) {
+          s += `q 0 0.6 1 0 RG 1.2 w [6 4] 0 d\n`
+          for (const sg of _cos) {
+            const op = sg[0]
+            if (op === 'm') { const [x, y] = T(sg[1], sg[2]); s += `${g(x)} ${g(y)} m\n` }
+            else if (op === 'l') { const [x, y] = T(sg[1], sg[2]); s += `${g(x)} ${g(y)} l\n` }
+            else if (op === 'c') { const a = T(sg[1], sg[2]), b = T(sg[3], sg[4]), c = T(sg[5], sg[6]); s += `${g(a[0])} ${g(a[1])} ${g(b[0])} ${g(b[1])} ${g(c[0])} ${g(c[1])} c\n` }
+            else if (op === 'h') s += 'h\n'
+          }
+          s += 'S Q\n'
+        }
         const nm = it.nombre ? nombreMesaGuia(it.nombre, cd.talle, config, rango) : ''
         if (nm) {
           const [cx, cy] = T(it.ccx, it.ccy)
@@ -674,12 +699,18 @@ export function aiGuiaMedidas(capasData, { config = 'default', rango = [], titul
   // arte se sigue imprimiendo hasta el borde de corte (la mesa del diseño no cambia). Por pieza
   // (`it.dobladillo`: una guía puede juntar moldes) o para todas (`dobladillo`). Gemelo: `cajaGuia` de
   // `pdfGuiaMedidas` y `cajaDe` del visor «Plantilla» (App.jsx).
+  // (MAPA 645) con la FORMA de la pieza: en un círculo o un triángulo la línea va redonda o en punta
   its.forEach((it, i) => {
-    const [x0, y0, x1, y1] = cajaGuia(it, it.dobladillo || dobladillo)
-    const a = Ti(i, x0, y0), b = Ti(i, x1, y0), c2 = Ti(i, x1, y1), d = Ti(i, x0, y1)
     mo.push('0.75 0 0 0 K\n1 w\n[8 6] 0 d')
-    mo.push(`${f3(a[0])} ${f3(a[1])} m\n${f3(b[0])} ${f3(b[1])} L\n${f3(c2[0])} ${f3(c2[1])} L\n${f3(d[0])} ${f3(d[1])} L\n${f3(a[0])} ${f3(a[1])} L\nS`)
+    mo.push(aiPath(segsGuia(it, it.dobladillo || dobladillo), (cx, cy) => Ti(i, cx, cy)) + '\nS')
     mo.push('[] 0 d')
+    // LA COSTURA (MAPA 654, sólo dobladillo): punteada, en naranja, adentro de la guía
+    const _cos = segsCostura(bboxSegs(it.segs), it.dobladillo || dobladillo, 72 / 2.54)
+    if (_cos) {
+      mo.push('0 0.6 1 0 K\n1 w\n[6 4] 0 d')
+      mo.push(aiPath(_cos, (cx, cy) => Ti(i, cx, cy)) + '\nS')
+      mo.push('[] 0 d')
+    }
   })
   mo.push(aiText(`${titulo} - Guia (arma el arte encima) - 1:1`, MARG, PH - 34, 14))
   const nombreMesa = (p) => {

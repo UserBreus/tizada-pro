@@ -58,6 +58,73 @@ export function nombresFuente(bytes) {
   return out
 }
 
+/**
+ * EL NOMBRE INTERNO DE MUPDF (`fitz.Font(fontfile=…).name` del servidor), calculado de los bytes (MAPA 669).
+ * mupdf.js no lo puede dar: `new mupdf.Font(nombre, bytes)` usa SIEMPRE el nombre que se le pasa — por eso
+ * desde que el análisis pasó al navegador (2026-09-22) toda tipografía subida quedaba como «subida». La regla
+ * es la de MuPDF sobre FreeType: familia + « » + estilo (FreeType: WWS 21/22 → tipográfico 16/17 → 1/2, o
+ * 16/17 → 1/2 si el OS/2 trae el bit WWS; el registro de Windows en inglés antes que el de Mac; todo lo que no
+ * es ASCII imprimible pasa a «?»), cortado a 31 letras (`font->name[32]`). Medido contra PyMuPDF en el
+ * catálogo y en las de Windows (contrato `verificar_fuente_ya_existe.py`).
+ */
+export function nombreInternoMupdf(bytes) {
+  try {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    const tag = (o) => String.fromCharCode(dv.getUint8(o), dv.getUint8(o + 1), dv.getUint8(o + 2), dv.getUint8(o + 3))
+    let base = 0
+    if (tag(0) === 'ttcf') base = dv.getUint32(12)          // colección: la primera (como `fontNumber=0`)
+    const nTablas = dv.getUint16(base + 4)
+    let name = -1, os2 = -1
+    for (let i = 0; i < nTablas; i++) {
+      const o = base + 12 + 16 * i
+      const t = tag(o)
+      if (t === 'name') name = dv.getUint32(o + 8)
+      else if (t === 'OS/2') os2 = dv.getUint32(o + 8)
+    }
+    if (name < 0) return ''
+    const cuenta = dv.getUint16(name + 2), datos = name + dv.getUint16(name + 4)
+    const recs = []
+    for (let i = 0; i < cuenta; i++) {
+      const o = name + 6 + 12 * i
+      recs.push({ plat: dv.getUint16(o), enc: dv.getUint16(o + 2), lang: dv.getUint16(o + 4), nid: dv.getUint16(o + 6),
+                  largo: dv.getUint16(o + 8), off: datos + dv.getUint16(o + 10) })
+    }
+    // `tt_face_get_name` de FreeType: qué registro se usa y cómo se pasa a ASCII
+    const leer = (nid) => {
+      let win = -1, esIngles = false, appleEng = -1, appleRoman = -1, uni = -1
+      recs.forEach((r, n) => {
+        if (r.nid !== nid || r.largo <= 0) return
+        if (r.plat === 0 || r.plat === 2) uni = n
+        else if (r.plat === 1) { if (r.lang === 0) appleEng = n; else if (r.enc === 0) appleRoman = n }
+        else if (r.plat === 3) {
+          // sólo un registro Unicode (símbolo / UCS-2 / UCS-4), y uno en inglés le gana al que haya
+          if ((win === -1 || (r.lang & 0x3FF) === 0x009) && (r.enc === 0 || r.enc === 1 || r.enc === 10)) {
+            esIngles = (r.lang & 0x3FF) === 0x009
+            win = n
+          }
+        }
+      })
+      const apple = appleEng >= 0 ? appleEng : appleRoman
+      const ascii = (c) => (c < 32 || c > 127 ? '?' : String.fromCharCode(c))
+      const utf16 = (r) => { let s = ''; for (let k = 0; k + 1 < r.largo; k += 2) { const c = dv.getUint16(r.off + k); if (c === 0) break; s += ascii(c) } return s }
+      const otro = (r) => { let s = ''; for (let k = 0; k < r.largo; k++) { const c = dv.getUint8(r.off + k); if (c === 0) break; s += ascii(c) } return s }
+      if (win >= 0 && !(apple >= 0 && !esIngles)) {
+        const r = recs[win]
+        return [0, 1, 10].includes(r.enc) ? utf16(r) : ''
+      }
+      if (apple >= 0) return otro(recs[apple])
+      if (uni >= 0) return utf16(recs[uni])
+      return ''
+    }
+    const wws = os2 >= 0 && os2 + 64 <= bytes.byteLength && (dv.getUint16(os2) !== 0xFFFF) && (dv.getUint16(os2 + 62) & 256)
+    const familia = wws ? (leer(16) || leer(1)) : (leer(21) || leer(16) || leer(1))
+    const estilo = wws ? (leer(17) || leer(2)) : (leer(22) || leer(17) || leer(2))
+    return (estilo ? `${familia} ${estilo}` : familia).slice(0, 31)
+  } catch {
+    return ''
+  }
+}
+
 /** `identidad_fuente`: con qué se decide que dos tipografías son LA MISMA (los estilos de una familia no). */
 export function identidadFuente(info) {
   return normFuente((info || {}).completo || (info || {}).interno || '')

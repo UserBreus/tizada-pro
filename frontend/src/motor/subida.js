@@ -11,7 +11,7 @@ export async function adjuntarArchivo(fd, archivo, sha1, rutaApi = (x) => x, cam
   if (sha1) {
     try {
       const r = await fetch(rutaApi(`/api/archivos/tengo?sha1=${encodeURIComponent(sha1)}`))
-      const d = r.ok ? await r.json() : null
+      const d = r.ok ? await r.json() : (await r.text().catch(() => ''), null)   // siempre leída (MAPA 671)
       if (d && d.tengo) {
         fd.append(campo + '_sha1', sha1)
         fd.append(campo + '_nombre', archivo.name || 'archivo')

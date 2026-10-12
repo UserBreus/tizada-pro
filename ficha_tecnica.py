@@ -46,6 +46,23 @@ def _texto(page, x, y, s, size=9, color=NEGRO, bold=False, max_w=None):
     return fitz.get_text_length(s, fontname=fn, fontsize=size)
 
 
+def _dibujar_ops(page, x0, y0, ops):
+    """Los trazos ya calculados de un dibujo (MAPA 659, `ficha_a_medida.py`): polilíneas y textos en puntos
+    relativos a (x0, y0). Gemelo: `dibujarOps` de `motor/ficha/ficha.js`."""
+    for op in ops or []:
+        if op.get("k") == "l":
+            pts = [fitz.Point(x0 + float(x), y0 + float(y)) for x, y in op.get("p") or []]
+            if len(pts) < 2:
+                continue
+            c, f = op.get("c"), op.get("f")
+            page.draw_polyline(pts, color=tuple(c) if c else None, fill=tuple(f) if f else None,
+                               dashes=op.get("d") or None, width=float(op.get("w") if op.get("w") is not None else 1),
+                               closePath=bool(op.get("h")))
+        elif op.get("k") == "t":
+            _texto(page, x0 + float(op["x"]), y0 + float(op["y"]), op.get("s"), size=float(op.get("z") or 8),
+                   color=tuple(op.get("c") or NEGRO), bold=bool(op.get("b")))
+
+
 def _encabezado(page, titulo, subtitulo, npag, total):
     page.draw_rect(fitz.Rect(0, 0, A4_W, 54), fill=(0.97, 0.98, 0.98), color=None)
     _texto(page, MARGEN, 26, titulo, size=15, bold=True, color=NEGRO)
@@ -120,7 +137,7 @@ def _dibujar_tabla(page, y, columnas, filas, y_max, fila0=0):
 
 
 # ── MOLDE GUÍA (piezas de la variable, con el diseño recortado — el MISMO PDF que la tizada) ───
-def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
+def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5, h_card=None):
     """Coloca las piezas en una grilla de `cols` columnas; devuelve (y_final, restantes). Cada pieza
     va en su propia TARJETA (sombra suave + fondo claro + borde) para que cada espacio se distinga;
     adentro, el PDF real de la pieza (recorte NATIVO → el diseño queda dentro de la silueta).
@@ -129,8 +146,11 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
     ancho = A4_W - 2 * MARGEN
     w_cel = ancho / cols
     gap = 5                              # aire entre tarjetas
-    h_cel = 134                          # alto de la celda (tarjeta + rótulo)
-    h_card = h_cel - 28                  # alto de la tarjeta (la imagen); el rótulo es nombre + tela
+    # MOLDE A MEDIDA (MAPA 666): la tarjeta toma el alto JUSTO de la pieza (`h_card`) y el rótulo lleva una
+    # línea más (la medida del diseño); si no, la celda de siempre
+    con_sub = any("sub" in pz for pz in piezas)
+    h_cel = (h_card + 28 + (9 if con_sub else 0)) if h_card else 134   # alto de la celda (tarjeta + rótulo)
+    h_card = h_card or (h_cel - 28)      # alto de la tarjeta (la imagen); el rótulo es nombre + tela
     restantes = []
     fila_y = y
     i = 0
@@ -173,11 +193,16 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
                 if src is not None:
                     src.close()
             # Rótulo: NOMBRE general de la pieza (sin número) + en qué TELA va. La medida no se muestra.
-            nom = _generico(pz.get("nombre") or "—")
+            # (a medida, MAPA 666: el nombre es el DISEÑO y va tal cual; debajo, su medida y su forma)
+            nom = str(pz.get("nombre") or "—") if "sub" in pz else _generico(pz.get("nombre") or "—")
             _texto(page, cx + gap + 2, fila_y + h_card + 12, nom, size=7.5, bold=True, color=NEGRO, max_w=w_cel - 2 * gap - 2)
+            _yt = fila_y + h_card + 22
+            if "sub" in pz:
+                _texto(page, cx + gap + 2, fila_y + h_card + 21, str(pz.get("sub") or ""), size=6.5, color=GRIS, max_w=w_cel - 2 * gap - 2)
+                _yt = fila_y + h_card + 30
             tela = str(pz.get("tela") or "").strip()
             if tela:
-                _texto(page, cx + gap + 2, fila_y + h_card + 22, "Tela: " + tela, size=6.5, bold=True, color=ACENTO, max_w=w_cel - 2 * gap - 2)
+                _texto(page, cx + gap + 2, _yt, "Tela: " + tela, size=6.5, bold=True, color=ACENTO, max_w=w_cel - 2 * gap - 2)
         fila_y += h_cel
     return fila_y, restantes
 
@@ -187,6 +212,52 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
 # «nombre»/«texto» se muestran «Texto» (2026-10-06); gemelo: LABEL_CAMPO de ficha/ficha.js
 _LABEL_CAMPO = {"nombre": "Texto", "texto": "Texto", "numero": "Número", "numero 2": "Número 2",
                 "numero2": "Número 2", "palabra": "Palabra", "apellido": "Apellido"}
+
+
+def _compactar_a_medida(guias):
+    """MOLDE A MEDIDA: UN BLOQUE POR PLANTILLA, UNA TARJETA POR DISEÑO (MAPA 666, «cuando es una sola pieza es
+    mucho título; los 2 diseños re lejos; mucho espacio en blanco»). Las guías seguidas con el mismo `am.grupo`
+    (las marca el servidor, `_agrupar_a_medida_ficha`) se juntan en una: título corto, sin la línea de detalle,
+    las piezas una al lado de la otra (nombre = el diseño, `sub` = su medida y forma), las tipografías sin
+    repetir, lo que no se sublima de todas y sus secciones «MEDIDA Y TERMINACIÓN» (`a_medidas`, ya sin
+    repetidas). `aspecto` = el alto ÷ ancho más alto: la tarjeta toma el alto justo. Gemelo: `compactarAMedida`."""
+    out, i = [], 0
+    while i < len(guias):
+        mg = guias[i]
+        am = mg.get("am") if isinstance(mg.get("am"), dict) else None
+        if not am or not am.get("grupo"):
+            out.append(mg)
+            i += 1
+            continue
+        grupo = []
+        while i < len(guias) and isinstance(guias[i].get("am"), dict) and guias[i]["am"].get("grupo") == am["grupo"]:
+            grupo.append(guias[i])
+            i += 1
+        piezas, fuentes, vistas, procesos, secciones, asp = [], [], set(), [], [], 0.0
+        for m in grupo:
+            a = m["am"]
+            asp = max(asp, float(a.get("aspecto") or 0))
+            for pz in (m.get("piezas") or []):
+                piezas.append({**pz, "nombre": str(m.get("diseno") or pz.get("nombre") or ""), "sub": str(a.get("sub") or "")})
+            for f in (m.get("fuentes") or []):
+                k = "|".join(str(f.get(x) or "") for x in ("campo", "fuente", "pedida", "sustituida"))
+                if k not in vistas:
+                    vistas.add(k)
+                    fuentes.append(f)
+            procesos += list(m.get("procesos") or [])
+            if m.get("a_medida"):
+                secciones.append(m["a_medida"])
+        out.append({"nombre": str(am.get("molde") or mg.get("nombre") or ""), "compacta": True, "piezas": piezas,
+                    "fuentes": fuentes, "procesos": procesos, "a_medidas": secciones, "aspecto": asp})
+    return out
+
+
+def _h_card_a_medida(aspecto):
+    """El alto de la tarjeta de un bloque a medida (3 columnas): el de la pieza a ese ancho. Gemelo: `hCardAMedida`."""
+    if not aspecto or aspecto <= 0:
+        return None
+    disp = (A4_W - 2 * MARGEN) / 3 - 2 * 5 - 2 * 7
+    return max(40.0, min(170.0, disp * float(aspecto) + 14))
 
 
 def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archivo="FICHA_TECNICA.pdf"):
@@ -224,6 +295,7 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
     _vistas, _unicas = set(), []
     for mg in guias:
         _k = (str(mg.get("nombre") or ""), str(mg.get("variante") or ""), str(mg.get("opciones") or ""),
+              str(mg.get("diseno") or "") if mg.get("am") else "",
               hashlib.sha1(b"".join(
                   str(p.get("nombre") or "").encode("utf-8") + (p.get("pdf") or b"")
                   for p in (mg.get("piezas") or []))).hexdigest())
@@ -231,7 +303,7 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
             continue
         _vistas.add(_k)
         _unicas.append(mg)
-    guias = _unicas
+    guias = _compactar_a_medida(_unicas)          # los moldes a medida, un bloque por plantilla (MAPA 666)
     # La VARIABLE sólo se nombra cuando el MISMO molde+diseño sale en más de una: ahí las piezas
     # cambian y hace falta distinguirlas. Si es la única, nombrarla sería ruido.
     _rep = {}
@@ -239,7 +311,10 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
         _rep[(mg.get("nombre"), mg.get("diseno"))] = _rep.get((mg.get("nombre"), mg.get("diseno")), 0) + 1
     for i_mg, mg in enumerate(guias):
         piezas = mg.get("piezas") or []
-        titulo_mg = f"MOLDE GUÍA · {mg.get('nombre', '')}" + (f"  ·  {mg.get('diseno')}" if mg.get("diseno") else "")
+        _comp = bool(mg.get("compacta"))
+        _hc = _h_card_a_medida(mg.get("aspecto")) if _comp else None
+        titulo_mg = (f"{mg.get('nombre', '')} · a medida" if _comp else
+                     f"MOLDE GUÍA · {mg.get('nombre', '')}" + (f"  ·  {mg.get('diseno')}" if mg.get("diseno") else ""))
         # Línea gris de abajo: la variable (si distingue), QUÉ OPCIONES lleva (manga corta/larga…)
         # y cuántas piezas son. Las opciones importan: si el pedido pidió las dos mangas, las piezas
         # de las dos están acá y hay que decirlo, si no parece que sobran piezas.
@@ -253,7 +328,7 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
         # lea como «todas las prendas llevan esto» (los de cada prenda están en la tabla de arriba).
         detalle.append(f"{len(piezas)} pieza" + ("s" if len(piezas) != 1 else ""))
         detalle = "  ·  ".join(detalle)
-        if y + 210 > A4_H - MARGEN:        # no entra ni el título + una fila → página nueva
+        if y + ((_hc + 80) if _hc else 210) > A4_H - MARGEN:   # no entra ni el título + una fila → página nueva
             pg = nueva_pagina(); y = 78
         else:
             y += 24
@@ -261,9 +336,12 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
                 page_y = y - 12
                 pg.draw_line(fitz.Point(MARGEN, page_y), fitz.Point(A4_W - MARGEN, page_y), color=LINEA, width=0.6)
         y = _seccion(pg, y, titulo_mg)
-        y += 11
-        _texto(pg, MARGEN, y, detalle, size=8, color=GRIS, max_w=A4_W - 2 * MARGEN)
-        y += 9
+        if _comp:
+            y += 2 + (9 if mg.get("fuentes") else 0)    # sin la línea de detalle (las tarjetas ya dicen todo)
+        else:
+            y += 11
+            _texto(pg, MARGEN, y, detalle, size=8, color=GRIS, max_w=A4_W - 2 * MARGEN)
+            y += 9
         # CON QUÉ TIPOGRAFÍA SALE ESTAMPADO cada campo. Va en su propia línea (junto al detalle se
         # cortaba) y avisa si el sistema tuvo que sustituirla: el taller no puede adivinarlo
         # mirando el dibujo.
@@ -288,39 +366,51 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
                     _lin, _acum = _try, _acum + [_pt]
             _texto(pg, MARGEN, y, _lin, size=8, color=GRIS, max_w=_anchoT)
             y += 9
-        y, rest = _dibujar_piezas(doc, pg, y, piezas, A4_H - MARGEN)
+        _cols = 3 if _comp else 5
+        y, rest = _dibujar_piezas(doc, pg, y, piezas, A4_H - MARGEN, cols=_cols, h_card=_hc)
         while rest:
             pg = nueva_pagina(); y = 78
             y = _seccion(pg, y, titulo_mg + " (continuación)")
             y += 10
-            y, rest = _dibujar_piezas(doc, pg, y, rest, A4_H - MARGEN)
+            y, rest = _dibujar_piezas(doc, pg, y, rest, A4_H - MARGEN, cols=_cols, h_card=_hc)
 
         # ── MOLDE A MEDIDA: MEDIDA Y TERMINACIÓN (MAPA 643) ─────────────────────────────────
         # La medida del diseño, el total con el margen, el borde y las TIRAS (cuántas, cada cuánto
         # se cosen). Las filas vienen redactadas del servidor (`_ficha_a_medida`); acá sólo se
         # dibujan. Gemelo: la misma sección en `motor/ficha/ficha.js`.
-        am_f = mg.get("a_medida") or {}
-        filas_am = am_f.get("filas") or []
-        if filas_am:
-            notas_am = [str(n) for n in (am_f.get("notas") or []) if n]
-            alto_am = 22 + 13 * len(filas_am) + 11 * len(notas_am)
-            if y + 16 + alto_am > A4_H - MARGEN:
-                pg = nueva_pagina(); y = 78
-            else:
-                y += 16
-            y = _seccion(pg, y, "MEDIDA Y TERMINACIÓN")
-            y += 12
-            for f in filas_am:
-                _sub = bool(f.get("sub"))
-                _sx = 14 if _sub else 0
-                _texto(pg, MARGEN + _sx, y, str(f.get("etiqueta") or ""), size=(8.5 if _sub else 9),
-                       color=(GRIS if _sub else NEGRO), bold=(not _sub), max_w=190 - _sx)
-                _texto(pg, MARGEN + 200, y, str(f.get("valor") or ""), size=9, color=NEGRO,
-                       max_w=A4_W - 2 * MARGEN - 200)
-                y += 13
-            for _n in notas_am:            # una frase por renglón
-                _texto(pg, MARGEN, y, _n, size=8, color=GRIS, max_w=A4_W - 2 * MARGEN)
-                y += 11
+        for am_f in ((mg.get("a_medidas") or []) if _comp else [mg.get("a_medida")]):
+            am_f = am_f or {}
+            filas_am = am_f.get("filas") or []
+            if filas_am:
+                notas_am = [str(n) for n in (am_f.get("notas") or []) if n]
+                alto_am = 22 + 13 * len(filas_am) + 11 * len(notas_am)
+                if y + 16 + alto_am > A4_H - MARGEN:
+                    pg = nueva_pagina(); y = 78
+                else:
+                    y += 16
+                # la misma configuración en varios diseños va UNA vez, con los diseños en el título (MAPA 665)
+                y = _seccion(pg, y, "MEDIDA Y TERMINACIÓN" + (f" · {am_f['titulo_disenos']}" if am_f.get("titulo_disenos") else ""))
+                y += 12
+                for f in filas_am:
+                    _sub = bool(f.get("sub"))
+                    _sx = 14 if _sub else 0
+                    _texto(pg, MARGEN + _sx, y, str(f.get("etiqueta") or ""), size=(8.5 if _sub else 9),
+                           color=(GRIS if _sub else NEGRO), bold=(not _sub), max_w=190 - _sx)
+                    _texto(pg, MARGEN + 200, y, str(f.get("valor") or ""), size=9, color=NEGRO,
+                           max_w=A4_W - 2 * MARGEN - 200)
+                    y += 13
+                for _n in notas_am:            # una frase por renglón
+                    _texto(pg, MARGEN, y, _n, size=8, color=GRIS, max_w=A4_W - 2 * MARGEN)
+                    y += 11
+                # LOS DIBUJOS (MAPA 659): el plano, el doblez y los pasos — cada bloque entero en una hoja
+                for _b in (am_f.get("dibujos") or []):
+                    _alto = float(_b.get("alto") or 0)
+                    if y + 14 + _alto > A4_H - MARGEN:
+                        pg = nueva_pagina(); y = 78
+                    else:
+                        y += 14
+                    _dibujar_ops(pg, MARGEN, y, _b.get("ops"))
+                    y += _alto
 
         # ── LO QUE NO SE SUBLIMA ────────────────────────────────────────────────────────────
         # Los objetos marcados como TPU / Bordado / DTF: en la tela sale sólo una cruz de 3 cm,

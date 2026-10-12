@@ -121,7 +121,8 @@ function tizadaArmar(plan) {
                 try {
                     hp[j].name = punteados[i].nombre || 'dobladillo';
                     try { hp[j].strokeDashes = punteados[i].punteado; } catch (ed1) { }
-                    if (plan.guias) {
+                    // la COSTURA (MAPA 654) queda punteada a la vista: `guia: false` no se vuelve guía
+                    if (plan.guias && punteados[i].guia !== false) {
                         try { hp[j].guides = true; } catch (eg) { }
                     }
                 } catch (ed) { }

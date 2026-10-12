@@ -1,4 +1,4 @@
-// node frontend/src/motor/pruebas/a_medida.mjs <ancho_m> <alto_m> <pieza> <salida.pdf> <resumen.json>
+// node frontend/src/motor/pruebas/a_medida.mjs <ancho_m> <alto_m> <pieza> <salida.pdf> <resumen.json> [forma] [orientacion] [margen JSON] [reserva_mm]
 // MOLDE A MEDIDA (MAPA 623): fabrica el PDF del rectángulo y corre el alta del camino A (la misma
 // que corre el obrero en el navegador) para ver que la pieza queda nombrada, con su talle y su
 // medida. Lo usa `verificar_molde_a_medida.py`.
@@ -7,9 +7,10 @@ import * as mupdf from 'mupdf'
 import { pdfMoldeAMedida, cabeEnTela, talleDeMedida } from '../molde/aMedida.js'
 import * as CA from '../molde/caminoA.js'
 
-const [, , ancho, alto, pieza, salidaPdf, salidaJson] = process.argv
+const [, , ancho, alto, pieza, salidaPdf, salidaJson, forma = 'rectangulo', orientacion = 'abajo', margenJson = 'null', reserva = '0'] = process.argv
 const anchoM = Number(ancho), altoM = Number(alto)
-const r = pdfMoldeAMedida(mupdf, { anchoM, altoM, pieza })
+// la FORMA (MAPA 645): círculo o triángulo, con su margen y la reserva del borde
+const r = pdfMoldeAMedida(mupdf, { anchoM, altoM, pieza, forma, orientacion, margen: JSON.parse(margenJson), reservaMm: Number(reserva) })
 fs.writeFileSync(salidaPdf, r.pdf)
 const doc = mupdf.Document.openDocument(r.pdf, 'application/pdf')
 const molde = new CA.MoldeA(mupdf, doc)

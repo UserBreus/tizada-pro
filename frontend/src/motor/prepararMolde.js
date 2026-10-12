@@ -15,6 +15,7 @@
 import { crearPool } from './pool.js'
 import { abrirEnPool, faseA, faseB, pareceConDiseno } from './molde/desplegar_paralelo.js'
 import { puedeHacer } from './capacidad.js'
+import { margenPorBorde } from './molde/aMedida.js'
 
 let _config = null
 const MOTOR = 'mupdf.js · navegador'
@@ -85,10 +86,11 @@ export const MOLDE_CON_DISENO = 'Ese molde viene con diseño incluido. Quitá la
 // páginas para el servidor y las páginas (PDF por mesa) para guardar en ESTA PC.
 // `dxfResumen` (MOLDE A MEDIDA, MAPA 623): el archivo es un PDF que armó esta computadora con el
 // resumen de un DXF (`nombres`, `talles`, `indices`): va por el camino A y el alta nombra la pieza.
-export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false, soloBase = false, manual = {}, enPc = false, dxfResumen = null } = {}) {
+export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false, soloBase = false, manual = {}, enPc = false, dxfResumen = null, pool: poolAjeno = null } = {}) {
   let pool = null
   let cerrado = false
-  const cerrar = () => { if (!cerrado && pool) { cerrado = true; pool.cerrar() } }
+  // `pool` ajeno (el molde a medida trae el suyo, ya con el motor cargado): lo cierra quien lo creó
+  const cerrar = () => { if (!cerrado && pool) { cerrado = true; if (!poolAjeno) pool.cerrar() } }
   try {
     // LA PUERTA (etapa 5): si esta computadora no tiene la memoria o la potencia, se dice y NO se
     // manda al servidor (regla del usuario: «quien no tenga la potencia no podrá enviar»).
@@ -116,7 +118,7 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
     const sha1 = hex(await crypto.subtle.digest('SHA-1', bytes))
     const caminoA = esDxf || !!dxfResumen || soloSiTraeDiseno || soloBase
     // el camino A lee el molde en UN hilo (el alta es secuencial); el B abre el archivo en todos
-    pool = crearPool(caminoA && esDxf ? 1 : hilosRecomendados(), () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }), 'preparar molde')
+    pool = poolAjeno || crearPool(caminoA && esDxf ? 1 : hilosRecomendados(), () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }), 'preparar molde')
     const info = await abrirEnPool(pool, bytes)
     if (caminoA) {
       let esA = esDxf || !!dxfResumen
@@ -202,15 +204,40 @@ export function subirPaginas(rutaApi, pid, zipB, onPct = null) {
  * metros con la pieza `pieza`, y lo prepara como cualquier molde del camino A. Devuelve lo mismo que
  * `prepararEnDosTiempos` (`zipA`, `archivo`, `sha1`, `caminoA: true`, `resumen`).
  */
-export async function prepararMoldeAMedida({ anchoM, altoM, pieza, reservaMm = 0, margen = null, onA = null }) {
+export async function prepararMoldeAMedida({ anchoM, altoM, pieza, reservaMm = 0, margen = null, forma = 'rectangulo', orientacion = 'abajo', terminacion = 'dobladillo', onA = null }) {
   onA && onA({ texto: 'Armando el molde a la medida…' })
+  // 🔴 LO MISMO, UNA SOLA VEZ (MAPA 661, «¿por qué demora tanto? que sea instantáneo»): el paquete de una
+  // medida no depende del molde ni del pedido, sólo de la geometría. Se guarda en memoria (las últimas 8):
+  // entrar otra vez al paso Arte con la misma medida (otro pedido, «Nuevo pedido») no rearma nada, y
+  // `precalentarMoldeAMedida` lo prepara de antemano apenas el molde entra al pedido.
+  const m = margenPorBorde(margen || { todos: 0 })
+  const clave = JSON.stringify([anchoM, altoM, pieza, reservaMm, m.arriba, m.abajo, m.izq, m.der, forma, orientacion, terminacion])
+  let p = _amListos.get(clave)
+  if (!p) {
+    p = _armarAMedida({ anchoM, altoM, pieza, reservaMm, margen, forma, orientacion, terminacion })
+    _amListos.set(clave, p)
+    p.catch(() => { if (_amListos.get(clave) === p) _amListos.delete(clave) })      // uno que falló se vuelve a intentar
+    while (_amListos.size > 8) _amListos.delete(_amListos.keys().next().value)
+  }
+  return p
+}
+const _amListos = new Map()          // clave de la medida → promesa del paquete
+
+/** Prepara de antemano (sin subir nada) el molde de una medida: cuando la pantalla lo pida, ya está. */
+export function precalentarMoldeAMedida(params) {
+  prepararMoldeAMedida(params).catch(() => {})
+}
+
+async function _armarAMedida({ anchoM, altoM, pieza, reservaMm, margen, forma, orientacion, terminacion }) {
+  // 🔴 UN SOLO HILO para todo (MAPA 661): antes se abría uno para dibujar el PDF, se cerraba, y para leerlo se
+  // abrían HASTA 12 hilos —cada uno cargando el motor de PDF y abriendo el archivo— para usar uno solo (una
+  // pieza, un talle). Con la máquina cargada eran 8 s o más mirando el cartel.
   const uno = crearPool(1, () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }), 'molde a medida')
-  let r
   try {
-    r = await uno.enviar('a_medida_pdf', { anchoM, altoM, pieza, reservaMm, margen })
+    const r = await uno.enviar('a_medida_pdf', { anchoM, altoM, pieza, reservaMm, margen, forma, orientacion, terminacion })   // la FORMA (645) y la TERMINACIÓN (652)
+    const archivo = new File([new Uint8Array(r.pdf)], 'molde_a_medida.pdf', { type: 'application/pdf' })
+    return await prepararEnDosTiempos(archivo, { dxfResumen: r.resumen, pool: uno })
   } finally {
     uno.cerrar()
   }
-  const archivo = new File([new Uint8Array(r.pdf)], 'molde_a_medida.pdf', { type: 'application/pdf' })
-  return prepararEnDosTiempos(archivo, { onA, dxfResumen: r.resumen })
 }

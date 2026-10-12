@@ -233,12 +233,16 @@ def main():
        "…y se calienta al entrar al paso Arte (`fuentes_estado`)")
 
     # ── 8. «NUEVO PEDIDO» ───────────────────────────────────────────────────────────────────
-    print("\n8 · «NUEVO PEDIDO»: SIEMPRE A «¿CÓMO VAS A ARMAR ESTE TRABAJO?», CON CARTEL BLOQUEANTE")
-    ok("setBorrandoPedido('Borrando el pedido anterior…');" in app and 'role="alert" aria-busy="true"' in app,
-       "un cartel tapa toda la pantalla mientras el servidor borra lo anterior")
+    # 🔴 CAMBIÓ (MAPA 661, pedido del usuario 2026-10-09: «que sea instantáneo»): antes un cartel tapaba la
+    # pantalla hasta que el servidor terminaba de borrar; ahora el pedido nuevo arranca YA y lo del servidor
+    # se borra de fondo (el barrido reintenta y el servidor nunca se lleva una copia de menos de 20 min).
+    print("\n8 · «NUEVO PEDIDO»: SIEMPRE A «¿CÓMO VAS A ARMAR ESTE TRABAJO?», AL INSTANTE (MAPA 661)")
+    _rp8 = app[app.index("const _reiniciarPedido = () => {"):app.index("setPedidoPaso('diseno');          // el wizard arranca por el DISEÑO")]
+    ok("setBorrandoPedido(" not in _rp8 and "await fetch('/api/pedido/limpiar_efimeros'" in _rp8
+       and "await fetch('/api/pedido/limpiar_trabajos'" in _rp8,
+       "no espera al servidor: los moldes, las tizadas y las tipografías se borran de fondo")
     ok("setActivoTab('pedidos'); setVistaDiseno(null); setMapeandoOperario(false);" in app,
        "y se vuelve a la pantalla de Pedidos con las dos tarjetas, desde donde sea")
-    ok("clearTimeout(_fin);\n        setBorrandoPedido(null);" in app, "el cartel se va cuando terminaron las tres limpiezas")
 
     print()
     if FALLOS:

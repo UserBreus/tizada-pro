@@ -38,40 +38,36 @@
       "izq": 1,
       "der": 0
     },
-    "total_marcas": 11,
+    "total_marcas": 7,
     "grosor_mm": 1.0,
-    "color_cmyk": [
-      0.0,
-      0.0,
-      0.0,
-      1.0
-    ],
+    "color": "negra con contorno blanco",
     "por_lado": [
       {
         "lado": "arriba",
         "marcas": 5,
-        "largo_del_lado_cm": 306.0,
-        "cada_cm": 76.5,
+        "largo_del_lado_cm": 300.0,
+        "cada_cm": 75.0,
         "en_el_medio": false,
         "largo_marca_cm": 3.0
       },
       {
         "lado": "abajo",
         "marcas": 5,
-        "largo_del_lado_cm": 306.0,
-        "cada_cm": 76.5,
+        "largo_del_lado_cm": 300.0,
+        "cada_cm": 75.0,
         "en_el_medio": false,
         "largo_marca_cm": 3.0
       },
       {
         "lado": "izq",
         "marcas": 1,
-        "largo_del_lado_cm": 156.0,
+        "largo_del_lado_cm": 150.0,
         "cada_cm": null,
         "en_el_medio": true,
         "largo_marca_cm": 3.0
       }
-    ]
+    ],
+    "marcadas_en_tizada": true
   },
   "ficha": [
     {
@@ -83,8 +79,8 @@
       "valor": "306 × 156 cm"
     },
     {
-      "etiqueta": "Margen (dobladillo)",
-      "valor": "3 cm por lado"
+      "etiqueta": "Terminación",
+      "valor": "Dobladillo · 3 cm por lado · esquinas recortadas"
     },
     {
       "etiqueta": "Borde de corte",
@@ -92,23 +88,24 @@
     },
     {
       "etiqueta": "Tiras",
-      "valor": "11 marcas en total · grosor 1 mm · color C0 M0 Y0 K100"
+      "valor": "7 marcas en total · grosor 1 mm · color C0 M0 Y0 K100"
     },
     {
       "etiqueta": "Arriba",
-      "valor": "5 marcas contando las 2 puntas, una cada 76,5 cm · marca de 3 cm",
+      "valor": "5 marcas contando las 2 puntas, una cada 75 cm · marca de 3 cm",
       "sub": true
     },
     {
       "etiqueta": "Abajo",
-      "valor": "5 marcas contando las 2 puntas, una cada 76,5 cm · marca de 3 cm",
+      "valor": "5 marcas contando las 2 puntas, una cada 75 cm · marca de 3 cm",
       "sub": true
     },
     {
       "etiqueta": "Izquierda",
-      "valor": "1 marca, en el medio (a 78 cm de cada punta) · marca de 3 cm",
+      "valor": "1 marca, en el medio (a 75 cm de cada punta) · marca de 3 cm",
       "sub": true
     }
   ],
-  "alarmas": []
+  "alarmas": [],
+  "terminacion": "dobladillo"
 }

@@ -469,6 +469,51 @@ export const DICCIONARIO = {
     que: 'Este molde es a medida: se escribe el ancho y el alto del DISEÑO en metros (lo de adentro del margen) y el sistema arma la pieza sumándole el margen de cada lado, con la etiqueta, el borde y el acomodo del molde. Avisa en qué telas entra y, si no entra, cuánto se pasa y cuál es lo máximo.',
     como: 'Escribí el ancho y el alto en metros.',
   },
+  'arte-medida-forma': {
+    nombre: 'Forma de la pieza',
+    que: 'La forma de este pedido: rectángulo, círculo o triángulo. En el círculo se escribe el diámetro; en el triángulo (isósceles) el ancho y el alto y hacia dónde va la punta. El margen va parejo todo alrededor y la guía del diseño sigue la forma.',
+    como: 'Tocá la forma que lleva este pedido.',
+  },
+  'arte-medida-punta': {
+    nombre: 'Hacia dónde va la punta',
+    que: 'En un triángulo, hacia dónde apunta la punta: abajo (el banderín), arriba, a la izquierda o a la derecha. La base es el lado opuesto.',
+    como: 'Tocá la flecha de la punta.',
+  },
+  'arte-medida-terminacion': {
+    nombre: 'Terminación del borde',
+    que: 'Cómo se termina el borde en este pedido: dobladillo (el margen del molde, que se dobla por la guía), overlock (la costura en el borde: la forma tal cual con la medida del overlock) o sin margen (la pieza es el diseño; las tiras van sólo en la ficha).',
+    como: 'Tocá la terminación de este pedido.',
+  },
+  'arte-tiras-marcar': {
+    nombre: 'Marcar en la tizada',
+    que: 'Si las marcas de las tiras salen impresas en la tizada. Apagado, no se marcan pero la ficha técnica las trae igual (cuántas y cada cuánto).',
+    como: 'Tocá el interruptor.',
+  },
+  'a-medida-overlock': {
+    nombre: 'Overlock (cm)',
+    que: 'La medida que se agrega alrededor del diseño cuando el pedido elige overlock (la costura va en el borde, sin doblar).',
+    como: 'Escribí los centímetros, por ejemplo 1.',
+  },
+  'a-medida-terminacion': {
+    nombre: 'Terminación por defecto',
+    que: 'Con qué terminación arranca cada pedido de este molde: dobladillo, overlock o sin margen. En el pedido se puede cambiar.',
+    como: 'Tocá la terminación con la que arrancan los pedidos.',
+  },
+  'tiras-marcar': {
+    nombre: 'Marcar en la tizada',
+    que: 'Si por defecto las marcas de las tiras salen impresas en la tizada. Apagado, no se marcan pero salen en la ficha técnica. Cada pedido lo puede cambiar.',
+    como: 'Tocá el interruptor.',
+  },
+  'arte-medida-costura': {
+    nombre: 'Costura',
+    que: 'Con dobladillo: la línea punteada naranja adentro de la guía del diseño, a la misma distancia que el margen. Ahí pasa la costura; sale también en la plantilla de Illustrator y CorelDRAW.',
+    como: 'Mirá en el visor si algo del diseño queda debajo de la costura.',
+  },
+  'arte-medida-otra': {
+    nombre: 'Arte de otra medida',
+    que: 'El arte cargado se armó con la plantilla de otra medida: su mesa no mide lo que la pieza, las guías no coinciden y el diseño no cubre toda la pieza.',
+    como: 'Creá la plantilla de nuevo con esta medida («Crear plantilla») y armá el arte ahí, o volvé a la medida del arte.',
+  },
   'arte-medida-ancho': {
     nombre: 'Ancho (m)',
     que: 'El ancho del diseño (sin el margen), en metros.',
@@ -483,11 +528,6 @@ export const DICCIONARIO = {
     nombre: 'Terminada, con el margen',
     que: 'Lo que mide la pieza de verdad: la medida del diseño más el margen de cada lado. Una bandera de 3 × 1,50 con 1 cm de margen sale de 302 × 152 cm. El borde de corte va por dentro de esa medida.',
     como: 'Mirá la medida terminada antes de armar.',
-  },
-  'arte-medida-armar': {
-    nombre: 'Se arma sola',
-    que: 'No hay botón: el molde se arma (o cambia de medida) solo, un momento después de dejar de escribir, si la medida es válida y entra en la tela. El arte cargado se conserva.',
-    como: 'Escribí la medida y esperá un momento (o tocá Enter).',
   },
   'arte-tiras': {
     nombre: 'Tiras',
@@ -506,7 +546,7 @@ export const DICCIONARIO = {
   },
   'arte-medida-tela': {
     nombre: 'En qué telas entra',
-    que: 'Las telas del molde en las que entra esta medida. La tela se elige como siempre, con «Asignar telas»; las que no entran no se ofrecen.',
+    que: 'Si la medida entra en la tela elegida (y si va girada). La tela se elige con «Asignar telas»; las que no entran no se ofrecen.',
     como: 'Elegí la tela con «Asignar telas».',
   },
   'arte-medida-visor': {
@@ -561,6 +601,16 @@ export const DICCIONARIO = {
     como: 'Tocá «Asignar telas».',
     // Mientras queden piezas sin tela el pedido no puede seguir: el paso insiste hasta que no falte.
     listo: (E) => E.pedido.artesCargadas > 0 && E.pedido.telasFaltan === 0,
+  },
+  'arte-fuente-pc': {
+    nombre: 'Fuentes de esta PC',
+    que: 'Usa las tipografías instaladas en esta computadora sin tener que cargarlas (Chrome y Edge). Las cargadas al sistema o al pedido tienen prioridad.',
+    como: 'Aceptá el permiso que pide el navegador al primer clic (o tocá «Usar las de esta PC»); después se reconocen solas.',
+  },
+  'fuentes-pc': {
+    nombre: 'Tipografías de esta PC',
+    que: 'Las tipografías instaladas en esta computadora. En el pedido se usan solas, sin cargarlas; para que sirvan en otra PC o en un pedido por la API, se cargan al sistema.',
+    como: 'Tocá «Cargar al sistema» en la que quieras tener en el catálogo.',
   },
   'arte-fuente': {
     nombre: 'Fuente del arte',
@@ -1384,11 +1434,6 @@ export const DICCIONARIO = {
     nombre: 'Grosor (mm)',
     que: 'El grosor de la línea de cada marca, en milímetros.',
     como: 'Escribí el grosor.',
-  },
-  'tiras-color': {
-    nombre: 'Color de las marcas',
-    que: 'El color CMYK con que se imprimen las marcas. La muestra es aproximada; el valor CMYK es el exacto que va a la tizada.',
-    como: 'Escribí los porcentajes C, M, Y y K.',
   },
   'tiras-guardar': {
     nombre: 'Guardar marcas',

@@ -11,6 +11,7 @@
 // viaja como el de un DXF (`resumen.nombres`) para que el alta lo ponga sola. El talle se llama como
 // la medida («1,50x0,90»): así la etiqueta de corte y la ficha dicen la medida sin tocar el motor.
 import { construirPdfPiezas } from '../dxf/importar.js'
+import { normForma, normOrientacion, margenUniforme, geoTriangulo, segsCirculo, segsPoligono, rectRecortado } from './formas.js'
 
 /** «1,50» — metros con dos decimales y coma, como se escriben en el taller. */
 export function metrosTexto(m) {
@@ -63,12 +64,84 @@ export const RESERVA_DEFECTO_MM = 2
 
 /** El MARGEN medido desde el CONTORNO del molde (lo que dibujan el visor, la guía y la plantilla):
  *  el margen se escribe desde el borde FINAL de la bandera, y el contorno está `reserva` más adentro. */
-export function margenSobreContorno(margen, reservaMm = RESERVA_DEFECTO_MM) {
+export function margenSobreContorno(margen, reservaMm = RESERVA_DEFECTO_MM, forma = 'rectangulo', orientacion = 'abajo', anchoM = null, altoM = null, terminacion = 'dobladillo') {
   const m = margenPorBorde(margen)
-  const r = (Number(reservaMm) || 0) / 10
+  const f = normForma(forma)
+  // el TRIÁNGULO (MAPA 645) no se achica: su contorno ES el total y el margen se mide desde ahí
+  const r = f === 'triangulo' ? 0 : (Number(reservaMm) || 0) / 10
   const q = (v) => Math.max(0, Math.round((v - r) * 1000) / 1000)
-  return { arriba: q(m.arriba), abajo: q(m.abajo), izq: q(m.izq), der: q(m.der) }
+  // LA COSTURA (MAPA 654): sólo con dobladillo — el margen ENTERO adentro de la guía (`segsCostura`)
+  const conCostura = normTerminacion(terminacion) === 'dobladillo' && (m.arriba > 0 || m.abajo > 0 || m.izq > 0 || m.der > 0)
+  if (f === 'rectangulo') {
+    const o = { arriba: q(m.arriba), abajo: q(m.abajo), izq: q(m.izq), der: q(m.der) }
+    if (conCostura) o.costura = { arriba: m.arriba, abajo: m.abajo, izq: m.izq, der: m.der }
+    return o
+  }
+  // círculo y triángulo: margen PAREJO (el mayor), como lo arma `medidaPieza`; la forma viaja con él
+  // para que cada guía (`segsDobladillo`, visores) dibuje la línea con la forma de la pieza
+  const u = q(margenUniforme(m))
+  const out = { arriba: u, abajo: u, izq: u, der: u, forma: f, orientacion: normOrientacion(orientacion) }
+  // el triángulo recortado (MAPA 649): la guía se arma con la medida del DISEÑO, no desde la caja
+  if (f === 'triangulo' && Number(anchoM) > 0 && Number(altoM) > 0) out.diseno = { w: Number(anchoM) * 100, h: Number(altoM) * 100 }
+  if (f === 'triangulo') out.recorte = normTerminacion(terminacion) !== 'overlock'      // overlock: puntas enteras (MAPA 652)
+  if (conCostura) { const cu = margenUniforme(m); out.costura = { arriba: cu, abajo: cu, izq: cu, der: cu } }
+  return out
 }
+
+/**
+ * 🔴 LA VERSIÓN DE LA GEOMETRÍA con la que se arma el archivo de cada forma (MAPA 651). El archivo del
+ * molde de un pedido se arma UNA vez (al escribir la medida); si después cambia cómo se dibuja una
+ * forma, la copia vieja quedaba con el contorno viejo y la guía (que se calcula con la geometría NUEVA)
+ * no coincidía con él — visto 2026-10-09: un triángulo armado con el inglete (649) mostraba en
+ * Illustrator la guía de la 650. La copia guarda con qué versión se armó (`a_medida.geo_v`) y el paso
+ * Arte la vuelve a armar sola si quedó vieja. Subir este número cuando cambie el dibujo de una forma.
+ */
+export const GEO_VERSION = { rectangulo: 2, circulo: 1, triangulo: 3 }     // rectángulo 2: esquinas recortadas (MAPA 653)
+
+/**
+ * LA TERMINACIÓN DEL BORDE (MAPA 652, pedido del usuario 2026-10-09): se elige EN CADA PEDIDO.
+ *  · `dobladillo`: el margen del molde (Ajustes › Margen), que se dobla por la guía (el triángulo con las
+ *    puntas recortadas para que, doblado, no sobre nada);
+ *  · `overlock`: la costura va en el borde, no se dobla: la forma tal cual, corrida la medida del overlock
+ *    (`overlock_cm` del molde, 1 cm si no se puso);
+ *  · `sin`: sin margen, la pieza es el diseño (las tiras van sólo en la ficha).
+ * Gemelos: `_TERMINACIONES` / `_margen_de_terminacion` de servidor.py.
+ */
+export const TERMINACIONES = ['dobladillo', 'overlock', 'sin']
+export const NOMBRE_TERMINACION = { dobladillo: 'Dobladillo', overlock: 'Overlock', sin: 'Sin margen' }
+export const normTerminacion = (t) => (TERMINACIONES.includes(t) ? t : 'dobladillo')
+export const OVERLOCK_DEFECTO_CM = 1
+/** El margen que rige con una terminación: el del molde (dobladillo), el del overlock, o nada. En una copia
+ *  del pedido el del dobladillo queda en `margen_dobladillo` (`margen` es el que rige). */
+export function margenDeTerminacion(am, terminacion) {
+  const t = normTerminacion(terminacion ?? (am && am.terminacion))
+  if (t === 'sin') return { todos: 0 }
+  if (t === 'overlock') {
+    const v = Number(am && am.overlock_cm)
+    return { todos: Number.isFinite(v) && v >= 0 ? v : OVERLOCK_DEFECTO_CM }
+  }
+  return (am && (am.margen_dobladillo || am.margen)) || { todos: 0 }
+}
+/**
+ * ¿EL ARTE ES DE OTRA MEDIDA? (MAPA 658, pedido del usuario 2026-10-09 con captura: «las guías deben ser
+ * idénticas en forma y tamaño; el arte no llegó a cubrirlo todo»). El arte se arma sobre la plantilla, y la
+ * plantilla tiene la medida que había cuando se creó: si después se cambia la medida (3,00 × 1,50 → 1,45), la
+ * mesa del arte (300 × 153,4) ya no es la pieza (300 × 148,5) y el diseño, escalado por una dimensión, deja tela
+ * sin cubrir. `mesa` = la mesa del arte de la pieza ({w_cm, h_cm}); `molde` = el contorno de la pieza
+ * ({w, h} en cm). Devuelve null si coinciden (± `tolCm`) o {arte: {w, h}, molde: {w, h}}.
+ * Gemelo: `_arte_otra_medida` de servidor.py (la alarma `arte-otra-medida` de la API).
+ */
+export function arteDeOtraMedida(mesa, molde, tolCm = 0.5) {
+  if (!mesa || !molde) return null
+  const aw = Number(mesa.w_cm), ah = Number(mesa.h_cm), mw = Number(molde.w), mh = Number(molde.h)
+  if (!(aw > 0 && ah > 0 && mw > 0 && mh > 0)) return null
+  if (Math.abs(aw - mw) <= tolCm && Math.abs(ah - mh) <= tolCm) return null
+  return { arte: { w: aw, h: ah }, molde: { w: mw, h: mh } }
+}
+
+export const versionGeo = (forma) => GEO_VERSION[normForma(forma)] || 1
+/** ¿El archivo de esta copia se armó con una geometría vieja? (sin `geo_v` = la primera) */
+export const geoVieja = (am) => !!am && !!am.de && (Number(am.geo_v) || 1) !== versionGeo(am.forma)
 
 /** El rectángulo como segmentos «DXF» (cm, y hacia arriba), como los lee `construirPdfPiezas`. */
 export function segsRectangulo(anchoCm, altoCm) {
@@ -79,13 +152,33 @@ export function segsRectangulo(anchoCm, altoCm) {
  * El PDF del molde a medida + su resumen (forma del resumen de un DXF: `nombres`, `talles`,
  * `indices`), listo para el alta del camino A. `mupdf` = el módulo ya cargado.
  */
-export function pdfMoldeAMedida(mupdf, { anchoM, altoM, pieza, reservaMm = 0, margen = null }) {
+export function pdfMoldeAMedida(mupdf, { anchoM, altoM, pieza, reservaMm = 0, margen = null, forma = 'rectangulo', orientacion = 'abajo', terminacion = 'dobladillo' }) {
   const nombre = String(pieza || '').trim() || 'Pieza'
   const talle = talleDeMedida(anchoM, altoM)          // el talle dice la medida ESCRITA (la del diseño)
   // la pieza = la medida del diseño + el margen alrededor (`medidaPieza`); el borde de corte va adentro
-  const { anchoCm, altoCm } = medidaPieza(anchoM, altoM, margen)
-  const rr = 2 * (Number(reservaMm) || 0) / 10
-  const piezas = [{ nombre, talles: new Map([[talle, segsRectangulo(Math.max(1, anchoCm - rr), Math.max(1, altoCm - rr))]]) }]
+  const f = normForma(forma)
+  const { anchoCm, altoCm } = medidaPieza(anchoM, altoM, margen, f, orientacion, terminacion)
+  const res = (Number(reservaMm) || 0) / 10
+  let segs
+  if (f === 'circulo') {
+    // el contorno, la reserva más adentro: el borde (hacia afuera de él) termina justo en el total
+    segs = segsCirculo(anchoCm / 2, anchoCm / 2, Math.max(0.5, anchoCm / 2 - res))
+  } else if (f === 'triangulo') {
+    // 🔴 el TRIÁNGULO es el total tal cual y el borde va por DENTRO (`_borde_de` → «dentro»), con las
+    // PUNTAS RECORTADAS (MAPA 649-650): al doblar el margen por la guía se superpone pero no sobra nada
+    segs = segsPoligono(geoTriangulo(Number(anchoM) * 100, Number(altoM) * 100, margenUniforme(margenPorBorde(margen)), orientacion,
+      normTerminacion(terminacion) !== 'overlock').pol)
+  } else {
+    // el contorno, la reserva más adentro (el borde «fuera» termina en el total). Con DOBLADILLO, las
+    // esquinas recortadas (MAPA 653): sin el cuadradito de cada esquina, del tamaño del margen — el borde
+    // «fuera» del contorno recortado termina justo en la guía, así al doblar no sobra nada
+    const m = margenPorBorde(margen)
+    const Wc = Math.max(1, anchoCm - 2 * res), Hc = Math.max(1, altoCm - 2 * res)
+    const corta = normTerminacion(terminacion) === 'dobladillo' && (m.izq > 0 || m.der > 0 || m.arriba > 0 || m.abajo > 0)
+      && Wc > m.izq + m.der && Hc > m.arriba + m.abajo
+    segs = corta ? segsPoligono(rectRecortado(0, 0, Wc, Hc, m.izq, m.der, m.arriba, m.abajo)) : segsRectangulo(Wc, Hc)
+  }
+  const piezas = [{ nombre, talles: new Map([[talle, segs]]) }]
   const r = construirPdfPiezas(mupdf, piezas, [talle], 1.0)
   return { pdf: r.pdf, resumen: { ...r.resumen, archivo: 'molde a medida', a_medida: true } }
 }
@@ -96,8 +189,19 @@ export function pdfMoldeAMedida(mupdf, { anchoM, altoM, pieza, reservaMm = 0, ma
  * de 3 × 1,50 con 1 cm de margen por lado sale de 3,02 × 1,52»). La PIEZA terminada = la medida + el
  * margen de cada lado; el borde de corte va adentro de ella (`RESERVA_DEFECTO_MM`). Gemelo: `_medida_pieza`.
  */
-export function medidaPieza(anchoM, altoM, margen) {
+export function medidaPieza(anchoM, altoM, margen, forma = 'rectangulo', orientacion = 'abajo', terminacion = 'dobladillo') {
   const m = margenPorBorde(margen)
+  const f = normForma(forma)
+  // CÍRCULO y TRIÁNGULO (MAPA 645): el margen es PAREJO (el mayor) y la pieza es la forma corrida afuera
+  if (f === 'circulo') {
+    const D = Number(anchoM) * 100 + 2 * margenUniforme(m)
+    return { anchoCm: D, altoCm: D }
+  }
+  if (f === 'triangulo') {
+    // con las puntas recortadas (MAPA 649-650): la caja del contorno cortado
+    const g = geoTriangulo(Number(anchoM) * 100, Number(altoM) * 100, margenUniforme(m), orientacion, normTerminacion(terminacion) !== 'overlock')
+    return { anchoCm: g.W, altoCm: g.H }
+  }
   return { anchoCm: Number(anchoM) * 100 + m.izq + m.der, altoCm: Number(altoM) * 100 + m.arriba + m.abajo }
 }
 
@@ -119,11 +223,28 @@ export const RESOLUCION_DEFECTO_MM = 4
  * Gemelo EXACTO (mismas cuentas, mismo texto): `_cabe_en_tela` de servidor.py.
  */
 export function cabeEnTela({ anchoM, altoM, margen = null, bordeMm = 0, anchoCm, largoMaxCm, margenNestingMm = 0,
-                            rotacion = 'ninguna', resolucionMm = RESOLUCION_DEFECTO_MM }) {
+                            rotacion = 'ninguna', resolucionMm = RESOLUCION_DEFECTO_MM, forma = 'rectangulo', orientacion = 'abajo', terminacion = 'dobladillo' }) {
   const m = margenPorBorde(margen)
+  const f = normForma(forma)
   const mx = m.izq + m.der, my = m.arriba + m.abajo
-  const w = Number(anchoM) * 100 + mx
-  const h = Number(altoM) * 100 + my
+  // el TRIÁNGULO lleva el borde por dentro y el armado le deja la reserva alrededor (MAPA 645)
+  const extra = f === 'triangulo' ? 2 * ((Number(bordeMm) > 0 ? Number(bordeMm) : 2) / 10) : 0
+  const tot = medidaPieza(anchoM, altoM, margen, f, orientacion, terminacion)
+  const w = tot.anchoCm + extra
+  const h = tot.altoCm + extra
+  // lo máximo de una forma: la medida del diseño más grande (cm enteros) con la que la pieza entra en
+  // `limite` por ese eje (en el círculo, el diámetro)
+  const maximoForma = (eje, limite) => {
+    let d = Math.floor(limite)
+    while (d >= MEDIDA_MIN_M * 100) {
+      const a = (f === 'circulo' || eje === 'ancho') ? d / 100 : Number(anchoM)
+      const b = (f === 'circulo' || eje === 'alto') ? d / 100 : Number(altoM)
+      const t = medidaPieza(a, b, margen, f, orientacion, terminacion)
+      if ((eje === 'ancho' ? t.anchoCm : t.altoCm) + extra <= limite + 1e-6) return d
+      d -= 1
+    }
+    return 0
+  }
   // El armado trabaja en una grilla de `res` mm (la separación entre piezas ya NO se come el borde de
   // la mesa, MAPA 633). Las cuentas van del lado seguro (una celda de más para la pieza, el redondeo
   // hacia abajo para la mesa), así lo que acá «entra» lo acepta siempre el armado real.
@@ -138,22 +259,22 @@ export function cabeEnTela({ anchoM, altoM, margen = null, bordeMm = 0, anchoCm,
   if (cabe(w, h)) return { cabe: true, girada: false, motivo: null, excesoCm: 0, maximoM: null, maximoLado: null }
   if (gira && cabe(h, w)) return { cabe: true, girada: true, motivo: null, excesoCm: 0, maximoM: null, maximoLado: null }
   const cm = (x) => (Math.round(x * 10) / 10).toString().replace('.', ',')
-  const conM = (mx || my) ? ' con el margen' : ''
+  const conM = (f === 'rectangulo' ? (mx || my) : margenUniforme(m) > 0) ? ' con el margen' : ''
   const tam = `La bandera${conM} mide ${cm(w)} × ${cm(h)} cm`
   let exceso, maxCm, lado, motivo
   if ((gira ? Math.min(w, h) : w) > util + 1e-6) {
     // no entra a lo ANCHO de la tela: se mide por el lado que iría atravesado (con giro, el más corto)
     const porAlto = gira && h < w
     exceso = (porAlto ? h : w) - util
-    maxCm = Math.floor((util - (porAlto ? my : mx)) + 1e-6)
-    lado = porAlto ? 'alto' : 'ancho'
+    maxCm = f === 'rectangulo' ? Math.floor((util - (porAlto ? my : mx)) + 1e-6) : maximoForma(porAlto ? 'alto' : 'ancho', util)
+    lado = f === 'circulo' ? 'diámetro' : (porAlto ? 'alto' : 'ancho')
     motivo = `${tam} y en esta tela entra hasta ${cm(util)} cm de ancho: se pasa ${cm(exceso)} cm${gira ? ' (ni girándola)' : ''}.`
   } else {
     // entra a lo ancho pero no en el LARGO de la mesa
     const derecha = w <= util + 1e-6
     exceso = (derecha ? h : w) - largo
-    maxCm = Math.floor((largo - (derecha ? my : mx)) + 1e-6)
-    lado = derecha ? 'alto' : 'ancho'
+    maxCm = f === 'rectangulo' ? Math.floor((largo - (derecha ? my : mx)) + 1e-6) : maximoForma(derecha ? 'alto' : 'ancho', largo)
+    lado = f === 'circulo' ? 'diámetro' : (derecha ? 'alto' : 'ancho')
     motivo = `${tam} y en la mesa más larga entra hasta ${cm(largo)} cm: se pasa ${cm(exceso)} cm.`
   }
   const maximoM = maxCm >= MEDIDA_MIN_M * 100 ? maxCm / 100 : null

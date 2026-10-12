@@ -34,7 +34,7 @@ namespace UserPro
     class CapaPlan { public string Nombre; public bool Bloqueada; public int[] Color; }
     class SubCamino { public List<double[]> P = new List<double[]>(); public bool C; }
     // `Punteado` (MOLDE A MEDIDA, MAPA 623): el margen/dobladillo, una línea de rayas; null = contorno
-    class CaminoPlan { public int Capa; public List<SubCamino> Sub = new List<SubCamino>(); public double Ancho; public double[] Color; public bool Punteado; }
+    class CaminoPlan { public int Capa; public List<SubCamino> Sub = new List<SubCamino>(); public double Ancho; public double[] Color; public bool Punteado; public string Nombre; }
     class TextoPlan { public int Capa; public string T; public double X, Y, Tam; public bool Vector; }
     class FondoPlan { public int Capa; public double[] Color; }
     class PaginaPlan
@@ -139,7 +139,7 @@ namespace UserPro
                     object[] col = Lista(Get(k, "color") ?? new object[] { 0, 0, 0, 100 }, 4, "color");
                     CaminoPlan cp = new CaminoPlan { Capa = (int)Num(Get(k, "capa")), Ancho = Num(Get(k, "ancho") ?? 1),
                         Color = new double[] { Num(col[0]), Num(col[1]), Num(col[2]), Num(col[3]) },
-                        Punteado = Get(k, "punteado") != null };
+                        Punteado = Get(k, "punteado") != null, Nombre = Get(k, "nombre") as string };
                     foreach (object so in Lista(Get(k, "sub"), 500, "sub-caminos"))
                     {
                         Dictionary<string, object> s = Dic(so, "un sub-camino");
@@ -395,7 +395,7 @@ namespace UserPro
                     // un estilo de rayas de los que trae Corel (el 1 es la línea llena). Si esta versión
                     // no lo deja, queda llena: igual se ve dónde termina el margen.
                     try { forma.Outline.Style = app.OutlineStyles[4]; } catch { }
-                    try { forma.Name = "dobladillo"; } catch { }
+                    try { forma.Name = string.IsNullOrEmpty(k.Nombre) ? "dobladillo" : k.Nombre; } catch { }   // «costura» (MAPA 654)
                 }
             }
         }

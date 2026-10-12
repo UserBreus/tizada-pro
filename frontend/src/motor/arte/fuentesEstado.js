@@ -15,6 +15,7 @@ import { resolverFuente } from '../texto/fuentes.js'
 import { claveFuenteCampo, fuenteDeCampo } from '../pieza/estampar.js'
 import { FuenteCurvas } from '../texto/curvas.js'
 import { traerConCache } from '../cache.js'
+import { catalogoConPc, bytesPc } from '../texto/fuentesPc.js'
 
 const ordenPy = (a, b) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -70,10 +71,13 @@ function fuentesPorCampo(pers) {
  */
 export async function fuentesEstadoLocal({ pid, diseno = 'principal', reemplazos = {}, rutaApi }) {
   const info = await infoMolde(pid, rutaApi, reemplazos)
-  const todas = (info.fuentes || {}).catalogo || []
+  const subidas = (info.fuentes || {}).catalogo || []
+  // + LAS DE ESTA PC (MAPA 670), al final: una subida siempre gana. Sólo nombres (no se lee ningún archivo).
+  const todas = await catalogoConPc(subidas)
   const alias = (info.fuentes || {}).alias || {}
-  // el catálogo del modal: sólo el del SISTEMA (como `catalogo_fuentes(FUENTES)`), por nombre
-  const catalogo = todas.filter((c) => !c.propia).map((c) => ({ interno: c.interno, archivo: c.archivo }))
+  // el catálogo del modal: sólo el del SISTEMA (como `catalogo_fuentes(FUENTES)`), por nombre — las de la PC
+  // no van ahí (un reemplazo se guarda en el servidor, y el servidor no las tiene)
+  const catalogo = subidas.filter((c) => !c.propia).map((c) => ({ interno: c.interno, archivo: c.archivo }))
     .sort((a, b) => ordenPy(String(a.interno).toLowerCase(), String(b.interno).toLowerCase()))
   const vacio = { ok: true, requeridas: [], faltantes: [], reemplazables: [], originales: {}, campos: [], catalogo, reemplazos: alias }
   if (!info.camino_a && !info.camino_b) return vacio
@@ -109,7 +113,9 @@ export async function fuentesEstadoLocal({ pid, diseno = 'principal', reemplazos
     }
     faltantes = [...faltan].sort(ordenPy)
   }
-  return { ok: true, requeridas: req, faltantes, reemplazables: req, originales, campos, catalogo, reemplazos: alias }
+  // las que se van a usar DE ESTA PC (no están subidas): la pantalla lo dice al lado de cada una
+  const de_pc = req.filter((f) => { const e = resolverFuente(f, todas, alias); return !!(e && e.pc) }).sort(ordenPy)
+  return { ok: true, requeridas: req, faltantes, reemplazables: req, originales, campos, catalogo, reemplazos: alias, de_pc }
 }
 
 // `str.isprintable()` de Python: fuera los de control, formato, sin asignar y separadores (menos el
@@ -125,7 +131,7 @@ export async function fuenteCharsLocal({ pid, rutaApi }) {
   const info = await infoMolde(pid, rutaApi, null)
   if (info.camino_b && preparandoB(info)) return { ok: false, preparando: true, chars: '', fuentes: [], faltantes: [] }
   const pers = persDe(info, 'principal') || {}
-  const todas = (info.fuentes || {}).catalogo || []
+  const todas = await catalogoConPc((info.fuentes || {}).catalogo || [])   // + las de esta PC (MAPA 670)
   const alias = (info.fuentes || {}).alias || {}
   const pares = []
   for (const m of Object.values(pers)) {
@@ -148,7 +154,7 @@ export async function fuenteCharsLocal({ pid, rutaApi }) {
     if (!e) { falta.push(f); continue }
     try {
       const url = rutaApi(`/api/fuente/archivo/${encodeURIComponent(e.archivo)}` + (e.propia ? `?pid=${encodeURIComponent(pid)}` : ''))
-      const bytes = await traerConCache(`fuente|${e.hash}|${e.archivo}`, url)
+      const bytes = e.pc ? await bytesPc(e) : await traerConCache(`fuente|${e.hash}|${e.archivo}`, url)
       const fc = new FuenteCurvas(bytes.slice(), null)
       const s = new Set()
       for (const cp of fc.cmap.keys()) {

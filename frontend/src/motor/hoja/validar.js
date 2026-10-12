@@ -44,8 +44,9 @@ export function validarHoja(mupdf, bytes, tela, espaciadoMm) {
         const k = claveObj(o)
         if (k) { if (vis.has(k)) return; vis.add(k) }
         if (o.isStream() && o.get('Subtype') && !o.get('Subtype').isNull() && o.get('Subtype').asName() === 'Form') {
-          const tb = o.get('TizadaBase')
-          if (!tb || tb.isNull()) chequear(o)          // una base del sello nace balanceada por contrato
+          const tb = o.get('TizadaBase'), tm = o.get('TizadaMolde')
+          // una base del sello nace balanceada por contrato; y toda mesa del molde aunque anide (MAPA 667)
+          if ((!tb || tb.isNull()) && (!tm || tm.isNull())) chequear(o)
         }
         const r2 = (o.isStream() || o.isDictionary()) ? o.get('Resources') : null
         const xo = r2 && !r2.isNull() ? r2.get('XObject') : null

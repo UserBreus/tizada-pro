@@ -9,6 +9,7 @@
 // que la respuesta del servidor: `{piezas: {nombre: {svg, w_cm, h_cm}}, talle}`.
 import { crearPool } from '../pool.js'
 import { traerConCache, base64DeTexto, claveDe, urlDe } from '../cache.js'
+import { fuentesConPc, fuentesDePers, alCambiarPc, catalogoConPc } from '../texto/fuentesPc.js'
 import { piezasDe } from './prendas.js'
 export { asegurarFuentes }
 import { pyRound } from '../py.js'
@@ -16,6 +17,8 @@ import { persConLimite } from '../pieza/estampar.js'
 
 const CM = 28.3465
 const motores = new Map()          // pid → {info, pool, mesasAbiertas:Set, fuentesListas:bool}
+// al dar el permiso de las fuentes de esta PC (MAPA 670), los hilos vuelven a recibir las tipografías
+alCambiarPc(() => { for (const m of motores.values()) m.fuentesListas = false })
 
 async function json(url, opts) {
   const r = await fetch(url, opts)
@@ -67,9 +70,13 @@ async function asegurarFuentes(m, rutaApi) {
   if (m.fuentesListas) return
   if (m.fuentesEnCurso) return m.fuentesEnCurso        // uno solo en curso (ver `asegurarContextoA`)
   m.fuentesEnCurso = (async () => {
-    const { catalogo, alias } = m.info.fuentes
+    // + LAS DE ESTA PC que pide el diseño y no están subidas (MAPA 670): la personalización del molde (B) y
+    // la de cada diseño (A); las subidas siempre ganan
+    const nombres = [...fuentesDePers(m.info.pers), ...(m.info.disenos || []).flatMap((d) => fuentesDePers(d.pers))]
+    const { catalogo, alias, pc } = await fuentesConPc(m.info.fuentes, nombres)
     const archivos = {}
     await Promise.all(catalogo.map(async (f) => {
+      if (f.pc) { archivos[f.archivo] = pc.get(f.archivo).slice(); return }
       const url = rutaApi(`/api/fuente/archivo/${encodeURIComponent(f.archivo)}` + (f.propia ? `?pid=${encodeURIComponent(m.pid)}` : ''))
       archivos[f.archivo] = await traerConCache(`fuente|${f.hash}|${f.archivo}`, url)
     }))
@@ -165,6 +172,7 @@ export async function validarMapeoEnNavegador({ pid, diseno = null, mapeo, varia
   const arte = await traerConCache(`arte|${m.pid}|${d.id}|${(d.sello || []).join(',')}`,
     rutaApi(`/api/productos/${encodeURIComponent(m.pid)}/arte_archivo` + (d.id !== 'principal' ? `?diseno=${encodeURIComponent(d.id)}` : '')))
   const contexto = await json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/arte_contexto`))
+  contexto.fuentes = { ...(contexto.fuentes || {}), catalogo: await catalogoConPc((contexto.fuentes || {}).catalogo || []) }   // + las de esta PC (MAPA 670)
   const bytes = arte.slice()
   return m.pool.enviar('arte_validar', { bytes, contexto, mapeo, variante: variante || '' }, [bytes.buffer])
 }
@@ -291,10 +299,53 @@ export async function previasCaminoA({ pid, diseno = null, variante, talle, ruta
   // sin un mapeo dado por la pantalla, el guardado del diseño (base + por variable, como el motor)
   const mapeoArte = (mapeo && Object.keys(mapeo).length) ? mapeo : (d.mapeo && Object.keys(d.mapeo.mapeo || {}).length ? d.mapeo : null)
   if (!mapeoArte) return { piezas: {}, talle, navegador: true, sin_mapeo: true }
-  const { clave, pers } = await asegurarContextoA(m, rutaApi, d.id, {
+  const cfg = {
     mapeoArte, editablesCfg, editablesTamano, editablesColor, editablesMarca: d.editables_marca,
     editablesSinMarca: d.editables_sin_marca, marcasComoCruz: false, borde: m.info.borde, referencia: m.info.referencia_medida,
-  }, { clave: `${pid}|${d.id}|previa`, conPersonalizacion: true })
+  }
+  // 🔴 UN CONTEXTO POR CONFIGURACIÓN (MAPA 675, «El visor del arte no puede dibujar»). Antes había UNO solo
+  // por diseño (`…|previa`) y lo pedían a la vez el visor (con el ajuste de editables del pedido), la pasada
+  // de todos los talles y la precarga (sin él): cada uno lo REARMABA con su configuración, y rearmarlo
+  // cierra los documentos del anterior mientras otra pieza los estaba usando (el hilo atiende varios
+  // pedidos a la vez) → «cannot find page tree» → el visor caía al servidor → 409 y el cartel rojo. Ahora
+  // cada configuración tiene el suyo (la clave lleva su huella), se guardan los últimos `PREVIAS_MAX` y
+  // nunca se suelta uno que se está usando.
+  const clave = `${pid}|${d.id}|previa|${huella(JSON.stringify(cfg))}`
+  m.previasEnUso = m.previasEnUso || new Map()
+  m.previasEnUso.set(clave, (m.previasEnUso.get(clave) || 0) + 1)
+  try {
+    const { pers } = await asegurarContextoA(m, rutaApi, d.id, cfg, { clave, conPersonalizacion: true })
+    return await _piezasA(m, pid, clave, pers, prendas, talle, avisar)
+  } finally {
+    m.previasEnUso.set(clave, m.previasEnUso.get(clave) - 1)
+    _soltarPreviasViejas(m, clave)
+  }
+}
+
+const PREVIAS_MAX = 4   // contextos del visor por molde (cada uno tiene el arte abierto)
+
+/** Huella corta de un texto (djb2): sólo para separar configuraciones en la clave. */
+function huella(t) {
+  let h = 5381
+  for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0
+  return h.toString(36)
+}
+
+/** La última usada va al final; si hay más de `PREVIAS_MAX`, se sueltan las más viejas que NADIE esté usando. */
+function _soltarPreviasViejas(m, clave) {
+  m.previasOrden = (m.previasOrden || []).filter((k) => k !== clave)
+  m.previasOrden.push(clave)
+  while (m.previasOrden.length > PREVIAS_MAX) {
+    const i = m.previasOrden.findIndex((k) => !(m.previasEnUso.get(k) > 0))
+    if (i < 0 || i === m.previasOrden.length - 1) break
+    const [vieja] = m.previasOrden.splice(i, 1)
+    m.previasEnUso.delete(vieja)
+    if (m.contextosA) m.contextosA.delete(vieja)
+    m.pool.enviar('contexto_a_soltar', { clave: vieja }).catch(() => { /* hilo cerrado: no hay nada que soltar */ })
+  }
+}
+
+async function _piezasA(m, pid, clave, pers, prendas, talle, avisar) {
   const { registro, etiqueta, fuentes } = m.info
   const pedidos = []
   const vistas = new Set()

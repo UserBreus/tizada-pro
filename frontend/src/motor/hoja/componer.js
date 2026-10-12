@@ -214,6 +214,9 @@ function formDeOrigen(out, mapa, srcDoc, pagina, delMolde) {
   // declaradas, balanceada): marcarla le ahorra al aplanado volver a parsear sus operadores. Sólo
   // si no anida otros dibujos adentro. Una clave privada en un XObject es PDF válido.
   if (delMolde && !anida) dict.put('TizadaBase', true)
+  // 🔴 Y TODA MESA DEL MOLDE, AUNQUE ANIDE (MAPA 667): la validación no la vuelve a recorrer (balanceada por
+  // contrato). Gemelo: `hoja_pike.py`.
+  if (delMolde) dict.put('TizadaMolde', true)
   return out.addStream(contenidoDePagina(pageObj), dict)
 }
 

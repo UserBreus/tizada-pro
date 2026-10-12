@@ -444,7 +444,7 @@ def _procesar_contenido(pdf, page, ops=None):
         del pdf.Root["/OCProperties"]
 
 
-def _aplanar_un_nivel(pdf, page, _hechos):
+def _aplanar_un_nivel(pdf, page, _hechos, _listos=None):
     """UN SOLO NIVEL (2026-09-04, la hoja compartida): la página CONSERVA sus `Do` y se sanea el
     interior de cada Form XObject UNA vez —lo de adentro se des-anida y se limpia como siempre—,
     en vez de expandir cada colocación inline. Con 45 colocaciones de 27 piezas el aplanado total
@@ -466,7 +466,7 @@ def _aplanar_un_nivel(pdf, page, _hechos):
                 _id = xo.objgen
             except Exception:
                 _id = None
-            if _id is not None and _id in _hechos:
+            if _id is not None and (_id in _hechos or (_listos is not None and _id in _listos)):
                 continue
             if xo.get("/TizadaBase") is not None and "/XObject" not in (xo.get("/Resources") or {}):
                 # Base de la hoja compartida: nace de una página desplegada, sin marcadores de
@@ -482,6 +482,8 @@ def _aplanar_un_nivel(pdf, page, _hechos):
             _procesar_contenido(pdf, xo, sub_ops)                              # y lo sanea, una vez
             if _id is not None:
                 _hechos[_id] = sub_ops
+                if _listos is not None:
+                    _listos.add(_id)          # ya quedó aplanado EN EL LUGAR: otra página que lo use no lo rehace
             if "/OC" in xo:
                 del xo["/OC"]
             if "/Group" in xo:
@@ -547,6 +549,11 @@ def _aplanar_archivo(path):
     # el handle anterior todavía abierto ese reintento se topaba con el archivo tomado.
     with pikepdf.open(path, allow_overwriting_input=True) as pdf:
         _total = bool(os.environ.get("TIZADA_APLANADO_TOTAL"))
+        # 🔴 LOS FORM YA APLANADOS, PARA TODO EL ARCHIVO (MAPA 667). El memo `_hechos` es por página (guarda
+        # las instrucciones: memoria), pero un Form de la página se aplana EN EL LUGAR, y las mesas del molde
+        # son las MISMAS en todas las páginas de la hoja: se rehacían en cada una (los «PR» de 100 MB: 16
+        # pasadas sobre 7 mesas de 11 MB, 65 s). Acá sólo se anota QUÉ objeto ya quedó listo (sin memoria).
+        _listos = set()
         for page in pdf.pages:
             # 🔴 EL MEMO ES **POR PÁGINA**, NO POR ARCHIVO. `_hechos` guarda, por cada Form
             # XObject, su LISTA COMPLETA DE OPERADORES (una pieza de la tizada son ~2.900), y con
@@ -566,7 +573,7 @@ def _aplanar_archivo(path):
                 _procesar_contenido(pdf, page, ops)                  # 1 pasada, sobre las instrucciones en memoria
                 _declarar_estado_grafico(pdf, page)      # ExtGState opaco + /GSflat
             else:
-                _aplanar_un_nivel(pdf, page, _hechos)
+                _aplanar_un_nivel(pdf, page, _hechos, _listos)
         _unificar_icc(pdf)
         # El OutputIntent (perfil de salida) se CONSERVA: es lo que le dice al RIP con qué perfil
         # se armó el archivo. Antes se borraba acá («Illustrator no lo tiene») y el servidor lo había

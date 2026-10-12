@@ -109,6 +109,7 @@ def xobject_base(pdf, b, memo):
     # no tienen que volver a parsear sus 20.000 operadores. Una clave privada en un XObject es
     # PDF válido; los lectores la ignoran.
     xo["/TizadaBase"] = True
+    xo["/TizadaMolde"] = True              # del molde: balanceada por contrato (MAPA 667)
     memo[k] = xo
     return xo
 
@@ -572,6 +573,12 @@ def componer_hoja_sello(colocaciones, cfg, path_salida, signo_rotacion=1, progre
             # (changelog 393: aplanado 15 → 4 s), y se pone SÓLO si no anida otros dibujos adentro.
             if del_molde and "/XObject" not in (xo.get("/Resources") or {}):
                 xo["/TizadaBase"] = True
+            # 🔴 Y TODA MESA DEL MOLDE, AUNQUE ANIDE (MAPA 667): la validación no la vuelve a recorrer. Una mesa
+            # con grupos de transparencia adentro (los «PR» de 100 MB: 11 MB de dibujo y 17 grupos) no puede
+            # llevar `TizadaBase` (el aplanado tiene que mirar esos grupos), pero sigue siendo la página del
+            # desplegado, balanceada por contrato: revisar su balance eran 41 s por hoja.
+            if del_molde:
+                xo["/TizadaMolde"] = True
             nm = f"/S{len(xobjs)}"
             por_fuente.setdefault(k, []).append((fuente, nm))
             xobjs[nm] = xo

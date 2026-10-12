@@ -6,6 +6,7 @@
 // comprueba y guarda (`servidor._subir_arte_paquete`). Si el servidor tiene esto apagado devuelve
 // `null` y el arte se manda pelado, como siempre.
 import { navegadorHace } from './vista/vista.js'
+import { catalogoConPc } from './texto/fuentesPc.js'
 import { puedeHacer } from './capacidad.js'
 import { traerConCache, claveDe, urlDe } from './cache.js'
 import { registrarHilo } from './monitor.js'
@@ -28,6 +29,8 @@ export async function prepararArteEnNavegador(archivo, { pid, diseno = null, rut
   if (!puerta.puede) { const e = new Error(puerta.motivo); e.capacidad = true; throw e }
   avisar && avisar('Leyendo el diseño en tu computadora…')
   const contexto = await json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/arte_contexto`))
+  // + las tipografías de esta PC (MAPA 670): la revisión del arte no las cuenta como faltantes (sólo nombres)
+  contexto.fuentes = { ...(contexto.fuentes || {}), catalogo: await catalogoConPc((contexto.fuentes || {}).catalogo || []) }
   // la plantilla decide el modo (`arte_es_separado`) igual que en el servidor
   const plantilla = contexto.plantilla_sello
     ? await traerConCache(claveDe.plantilla(pid, contexto.plantilla_sello), rutaApi(urlDe.plantilla(pid)))
