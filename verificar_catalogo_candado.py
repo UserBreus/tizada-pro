@@ -50,7 +50,7 @@ def _get_doc_ver(c, default=None):
     return copy.deepcopy(_DOCS.get(c, default)), _VERS.get(c, 0)
 
 
-def _guardar_cat_ver(cat, version_esperada=None):
+def _guardar_cat_ver(cat, version_esperada=None, solo=None):   # `solo`: los moldes a re-proyectar (MAPA 694)
     if version_esperada is not None and version_esperada != _VERS.get("catalogo", 0):
         raise _ConflictoVersion("el catálogo cambió mientras tanto")
     _GUARDADOS.append(time.time())

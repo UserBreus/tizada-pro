@@ -1339,7 +1339,20 @@ def _ancla_etiqueta(cont, posicion, size_pt):
             "angulo": 0.0, "size_pt": round(size_pt, 2), "fuente": "Arial-BoldMT", "h": "centro"}
 
 
-def _eops_borde(cont, S, x0, y0, B, rx, ry, t, texto, size, align, fetq, bc_activo=False):
+def _adentro_del_borde(bc_activo, bc_alin, B, size):
+    """🔴 LA ETIQUETA NUNCA ENCIMA DEL BORDE (MAPA 702). La baseline se apoyaba en el CONTORNO
+    pensando en un borde por FUERA; con el borde por DENTRO (el banderín triangular, o un molde
+    configurado así) o CENTRADO, la etiqueta caía encima del trazo y lo tapaba. Devuelve cuánto
+    más hacia adentro (pt) va la baseline: el ancho del borde que cae adentro de la pieza + el
+    despeje de los descendentes (las comas, la p, la g bajan de la baseline). Borde por fuera o
+    apagado: 0 (lo de siempre, invariante 5 de la etiqueta). Gemelo: `adentroDelBorde` (estampar.js)."""
+    if not bc_activo:
+        return 0.0
+    dentro = B if bc_alin == "dentro" else (B / 2 if bc_alin == "centro" else 0.0)
+    return dentro + 0.25 * size if dentro > 0 else 0.0
+
+
+def _eops_borde(cont, S, x0, y0, B, rx, ry, t, texto, size, align, fetq, bc_activo=False, adentro=0.0):
     """TEXT-ON-PATH del motor: dibuja `texto` siguiendo el SEGMENTO del contorno
     (entre dos esquinas/cortes) que contiene la posición relativa `t`, igual que el
     preview. Trabaja en coords de PÁGINA (pt, y-up) usando la MISMA transformación que
@@ -1440,7 +1453,8 @@ def _eops_borde(cont, S, x0, y0, B, rx, ry, t, texto, size, align, fetq, bc_acti
     # dibuja por FUERA, así que el texto de adentro NO necesita despegarse. Solo un pelín
     # hacia adentro para que el cuerpo de las letras quede visible; los descendentes (p, g,
     # y…) bajan del baseline, cruzan el contorno y quedan recortados/ocultos bajo el borde.
-    off_in = 0.18 * MM
+    # Con el borde por DENTRO o centrado, además el ancho que cae adentro (`adentro`, MAPA 702).
+    off_in = 0.18 * MM + adentro
     n = len(segp); base = list(segp); segp = []
     for i in range(n):
         a2 = base[max(0, i-1)]; b2 = base[min(n-1, i+1)]
@@ -1490,7 +1504,7 @@ def _eops_borde(cont, S, x0, y0, B, rx, ry, t, texto, size, align, fetq, bc_acti
     return "\n".join(parts)
 
 
-def _eops_tramo(_at, _dir, a, b, cx, cy, texto, size, align, fetq):
+def _eops_tramo(_at, _dir, a, b, cx, cy, texto, size, align, fetq, adentro=0.0):
     """Dibuja `texto` (text-on-path) sobre el tramo de arco [a,b] (coords de PÁGINA, y-up)
     de un contorno ya aplanado (`_at`/`_dir` = punto/dirección por longitud de arco).
     Orienta hacia el centroide (cx,cy), apoya la baseline sobre el borde y alinea el texto
@@ -1506,7 +1520,7 @@ def _eops_tramo(_at, _dir, a, b, cx, cy, texto, size, align, fetq):
     up = (-_m.sin(an), _m.cos(an))
     if (up[0] * (cx - md[0]) + up[1] * (cy - md[1])) < 0:
         segp.reverse()
-    off_in = 0.18 * MM
+    off_in = 0.18 * MM + adentro          # + el borde que cae adentro de la pieza (MAPA 702)
     n = len(segp); base = list(segp); segp = []
     for i in range(n):
         a2 = base[max(0, i - 1)]; b2 = base[min(n - 1, i + 1)]
@@ -1550,7 +1564,7 @@ def _eops_tramo(_at, _dir, a, b, cx, cy, texto, size, align, fetq):
     return "\n".join(parts)
 
 
-def _eops_zonas(cont, S, x0, y0, B, puntos, conts, size, align_def, fetq, talle, pieza, nro, sep):
+def _eops_zonas(cont, S, x0, y0, B, puntos, conts, size, align_def, fetq, talle, pieza, nro, sep, adentro=0.0):
     """TEXT-ON-PATH POR ZONAS: parte el contorno por las esquinas elegidas (`puntos` =
     fracciones 0..1 del arco; cada una se ENGANCHA a la esquina REAL más cercana de ESTA
     pieza → estable aunque el talle esté gradado, igual que el preview). La zona i va del
@@ -1660,7 +1674,7 @@ def _eops_zonas(cont, S, x0, y0, B, puntos, conts, size, align_def, fetq, talle,
         if not txt:
             continue
         alg = (c or {}).get("align") or align_def or "centro"
-        ops = _eops_tramo(_at, _dir, a, b, cx, cy, txt, size, alg, fetq)
+        ops = _eops_tramo(_at, _dir, a, b, cx, cy, txt, size, alg, fetq, adentro)
         if ops:
             out.append(ops)
     return "\n".join(out) if out else None
@@ -4019,6 +4033,12 @@ def mapeo_por_nombre(path_arte, registro_molde):
         if len(cands) == 1:
             for nom in porgen[cands[0]]:
                 mapeo.setdefault(nom, mesa)
+    # UNA PIEZA Y UN DISEÑO (MAPA 700): no hay nada que adivinar. Un molde de una sola pieza (el
+    # molde a medida: la bandera, el banderín) con un arte de una sola mesa SIN rótulo quedaba sin
+    # asignar → el pedido lo trataba como arte «clásico» y lo pegaba sin escalar y corrido. Gemelo
+    # de `mapeoPorNombre` (frontend/src/motor/arte/mapeo.js).
+    if not mapeo and len(piezas) == 1 and len(doc) == 1:
+        mapeo[piezas[0]] = 1
     return mapeo
 
 
@@ -5885,7 +5905,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 _esize = fetq.size_para_alto(float(_et.get("size_mm") or 3.0) * MM)
                 _zeops = _eops_zonas(cont, S, x0, y0, B, _zna["puntos"], _zna.get("cont") or [],
                                      _esize, _et.get("align") or "centro", fetq,
-                                     talle, _pieza_txt, nro, (_et.get("separador", "-") or "-"))
+                                     talle, _pieza_txt, nro, (_et.get("separador", "-") or "-"),
+                                     _adentro_del_borde(_bc_activo, _bc_alin, B, _esize))
             except Exception:
                 _zeops = None
             if _zeops:
@@ -5974,7 +5995,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                     try:
                         fetq = fuente("Arial-BoldMT")
                         _rx = _posi.get("rx"); _ry = _posi.get("ry")
-                        eops = _eops_borde(cont, S, x0, y0, B, _rx, _ry, float(_posi["t"]), et, _esize, _alg, fetq, _bc_activo)
+                        eops = _eops_borde(cont, S, x0, y0, B, _rx, _ry, float(_posi["t"]), et, _esize, _alg, fetq, _bc_activo,
+                                           _adentro_del_borde(_bc_activo, _bc_alin, B, _esize))
                     except Exception:
                         eops = None      # ante cualquier error, cae al recto (no rompe la tizada)
                 if eops is None:
@@ -6048,7 +6070,10 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                         "_fila": (pr.get("_fila") if isinstance(pr, dict) else None),
                         "_copias": (pr.get("_copias", 1) if isinstance(pr, dict) else 1),
                         # TALLES POR MESA (MAPA 593): el grupo de talles de esta prenda (None = con el resto)
-                        "_grupo_mesa": (pr.get("_grupo_mesa") if isinstance(pr, dict) else None)})
+                        "_grupo_mesa": (pr.get("_grupo_mesa") if isinstance(pr, dict) else None),
+                        # el DISEÑO de la fila: «Separar diseños» (MAPA 717)
+                        "_diseno": (pr.get("_diseno") if isinstance(pr, dict) else None),
+                        "_diseno_nombre": (pr.get("_diseno_nombre") if isinstance(pr, dict) else None)})
             piezas_por_tela.setdefault(TELA(pieza), []).append(ent)
             hechas += 1
             if progreso:
@@ -6069,6 +6094,16 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                         validar=True):
     """Anida y compone las piezas (ya generadas) por TELA → una hoja por tela.
     Todas las piezas de una misma tela van JUNTAS (sin importar de qué molde son)."""
+    # los rótulos de la separación entre talles (MAPA 711) van en curvas con Arial Bold del catálogo
+    _fuentes_rot = {}
+
+    def _fuente_rotulos(nombre):
+        if nombre not in _fuentes_rot:
+            _ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "catalogo_fuentes", "Arial-Bold.ttf")
+            _fuentes_rot[nombre] = FuenteCurvas(open(_ruta, "rb").read()) if os.path.exists(_ruta) else None
+        if _fuentes_rot[nombre] is None:
+            raise RuntimeError("sin Arial Bold en el catálogo: la separación va sin rótulos")
+        return _fuentes_rot[nombre]
     cfg = {"ancho_cm": 180, "altura_max_cm": 500, "espaciado_cm": 0.5,
            "margenes_cm": {"sup": 1, "inf": 1, "izq": 1, "der": 1},
            "resolucion_mm": float(os.environ.get("TIZADA_RES_MM", 4)), "estrategias": ["bl", "bandas"]}
@@ -6104,10 +6139,14 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
             for p in piezas)
         if _sello:
             from hoja_pike import componer_hoja_sello
-            consumo, alturas_cm = componer_hoja_sello(coloc, cfg_t, path, progreso=progreso)
+            consumo, alturas_cm = componer_hoja_sello(coloc, cfg_t, path, progreso=progreso,
+                                                      cortes=[(x or {}).get("cortes") or [] for x in _mesas] if _mesas else None,   # MAPA 710
+                                                      fuente=_fuente_rotulos)
         elif _pike:
             from hoja_pike import componer_hoja_pike
-            consumo, alturas_cm = componer_hoja_pike(coloc, cfg_t, path)
+            consumo, alturas_cm = componer_hoja_pike(coloc, cfg_t, path,
+                                                     cortes=[(x or {}).get("cortes") or [] for x in _mesas] if _mesas else None,
+                                                     fuente=_fuente_rotulos)
         else:
             for p in piezas:
                 if hasattr(p.get("doc"), "real"):
@@ -6246,10 +6285,17 @@ def generar_pedido_multi(molds, carpeta_fuentes, salida, config_nesting=None,
     for md in molds:
         # `fuentes` por MOLDE (carpeta del pedido + catálogo + reemplazos elegidos): sin esto
         # el visor estampaba con el reemplazo y la tizada con la original (LEY arte=tizada).
+        # 🔴 un arte SEPARADO sin nada asignado no es un arte clásico (MAPA 700): sin mapeo,
+        # `generar_pedido` lo pegaría como dibujado sobre la plantilla (sin escalar y corrido). Con
+        # una clave que ninguna pieza tiene, queda en modo separado y la pieza sale en blanco, como
+        # dice el aviso — igual que `contextoCaminoA({clasico: false})` del navegador.
+        _map = md.get("mapeo_arte")
+        if md.get("arte") and md.get("modo_arte") == "separado" and not _map:
+            _map = {"__sin_asignar__": -1}
         pt = generar_pedido(md["plantilla"], md["arte"], md["registro"], md.get("pers") or {},
                             md["prendas"], md.get("fuentes") or carpeta_fuentes, salida,
                             config_nesting=config_nesting, progreso=progreso,
-                            mapeo_arte=md.get("mapeo_arte"), rotaciones=md.get("rotaciones"),
+                            mapeo_arte=_map, rotaciones=md.get("rotaciones"),
                             asignacion_tela=md.get("asignacion_tela"), telas_cfg=telas_cfg,
                             solo_piezas=True, limite_texto=md.get("limite_texto"))
         for tela, lst in pt.items():

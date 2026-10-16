@@ -48,7 +48,7 @@ _falso.__getattr__ = lambda n: (lambda *a, **k: None)
 _falso.get_doc = lambda c, default=None: _DOCS.get(c, default)
 _falso.get_doc_ver = lambda c, default=None: (_DOCS.get(c, default), 0)
 _falso.set_doc = lambda c, o, version_esperada=None: (_DOCS.__setitem__(c, o), 1)[-1]
-_falso.guardar_catalogo = lambda cat, version_esperada=None: (_DOCS.__setitem__("catalogo", cat), 1)[-1]
+_falso.guardar_catalogo = lambda cat, version_esperada=None, solo=None: (_DOCS.__setitem__("catalogo", cat), 1)[-1]
 _falso.leer_registro = lambda pid: None
 _falso.trabajo_crear = lambda legacy_id, **k: _TRAB.__setitem__(legacy_id, {"estado": "en cola"})
 _falso.trabajo_actualizar = lambda legacy_id, **k: (_TRAB.setdefault(legacy_id, {}).update(k), 1)[-1]

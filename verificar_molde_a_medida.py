@@ -208,13 +208,24 @@ ok(pub["borde_mm"] == 2 and pub["nesting"]["alto_max_cm"] == 2000 and pub["nesti
    "la pantalla recibe el borde y el acomodo para decidir sola qué tela sirve")
 # la medida es la del DISEÑO: la pieza lleva los 3 cm de margen por lado (1,50 → 156 cm, que no entra en
 # los 153 útiles de la tela de 1,60); con 1,40 (146 cm) entra en las dos
-ok(len(S._a_medida_telas_que_no_entran(copia, CAT, ["1", "2"])) == 1, "1,50 × 0,90 + 3 cm de margen por lado (156 cm) ya no entra en la de 1,60")
+# (MAPA 692) lo decide la computadora del usuario: `amEnTela` del motor del navegador, con lo que publica el servidor
+def _no_entran(prod, ids):
+    pub = S._a_medida_publico(prod, CAT)
+    telas = [t for t in CAT["telas"] if str(t.get("id")) in ids]
+    r = node("import { amEnTela } from './src/motor/molde/aMedida.js';"
+             f"const am = {json.dumps(pub)}; const T = {json.dumps(telas)};"
+             "console.log(JSON.stringify(T.map(t => [t.nombre, amEnTela(am, t.ancho_cm)]).filter(x => !x[1].cabe).map(x => [x[0], x[1].motivo])))")
+    return r
+# (MAPA 696) la bandera SIEMPRE puede girar: para que no entre, los DOS lados tienen que pasarse (alto 1,55 → 161 cm)
+copia["a_medida"]["alto_m"] = 1.55
+ok(len(_no_entran(copia, ["1", "2"])) == 1, "1,50 × 1,55 + 3 cm de margen por lado (156 × 161 cm) no entra en la de 1,60 ni girada")
 copia["a_medida"]["ancho_m"] = 1.4
-ok(S._a_medida_telas_que_no_entran(copia, CAT, ["1", "2"]) == [], "1,40 × 0,90 + el margen (146 cm) entra en las dos telas")
+ok(_no_entran(copia, ["1", "2"]) == [], "1,40 × 1,55 + el margen (146 cm de un lado) entra en las dos telas")
 copia["a_medida"]["ancho_m"] = 3
-_no = S._a_medida_telas_que_no_entran(copia, CAT, ["1", "2"])
-ok(len(_no) == 1 and _no[0][0] == "Tela 1,60", f"3 m de ancho no entra en la de 1,60 ({_no})")
+_no = _no_entran(copia, ["1", "2"])
+ok(len(_no) == 1 and _no[0][0] == "Tela 1,60", f"3 × 1,55 m no entra en la de 1,60 ni girada ({_no})")
 copia["a_medida"]["ancho_m"] = 1.5
+copia["a_medida"]["alto_m"] = 0.9
 
 print("\n3b · UN MOLDE YA CREADO, SIN ARCHIVO, SE PUEDE PASAR A MEDIDA (Moldería, 2026-10-06)")
 # El catálogo y su guardado se reemplazan acá: lo que se prueba es la DECISIÓN de la ruta.
@@ -354,7 +365,10 @@ ok("/api/externo/robot/a_medida/<ref>" in src and "/api/externo/robot/a_medida/<
 rob = io.open(os.path.join(_AQUI, "frontend", "src", "motor", "robot", "robot.mjs"), encoding="utf-8").read()
 ok("armarCopiaAMedida" in rob and rob.count("armarCopiaAMedida(") >= 3, "el robot arma la copia en el pedido y en la plantilla")
 srv = io.open(os.path.join(_AQUI, "servidor.py"), encoding="utf-8").read()
-ok('"la pieza no entra en la tela"' in srv, "el plan del pedido frena una tela donde la pieza no entra (cinturón)")
+# MAPA 692 (regla del usuario 2026-10-13: «nada del uso depende del servidor»): el plan YA NO frena; lo decide
+# la pantalla (`amEnTela`) y el pedido del otro sistema lo valida la API (`tela-no-entra`, arriba)
+ok('"la pieza no entra en la tela"' not in srv and "_a_medida_telas_que_no_entran" not in srv,
+   "el servidor ya no decide si la pieza entra: no hay freno 409 en el plan")
 
 print("\n6 · LA PLANTILLA: el margen punteado aparte")
 pl = node("import { planIllustrator } from './src/motor/molde/illustrator.js';"
@@ -554,10 +568,11 @@ ok("panelIzquierdo={_amIt ? _panelMedida" in app,
 # 🔴 SIN ARMAR, LA MISMA PANTALLA (MAPA 676, reclamo del usuario 2026-10-12: «¿por qué volviste a romper este espacio?»):
 # mientras la copia se arma de fondo se ve el paso de siempre —cabecera con sus botones, visor y panel de diseños—, con
 # el dibujo de la forma en el visor; lo que necesita la copia espera apagado. Nunca una tarjeta aparte sin barra.
+# (MAPA 695) y SIN ESPERAR al servidor: «Cargar arte» ya no se apaga por la copia — la copia se arma al cargar el arte
 ok("{(_moldeListo || (_amIt && !_amIt.de)) ? (" in app and "visorReemplazo={_amSinArmar ? _visorMedida : null}" in app
-   and "disabled={!!amArmando || _amSinArmar}" in app and "onCargarDiseno={_amSinArmar ? null :" in app
-   and "{(_amIt && !_amIt.de) ? (" not in app,
-   "sin armar todavía: la pantalla de siempre con sus botones (cargar el arte espera a la copia)")
+   and "disabled={!!amArmando} title={amArmando ?" in app and "onCargarDiseno={() => fileInputArteRef.current.click()}" in app
+   and "disabled={!!amArmando || _amSinArmar}" not in app and "{(_amIt && !_amIt.de) ? (" not in app,
+   "sin armar todavía: la pantalla de siempre con sus botones, y «Cargar arte» se puede tocar ya (MAPA 695)")
 # 🔴 UN SOLO LUGAR (pedido del usuario 2026-10-07: «usá la misma visual, no lo separes en 2 espacios»): el dibujo de la
 # medida va EN el visor del paso, no en una pantalla aparte ni en un dibujito dentro del panel
 ok("telaAMedida={_telaVisor}" in app
@@ -569,10 +584,10 @@ ok("[_claveTelaDis(did, d.id)]: v" in app, "la tela elegida antes de armar pasa 
 ok("amTimerRef.current = null; amIntentoRef.current = firma;" in app and "armarAMedida(st.did, st.it, st.a, st.h, { forma: st.f, orientacion: st.o, terminacion: st.te, silencioso: true })" in app and "listaParaArmar" in app
    and "Armar a esta medida" not in app and "— Elegí la tela —" not in app,
    "la medida se arma sola (sin botón) y la tela se elige como siempre (sin lista propia en el panel)")
-# 🔴 DE ENTRADA, EL PASO COMPLETO (MAPA 637): el molde a medida recién elegido se arma solo con la medida
-# PREDETERMINADA de Ajustes; la medida se cambia en el panel del paso, no en otra pantalla
-ok("(st.esCopia && !amForm[st.clave] && !st.vieja)" in app and "metrosTexto(_amIt.ancho_m || 1)" in app,
-   "el molde a medida se arma solo con la medida predeterminada al entrar al paso Arte")
+# 🔴 DE ENTRADA, EL PASO COMPLETO (MAPA 637): el visor muestra el molde a medida con la medida PREDETERMINADA de
+# Ajustes; la medida se cambia en el panel del paso. (MAPA 695) Ya NO se arma en el servidor al entrar: se dibuja acá
+ok("st.lista && st.esCopia && (!!amForm[st.clave] || st.vieja)" in app and "metrosTexto(_amIt.ancho_m || 1)" in app,
+   "el molde a medida se ve con la medida predeterminada al entrar al paso Arte, sin armar nada en el servidor")
 # 🔴 CAMBIAR LA MEDIDA ES INSTANTÁNEO (MAPA 638): el visor de siempre dibuja la medida escrita al toque
 # (`_layoutVivo`) y el archivo se rehace de fondo, SIN el cartel que tapa todo
 ok("canvasLayout={_amSinArmar ? null : (_layoutVivo || canvasLayout)}" in app and "previewPiezas={_pvMedida}" in app
@@ -798,7 +813,7 @@ _gv = node("import { versionGeo, geoVieja, GEO_VERSION } from './src/motor/molde
            " hoy: geoVieja({ de: 'x', forma: 'triangulo', geo_v: GEO_VERSION.triangulo }), rect: geoVieja({ de: 'x' }), rectHoy: geoVieja({ de: 'x', geo_v: GEO_VERSION.rectangulo }), tpl: geoVieja({ forma: 'triangulo' }) }))")
 ok(_gv["t"] >= 3 and _gv["r"] >= 2 and _gv["vieja"] and _gv["sinSello"] and not _gv["hoy"] and _gv["rect"] and not _gv["rectHoy"] and not _gv["tpl"],
    f"una copia armada con una geometría vieja (o sin sello: el rectángulo de antes de las esquinas recortadas) se detecta; la de hoy y la plantilla no ({_gv})")
-ok("(Number(am.geo_v) || 1) === versionGeo(f)" in app8 and "!st.vieja" in app8 and "vieja: geoVieja(_amIt)" in app8
+ok("(Number(am.geo_v) || 1) === versionGeo(f)" in app8 and "|| st.vieja)" in app8 and "vieja: geoVieja(_amIt)" in app8
    # (MAPA 664) la versión viaja en el mismo pedido que crea la copia o le cambia la medida (antes, un POST más)
    and app8.count("terminacion: te, geo_v: versionGeo(fo) }) });") == 2 and "anotarGeo" not in app8
    and 'extra["a_medida"]["geo_v"] = max(1, min(1000, int(cuerpo.get("geo_v"))))' in io.open(os.path.join(_AQUI, "servidor.py"), encoding="utf-8").read()
@@ -1096,15 +1111,19 @@ finally:
     _FAM.dibujos_a_medida = _dv
 ok(_fx and _fx.get("filas") and _fx.get("dibujos") == [], "si el dibujo falla, la ficha sale igual con sus filas")
 
-print(chr(10) + "13 · AL ENTRAR AL PASO ARTE LA MEDIDA SE ARMA SOLA, TAMBIÉN DESPUÉS DE «NUEVO PEDIDO» (MAPA 660)")
-# 🔴 pedido del usuario 2026-10-09 con captura: tras «Nuevo pedido», la misma bandera con la misma medida no se
-# armaba al entrar (14:31:32 activar y ningún crear): `amIntentoRef` guardaba la firma también cuando salía BIEN
+print(chr(10) + "13 · LA COPIA SE ARMA RECIÉN AL CARGAR EL ARTE; AUTOMÁTICO SÓLO EL RE-ARMADO DE UNA COPIA (MAPA 660 → 695)")
+# MAPA 695 (el usuario: «dibujar esa mierda simple no necesita del servidor»): elegir la medida no toca el servidor.
 _a13b = io.open(os.path.join(_AQUI, "frontend", "src", "App.jsx"), encoding="utf-8").read()
 _arm = _a13b[_a13b.index("const armarAMedida = async"):_a13b.index("const amIntentoRef = useRef('');")]
 ok(".then((bien) => { if (bien && amIntentoRef.current === firma) amIntentoRef.current = ''; });" in _a13b
-   and _arm.count("return true;") == 2 and "showError(e.message);" + chr(10) + "      return false;" in _arm.replace(chr(13), ""),
-   "el «ya lo intenté» queda sólo si el armado falló (armarAMedida dice si salió bien)")
-ok("useEffect(() => { if (pedidoPaso !== 'arte') { amIntentoRef.current = ''; amFondoRef.current = new Set(); } }, [pedidoPaso]);" in _a13b,
+   and "return mid;" in _arm and "return d.id;" in _arm and "showError(e.message);" + chr(10) + "      return false;" in _arm.replace(chr(13), ""),
+   "armarAMedida devuelve el id de la copia (o false si falló); el «ya lo intenté» queda sólo si falló")
+ok("st.lista && st.esCopia && (!!amForm[st.clave] || st.vieja)" in _a13b,
+   "el armado automático es SÓLO re-armar una copia que ya existe (otra medida escrita o geometría vieja), nunca la plantilla")
+ok("const asegurarCopiaAMedida = async" in _arm and "id = await asegurarCopiaAMedida(_etapa);" in _a13b
+   and _a13b.count("await asegurarCopiaAMedida((x) => setProcesando(x))") == 1,
+   "la copia se arma al cargar el arte (dentro del mismo cartel) o al tocar «Crear plantilla»; elegir la tela no la necesita")
+ok("useEffect(() => { if (pedidoPaso !== 'arte') amIntentoRef.current = ''; }, [pedidoPaso]);" in _a13b,
    "y al salir del paso Arte se olvida también un intento fallido")
 
 print(chr(10) + "14 · INSTANTÁNEO: UN SOLO HILO, LA MISMA MEDIDA UNA VEZ, PRECALENTADO Y «NUEVO PEDIDO» SIN ESPERA (MAPA 661)")
@@ -1139,14 +1158,13 @@ _rp = _a14[_a14.index("const _reiniciarPedido = () => {"):_a14.index("setPedidoP
 ok("setBorrandoPedido(" not in _rp and "setProductosCat(c => ({ ...c, productos: (c.productos || []).filter(p => !_sacar.has(p.id)) }))" in _rp,
    "«Nuevo pedido» arranca YA: lo del servidor se borra de fondo (sin cartel que espere) y sus moldes salen de la lista en el acto")
 
-print(chr(10) + "15 · CAMBIAR DE DISEÑO ES INSTANTÁNEO: LAS COPIAS DE LOS OTROS DISEÑOS SE ARMAN DE FONDO (MAPA 662)")
+print(chr(10) + "15 · CAMBIAR DE DISEÑO SIGUE SIENDO INSTANTÁNEO, SIN ARMAR NADA DE FONDO (MAPA 662 → 695)")
+# MAPA 695: armar de fondo las copias de TODOS los diseños eran 5-7 pedidos al servidor por diseño (la cola de 43
+# medida en el publicado). Pasar de diseño es instantáneo igual: el visor dibuja la medida ACÁ (`_visorMedida`).
 _a15 = io.open(os.path.join(_AQUI, "frontend", "src", "App.jsx"), encoding="utf-8").read()
 _ef15 = _a15[_a15.index("const amIntentoRef = useRef('');"):_a15.index("// ⚡ PRECALENTAR (MAPA 661")]
-ok("if (!ok && pedidoPaso && pedidoPaso !== 'diseno' && !procesando && !amArmando && !amTimerRef.current) {" in _ef15 and "silencioso: true })" in _ef15 and "silencioso: st.esCopia" not in _ef15
-   and "amFondoRef.current.add(k);" in _ef15 and "silencioso: true });" in _ef15
-   and _ef15.index("amFondoRef.current.add(k);") < _ef15.index("if (!ok || amIntentoRef.current === firma || amTimerRef.current) return;"),
-   "mientras el diseño que se ve no tiene nada que armar, se arma sin cartel la copia de otro diseño (de a una, una vez cada una)")
-ok("amIntentoRef.current = ''; amFondoRef.current = new Set();" in _ef15, "y al salir del paso Arte se empieza de nuevo")
+ok("amFondoRef" not in _a15 and "for (const did of Object.keys(disenoMoldes || {}))" not in _ef15,
+   "ya no se arman de fondo las copias de los otros diseños")
 
 print(chr(10) + "16 · LA FICHA: LA MISMA CONFIGURACIÓN EN VARIOS DISEÑOS VA UNA VEZ; DISTINTA, UNA POR DISEÑO (MAPA 665)")
 _cat16 = {"productos": [{"id": "c1", "a_medida": {"de": "tplA"}}, {"id": "c2", "a_medida": {"de": "tplA"}},
@@ -1195,13 +1213,14 @@ ok("Bandera · a medida" in _t17 and "MOLDE GUÍA" not in _t17 and "1 pieza" not
    and "JUGADOR" in _t17 and "GOLERO" in _t17 and _t17.count("MEDIDA Y TERMINACIÓN") == 1,
    "la ficha impresa: «Bandera · a medida», sin «MOLDE GUÍA» ni «1 pieza», las dos tarjetas con su medida y una sola sección")
 _fj17 = io.open(os.path.join(_AQUI, "frontend", "src", "motor", "ficha", "ficha.js"), encoding="utf-8").read()
+_gen17 = io.open(os.path.join(_AQUI, "frontend", "src", "motor", "pedido", "generar.js"), encoding="utf-8").read()
 ok("export function compactarAMedida(guias)" in _fj17 and "function hCardAMedida(aspecto)" in _fj17
-   and "am: g.am || null" in io.open(os.path.join(_AQUI, "frontend", "src", "motor", "pedido", "generar.js"), encoding="utf-8").read(),
-   "la ficha del navegador hace lo mismo (gemelos; el píxel a píxel lo mira `verificar_navegador_ficha.py`)")
+   and "fichaAMedida(g.a_medida_datos)" in _gen17 and "agruparAMedidaFicha(guias)" in _gen17,
+   "la ficha del navegador arma la sección y agrupa en ESTA computadora (MAPA 692; el píxel a píxel lo mira `verificar_navegador_ficha.py`)")
 _ps16 = io.open(os.path.join(_AQUI, "servidor.py"), encoding="utf-8").read()
-ok("_agrupar_a_medida_ficha(guias, plan[\"cat\"])" in _ps16 and "_agrupar_a_medida_ficha(_guias, cat)" in _ps16
-   and 'g["pid"] = _pf' in _ps16,
-   "las dos fichas agrupan igual: la del navegador (plan) y la del servidor")
+ok("_agrupar_a_medida_ficha(guias, plan[\"cat\"])" not in _ps16 and '_g["a_medida_datos"] = _datos_ficha_a_medida(' in _ps16
+   and "_agrupar_a_medida_ficha(_guias, cat)" in _ps16 and 'g["pid"] = _pf' in _ps16,
+   "el plan manda sólo los datos guardados (MAPA 692); la ficha del servidor (API/contratos) sigue agrupando igual")
 _fd16 = os.path.join(_TMP, "ficha_665"); os.makedirs(_fd16, exist_ok=True)
 _r16 = _FT.generar_ficha(_fd16, "Ficha técnica", "Bandera", {"columnas": [{"id": "c", "label": "Cantidad"}], "filas": [{"c": 1}]},
                          [{"nombre": "Bandera", "diseno": "JUGADOR", "piezas": [], "a_medida": {**_fa, "titulo_disenos": "JUGADOR y GOLERO"}},
@@ -1211,6 +1230,191 @@ ok("MEDIDA Y TERMINACIÓN · JUGADOR y GOLERO" in _t16 and _t16.count("MEDIDA Y 
    "la ficha impresa la trae UNA vez, titulada con los dos diseños")
 _fj16 = io.open(os.path.join(_AQUI, "frontend", "src", "motor", "ficha", "ficha.js"), encoding="utf-8").read()
 ok("(verdad(amF.titulo_disenos) ? ` · ${amF.titulo_disenos}` : '')" in _fj16, "la del navegador igual (gemelo)")
+
+print("\n691 · 🔴 EL SERVIDOR MIDE LA MISMA PIEZA QUE EL VISOR (forma, punta, terminación)")
+# El reclamo (2026-10-13): en el servidor publicado un triángulo de 3 × 1,50 que el visor mostraba de
+# 300 × 153,4 cm se frenaba al enviar el pedido «mide 300,4 × 158,8»: `_a_medida_telas_que_no_entran` (el
+# plan, 409) y `_amTelaNoEntra` (la pantalla) llamaban a la cuenta SIN forma/punta/terminación → un
+# rectángulo con el margen guardado. (a) los gemelos dan lo mismo en TODAS las combinaciones; (b) el freno
+# del servidor da lo mismo que la cuenta del visor sobre una copia real; (c) la pantalla le pasa todo.
+import itertools as _it691
+_C691 = []
+for f, o, te, rot, mg, (an, al), tela in _it691.product(
+        ("rectangulo", "circulo", "triangulo"), ("abajo", "arriba", "izquierda", "derecha"), ("dobladillo", "overlock", "sin"),
+        ("ninguna", "90", "libre", "auto"), ({"todos": 0}, {"todos": 2}, {"izq": 1, "der": 3, "arriba": 4, "abajo": 0.5}),
+        ((3, 1.5), (1.5, 3), (1.2, 0.8), (4, 1), (1.55, 1.55)), (157, 180, 100)):
+    if f != "triangulo" and o != "abajo":
+        continue                                    # la punta sólo cambia el triángulo
+    _C691.append(dict(anchoM=an, altoM=al, margen=mg, bordeMm=2, anchoCm=tela, largoMaxCm=500, margenNestingMm=10,
+                      rotacion=rot, resolucionMm=4, forma=f, orientacion=o, terminacion=te, overlock_cm=1.5))
+_f691 = os.path.join(_TMP, "casos_691.json")          # por archivo: en la línea de comandos no entran (WinError 206)
+with open(_f691, "w", encoding="utf-8") as _fh:
+    json.dump(_C691, _fh)
+_js691 = node("import { cabeEnTela, margenDeTerminacion } from './src/motor/molde/aMedida.js'; import { readFileSync } from 'fs';"
+              f"const C = JSON.parse(readFileSync({json.dumps(_f691)}, 'utf8'));"
+              "console.log(JSON.stringify(C.map(x => { const r = cabeEnTela({ ...x, margen: margenDeTerminacion({ margen: x.margen, overlock_cm: x.overlock_cm }, x.terminacion) });"
+              " return [r.cabe, r.motivo || null] })))")
+_dif691 = []
+for c, (jc, jm) in zip(_C691, _js691):
+    _mg = S._margen_de_terminacion({"margen": c["margen"], "overlock_cm": c["overlock_cm"]}, c["terminacion"])
+    pc, pm = S._cabe_en_tela(c["anchoM"], c["altoM"], c["bordeMm"], c["anchoCm"], c["largoMaxCm"], c["margenNestingMm"], c["rotacion"],
+                             margen=_mg, resolucion_mm=c["resolucionMm"], forma=c["forma"], orientacion=c["orientacion"],
+                             terminacion=c["terminacion"])
+    if pc != jc or (pm or None) != jm:
+        _dif691.append(f"{c['forma']}/{c['orientacion']}/{c['terminacion']}/{c['rotacion']} {c['anchoM']}×{c['altoM']} en {c['anchoCm']}: py {pc} «{pm}» ≠ js {jc} «{jm}»")
+ok(not _dif691, f"gemelos `_cabe_en_tela` ↔ `cabeEnTela`: {len(_C691)} combinaciones (forma × punta × terminación × giro × margen × medida × tela) iguales"
+   + ("" if not _dif691 else f" — {len(_dif691)} distintas, p. ej. {_dif691[0]}"))
+
+# (b) una COPIA real (triángulo con overlock, margen guardado de dobladillo 4 cm): lo que decide la pantalla
+# (`amEnTela`, MAPA 692) = la cuenta que muestra el visor (`estadoMedida`) = lo que valida la API (Python, como
+# `integracion_externa`: margen de la terminación + forma + punta)
+_cat691 = {"telas": [{"id": "t157", "nombre": "Bandera (1,60)", "ancho_cm": 157}],
+           "nesting_presets": [{"id": "np", "nombre": "x", "margen_mm": 10, "rotacion": "libre", "alto_max_cm": 3000}]}
+for _f, _te, _an, _al in (("triangulo", "dobladillo", 3, 1.5), ("triangulo", "overlock", 3, 1.5), ("circulo", "sin", 1.55, 1.55),
+                          ("rectangulo", "overlock", 3, 1.53), ("triangulo", "dobladillo", 3, 1.6)):
+    _am = {"de": "plantilla", "ancho_m": _an, "alto_m": _al, "forma": _f, "orientacion": "abajo", "terminacion": _te,
+           "margen": {"todos": 4}, "margen_dobladillo": {"todos": 2}, "overlock_cm": 1}
+    _pr = {"id": "copia691", "nombre": "Bandera", "a_medida": _am, "nesting_preset_id": "np"}
+    _pub = S._a_medida_publico(_pr, _cat691)
+    _n = _pub["nesting"]; _term = S._norm_terminacion(_am["terminacion"])
+    _api = S._cabe_en_tela(_an, _al, _pub["borde_mm"], 157, _n["alto_max_cm"], _n["margen_mm"], _n["rotacion"],
+                           margen=S._margen_de_terminacion(_am, _term), resolucion_mm=_n["resolucion_mm"],
+                           forma=_f, orientacion="abajo", terminacion=_term)
+    _vis = node("import { cabeEnTela, amEnTela, margenDeTerminacion, normTerminacion } from './src/motor/molde/aMedida.js';"
+                f"const am = {json.dumps(_pub)}; const te = normTerminacion(am.terminacion); const n = am.nesting;"
+                "const v = cabeEnTela({ anchoM: am.ancho_m, altoM: am.alto_m, margen: margenDeTerminacion(am, te), bordeMm: am.borde_mm, anchoCm: 157,"
+                " largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion, resolucionMm: n.resolucion_mm,"
+                " forma: am.forma, orientacion: am.orientacion, terminacion: te });"
+                "const p = amEnTela(am, 157);"
+                "console.log(JSON.stringify([[v.cabe, v.motivo || null], [p.cabe, p.motivo || null]]))")
+    ok(_vis[0] == _vis[1] and _vis[1] == [_api[0], _api[1] or None],
+       f"{_f} {_an}×{_al} con {_te}: la pantalla ({'entra' if _vis[1][0] else _vis[1][1]}) = el visor = la API")
+
+# (c) la pantalla frena la tela del pedido con `amEnTela` (la computadora del usuario decide, MAPA 692)
+_app691 = io.open(os.path.join(_AQUI, "frontend", "src", "App.jsx"), encoding="utf-8").read()
+_i691 = _app691.index("const _amTelaNoEntra = (am, telaId) =>")
+_b691 = _app691[_i691:_i691 + 600]
+ok("amEnTela(am, t.ancho_cm)" in _b691, "la pantalla (`_amTelaNoEntra`) decide con `amEnTela` (forma, punta, terminación y su margen)")
+
+print("\n692 · 🔴 LA FICHA DEL MOLDE A MEDIDA LA ARMA LA COMPUTADORA DEL USUARIO (el servidor sólo da los datos)")
+# Regla del usuario (2026-10-13): «nada del uso depende del servidor». El plan manda `a_medida_datos` (lo
+# guardado) y el navegador arma filas, notas, dibujos y el agrupado: tiene que dar EXACTAMENTE lo mismo que
+# la ficha del servidor (`_ficha_a_medida`, `_agrupar_a_medida_ficha`), que sigue para la API.
+import itertools as _it692
+
+
+def _igual692(a, b, ruta="$"):
+    """Diferencia profunda (números con tolerancia 1e-6); None si son iguales."""
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool) and not isinstance(b, bool):
+        return None if abs(float(a) - float(b)) <= 1e-6 else f"{ruta}: {a} ≠ {b}"
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        if len(a) != len(b):
+            return f"{ruta}: largo {len(a)} ≠ {len(b)}"
+        for i, (x, y) in enumerate(zip(a, b)):
+            d = _igual692(x, y, f"{ruta}[{i}]")
+            if d:
+                return d
+        return None
+    if isinstance(a, dict) and isinstance(b, dict):
+        if set(a) != set(b):
+            return f"{ruta}: claves {sorted(set(a) ^ set(b))}"
+        for k in a:
+            d = _igual692(a[k], b[k], f"{ruta}.{k}")
+            if d:
+                return d
+        return None
+    return None if a == b else f"{ruta}: {a!r} ≠ {b!r}"
+
+
+_tpl692 = {"id": "tpl692", "nombre": "Bandera", "a_medida": {"pieza": "Bandera"}, "marcas_tiras": {"grosor_mm": 1.5}}
+_LADOS692 = {"rectangulo": {"arriba": 4, "abajo": 1, "izq": 3, "der": 0}, "circulo": {"alrededor": 8},
+             "triangulo": {"base": 5, "laterales": 3}}
+_casos692, _prods692 = [], []
+for (f, o), te, mg, (an, al), tir, borde in _it692.product(
+        [("rectangulo", "abajo"), ("circulo", "abajo")] + [("triangulo", x) for x in ("abajo", "arriba", "izq", "der")],
+        ("dobladillo", "overlock", "sin"), ({"todos": 2}, {"izq": 1, "der": 3, "arriba": 4, "abajo": 0.5}, {"todos": 0}),
+        ((3, 1.5), (1.2, 0.8), (1.55, 1.55)), ("sin", "marca", "no_marca"), (True, False)):
+    am = {"de": "tpl692", "pieza": "Bandera", "ancho_m": an, "alto_m": al, "forma": f, "orientacion": o, "terminacion": te,
+          "margen_dobladillo": mg, "overlock_cm": 1.5}
+    am["margen"] = S._margen_de_terminacion(am)
+    pr = {"id": f"c692_{len(_prods692)}", "nombre": "Bandera", "a_medida": am, "borde_corte": {"activo": borde, "ancho_mm": 2}}
+    if tir != "sin":
+        pr["marcas_tiras"] = {"activo": True, "lados": _LADOS692[f], "marcar": tir == "marca"}
+    _prods692.append(pr)
+_cat692 = {"productos": [_tpl692] + _prods692}
+for pr in _prods692:
+    _casos692.append({"py": S._ficha_a_medida(pr, _cat692), "datos": S._datos_ficha_a_medida(pr, _cat692)})
+_f692 = os.path.join(_TMP, "casos_692.json")
+with open(_f692, "w", encoding="utf-8") as _fh:
+    json.dump([c["datos"] for c in _casos692], _fh)
+_salida692 = os.path.join(_TMP, "salida_692.json")
+node("import { fichaAMedida } from './src/motor/molde/aMedidaFicha.js'; import { readFileSync, writeFileSync } from 'fs';"
+     f"const C = JSON.parse(readFileSync({json.dumps(_f692)}, 'utf8'));"
+     f"writeFileSync({json.dumps(_salida692)}, JSON.stringify(C.map(d => fichaAMedida(d))));"
+     "console.log('1')")
+_js692 = json.load(open(_salida692, encoding="utf-8"))
+_dif692 = [(i, d) for i, (c, j) in enumerate(zip(_casos692, _js692)) for d in [_igual692(c["py"], j)] if d]
+_conDib = sum(1 for c in _casos692 if (c["py"] or {}).get("dibujos"))
+ok(not _dif692 and _conDib == len(_casos692),
+   f"`fichaAMedida` (navegador) = `_ficha_a_medida` (servidor) en {len(_casos692)} moldes (forma × punta × terminación × margen × "
+   f"medida × tiras × borde), filas, notas y dibujos ({_conDib} con dibujos)"
+   + ("" if not _dif692 else f" — {len(_dif692)} distintos, p. ej. caso {_dif692[0][0]} "
+      f"({_prods692[_dif692[0][0]]['a_medida']['forma']}/{_prods692[_dif692[0][0]]['a_medida']['terminacion']}): {_dif692[0][1]}"))
+
+# el agrupado (MAPA 665-666): mismo orden, mismos bloques, mismas secciones y títulos que el servidor
+_g692 = [(0, "JUGADOR"), (len(_prods692) - 1, "OTRO"), (0, "GOLERO"), (5, "ARQUERO"), (None, "BUZO")]
+_lista_py, _lista_js = [], []
+for idx, dis in _g692:
+    if idx is None:
+        _lista_py.append({"pid": "buzo", "nombre": "Buzo", "diseno_nombre": dis})
+        _lista_js.append({"pid": "buzo", "nombre": "Buzo", "diseno_nombre": dis, "a_medida": None, "a_medida_datos": None})
+        continue
+    pr = _prods692[idx]
+    _lista_py.append({"pid": pr["id"], "nombre": "Bandera", "diseno_nombre": dis, "a_medida": S._ficha_a_medida(pr, _cat692)})
+    _lista_js.append({"pid": pr["id"], "nombre": "Bandera", "diseno_nombre": dis, "a_medida_datos": S._datos_ficha_a_medida(pr, _cat692)})
+S._agrupar_a_medida_ficha(_lista_py, _cat692)
+_f692b = os.path.join(_TMP, "agrupar_692.json")
+with open(_f692b, "w", encoding="utf-8") as _fh:
+    json.dump(_lista_js, _fh)
+_ag692 = node("import { fichaAMedida, agruparAMedidaFicha } from './src/motor/molde/aMedidaFicha.js'; import { readFileSync } from 'fs';"
+              f"const G = JSON.parse(readFileSync({json.dumps(_f692b)}, 'utf8'));"
+              "for (const g of G) g.a_medida = g.a_medida_datos ? fichaAMedida(g.a_medida_datos) : null;"
+              "agruparAMedidaFicha(G);"
+              "console.log(JSON.stringify(G.map(g => ({ pid: g.pid, d: g.diseno_nombre, am: g.am || null, sec: g.a_medida ? (g.a_medida.titulo_disenos || '·') : null }))))")
+_ag692py = [{"pid": g["pid"], "d": g["diseno_nombre"], "am": g.get("am"), "sec": (g["a_medida"].get("titulo_disenos") or "·") if g.get("a_medida") else None}
+            for g in _lista_py]
+_dag = _igual692(_ag692py, _ag692)
+ok(not _dag, "`agruparAMedidaFicha` = `_agrupar_a_medida_ficha`: mismo orden, mismos bloques compactos y una sección por configuración"
+   + ("" if not _dag else f" — {_dag}"))
+# (las cuatro banderas salen de la MISMA plantilla: quedan en su orden; el buzo, que no es a medida, al final)
+_sec692 = {x["d"]: x["sec"] for x in _ag692}
+ok([x["d"] for x in _ag692] == ["JUGADOR", "OTRO", "GOLERO", "ARQUERO", "BUZO"] and _sec692["JUGADOR"] == "JUGADOR y GOLERO"
+   and _sec692["GOLERO"] is None and _sec692["OTRO"] == "OTRO" and _sec692["BUZO"] is None,
+   f"JUGADOR y GOLERO con la misma bandera: una sola sección titulada con los dos; otra configuración, la suya ({list(_sec692.items())})")
+
+print("\n696 · 🔴 UN MOLDE A MEDIDA SIEMPRE PUEDE GIRAR 90° (en la pantalla, la API y el armado)")
+# El reclamo (2026-10-13): en el publicado la Bandera tenía la regla «Estándar» (no gira) y una de 3 × 1,50 no
+# entraba en la tela de 1,60; en el taller (regla «Productos simples», giro libre) sí. Una bandera es plana.
+_cat696 = {"telas": [{"id": "t157", "nombre": "Bandera (1,60)", "ancho_cm": 157}],
+           "nesting_presets": [{"id": "np0", "nombre": "Estándar", "margen_mm": 10, "rotacion": "ninguna", "alto_max_cm": 3000},
+                               {"id": "npL", "nombre": "Libre", "margen_mm": 10, "rotacion": "libre", "alto_max_cm": 3000}]}
+_am696 = {"de": "tpl", "ancho_m": 3, "alto_m": 1.5, "forma": "triangulo", "orientacion": "abajo", "terminacion": "dobladillo",
+          "margen": {"todos": 2}, "margen_dobladillo": {"todos": 2}}
+_pr696 = {"id": "c696", "nombre": "Bandera", "a_medida": _am696, "nesting_preset_id": "np0"}
+_pub696 = S._a_medida_publico(_pr696, _cat696)
+_r696 = node("import { amEnTela, rotacionAMedida } from './src/motor/molde/aMedida.js';"
+             f"const am = {json.dumps(_pub696)};"
+             "console.log(JSON.stringify([amEnTela(am, 157), ['ninguna','auto','180','90','libre'].map(rotacionAMedida)]))")
+ok(_pub696["nesting"]["rotacion"] == "90" and _r696[0]["cabe"] and _r696[0]["girada"],
+   f"con la regla «Estándar» (no gira) la bandera 3 × 1,50 entra GIRADA en la tela de 1,60 ({_r696[0].get('motivo')})")
+ok(_r696[1] == ["90", "90", "90", "90", "libre"] and [S._rotacion_a_medida(x) for x in ("ninguna", "auto", "180", "90", "libre")] == _r696[1],
+   "gemelos `rotacionAMedida` ↔ `_rotacion_a_medida`: «libre» queda libre, lo demás gira 90°")
+ok(S._nesting_de({**_pr696, "nesting_preset_id": "npL"}, _cat696)["rotacion"] == "libre"
+   and S._nesting_de({"id": "buzo", "nesting_preset_id": "np0"}, _cat696)["rotacion"] == "ninguna",
+   "con regla libre sigue libre; un molde que NO es a medida sigue con su regla")
+_src696 = io.open(os.path.join(_AQUI, "servidor.py"), encoding="utf-8").read()
+_cp696 = _src696[_src696.index("def _config_produccion("):_src696.index("def _con_cantidad(")]
+ok("rot = _rotacion_a_medida(rot)" in _cp696, "el armado (`_config_produccion` → rotaciones del plan) gira igual que lo que dijo «entra»")
 
 print()
 if FALLOS:

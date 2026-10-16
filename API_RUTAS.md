@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **188 endpoints**. Generado automáticamente del código.
+Total: **189 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -252,7 +252,6 @@ Total: **188 endpoints**. Generado automáticamente del código.
 | POST | `/api/reserva/tomar` | Toma o renueva la reserva de UNA cosa. Devuelve `{mia, dueno}`: si no es tuya, `dueno` dice quién la tiene para poder decirlo en pantalla. | body: recurso |
 | GET | `/api/reservas` | Todo lo que está tomado ahora mismo. Lo pide la pantalla de configuración para pintar quién está en qué, sin tener que preguntar cosa por cosa. | — |
 
-
 ## Usuarios / Roles / Permisos
 
 | Método | Ruta | Descripción | Params |
@@ -279,10 +278,11 @@ Total: **188 endpoints**. Generado automáticamente del código.
 | GET | `/api/registro` | Los últimos eventos. `tipo` (error/aviso/info), `area` y `limite` filtran. Pide sesión (o el token del taller, para leer el publicado desde acá): lo q | q: area, limite, tipo |
 | POST | `/api/registro/limpiar` |  | — |
 
-## Ayuda guiada (tutoriales grabados)
+## Ayuda en video (tutoriales de Drive)
 
 | Método | Ruta | Descripción | Params |
 |---|---|---|---|
-| GET | `/api/tutoriales` | Los tutoriales grabados, para el menú de Ayuda. SIN permiso: la ayuda es para todos. | — |
-| POST | `/api/tutoriales` | Guarda una grabación. Body: {nombre, desc?, pasos:[{ancla, accion, etiqueta, donde}]}. Con `id` reemplaza uno existente (renombrar / regrabar). Sólo a | body: desc, id, nombre, pasos |
-| POST | `/api/tutoriales/borrar` | Saca un tutorial de la lista. Body: {id}. Sólo administradores. | — |
+| GET | `/api/ayuda/miniatura/<fid>` | La miniatura del video que arma Drive, cacheada en el servidor. | — |
+| GET | `/api/ayuda/video/<fid>` | El .mp4 desde el caché del servidor, con Range (para adelantar sin bajarlo entero). 409 si todavía no bajó. | — |
+| GET | `/api/ayuda/video/<fid>/estado` | ¿Ya está bajado al servidor? {listo, pct}. Si no, lo pide a Drive adelante de la cola de fondo. | — |
+| GET | `/api/ayuda/videos` | Los videos de la carpeta de Drive agrupados por sección (subcarpeta). `?recargar=1` relee Drive sin esperar los 5 min. | q: recargar |

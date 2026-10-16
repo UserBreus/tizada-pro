@@ -23,7 +23,7 @@ async function json(url, opts) {
  * Devuelve `{zip, modo, validacion}` o `null`. Tira un Error con mensaje para la pantalla si esta
  * computadora no puede (`e.capacidad`).
  */
-export async function prepararArteEnNavegador(archivo, { pid, diseno = null, rutaApi = (x) => x, avisar = null } = {}) {
+export async function prepararArteEnNavegador(archivo, { pid, diseno = null, rutaApi = (x) => x, avisar = null, mapeoManual = null } = {}) {
   if (!pid || !(await navegadorHace('arte', rutaApi))) return null
   const puerta = puedeHacer({ tipo: 'molde', mb: archivo.size / 1048576, hilos: 1 })
   if (!puerta.puede) { const e = new Error(puerta.motivo); e.capacidad = true; throw e }
@@ -42,9 +42,9 @@ export async function prepararArteEnNavegador(archivo, { pid, diseno = null, rut
     const r = await new Promise((ok, no) => {
       w.onmessage = (e) => { const m = e.data || {}; m.error ? no(new Error(m.error)) : ok(m.valor) }
       w.onerror = (e) => no(new Error('el hilo que analiza el diseño no arrancó: ' + (e.message || '')))
-      w.postMessage({ id: 1, tipo: 'arte_preparar', datos: { bytes, contexto: { ...contexto, diseno, plantilla: plantilla ? plantilla.slice() : null } } }, [bytes.buffer])
+      w.postMessage({ id: 1, tipo: 'arte_preparar', datos: { bytes, contexto: { ...contexto, diseno, plantilla: plantilla ? plantilla.slice() : null, manual: mapeoManual } } }, [bytes.buffer])
     })
-    return { zip: r.zip, modo: r.modo, validacion: r.validacion, mapeo: r.mapeo, sha1: r.sha1 }
+    return { zip: r.zip, modo: r.modo, validacion: r.validacion, mapeo: r.mapeo, sha1: r.sha1, mapeoManualErrores: r.mapeoManualErrores || null }
   } finally {
     try { w.terminate() } catch { /* nada */ }
   }

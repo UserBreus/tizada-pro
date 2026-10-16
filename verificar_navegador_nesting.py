@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# CONTRATO_LENTO (MAPA 728): ~15 min con el optimizador; va con `correr_contratos.py --todos`
 """
 CONTRATO: EL NAVEGADOR ACOMODA LAS PIEZAS EN LA TELA IGUAL QUE EL SERVIDOR — `py verificar_navegador_nesting.py`
 
@@ -14,6 +15,11 @@ salen de `math.cos/sin`; la UCRT de Windows y V8 difieren en el último bit para
 grados enteros (medido 2026-09-17), así que en rotación «libre» se aceptan 1e-9 de diferencia
 relativa. En los ángulos múltiplos de 90° coinciden bit a bit y la comparación es exacta. El área
 usa `** 2` (pow) contra `k * k`: misma tolerancia.
+
+EL OPTIMIZADOR (MAPA 728): el navegador corre la búsqueda y los carriles EN VARIOS HILOS (`nesting/carriles.js`)
+y Python en orden; tienen que dar lo mismo. Los escenarios usan un optimizador CHICO (`optimizar` = 3 carriles × 2
+intentos: el carril 0 —lo de antes, pulido—, el 1 —desde la búsqueda— y uno mezclado) porque Python tarda; uno
+usa 6 carriles para pasar por los dos juegos de giros. El mecanismo es el mismo que con los 16 de verdad.
 
 Python corre SIEMPRE por el camino del contorno (`_mascara_contorno`): las piezas traen `base.cont`
 y no traen `doc`, y `TIZADA_MASCARA_LEGACY` se quita del entorno. El navegador no tiene otro camino.
@@ -32,6 +38,9 @@ import time
 import types
 
 import numpy as np
+
+# 🔴 LENTO (MAPA 728): con el optimizador, Python corre los carriles EN ORDEN y compacta con FFT (~15 min)
+CONTRATO_LENTO = True
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 _AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -77,6 +86,41 @@ def _piezas_de(talles, talle, copias, rotacion, molde="m1", solo=None, borde_mm=
     return out
 
 
+def _forma_cont(pts):
+    """Un contorno SINTÉTICO (pt) para probar formas que no están en el molde: `pts` = polígono
+    [(x, y)…] o `("circulo", r)`. Mismo formato que `desplegado/m1.json` (segmentos m/l/c/h)."""
+    if isinstance(pts, tuple) and pts[0] == "circulo":
+        r = pts[1]
+        k = 0.5522847498 * r
+        cx = cy = r
+        seg = [["m", cx + r, cy],
+               ["c", cx + r, cy + k, cx + k, cy + r, cx, cy + r],
+               ["c", cx - k, cy + r, cx - r, cy + k, cx - r, cy],
+               ["c", cx - r, cy - k, cx - k, cy - r, cx, cy - r],
+               ["c", cx + k, cy - r, cx + r, cy - k, cx + r, cy],
+               ["h"]]
+        w = h = 2 * r
+    else:
+        seg = [["m", pts[0][0], pts[0][1]]] + [["l", x, y] for x, y in pts[1:]] + [["h"]]
+        w = max(x for x, _ in pts) - min(x for x, _ in pts)
+        h = max(y for _, y in pts) - min(y for _, y in pts)
+    return {"segmentos": [tuple(x) for x in seg], "bbox_raw": (0.0, 0.0, w, h), "bbox_mu": (0.0, 0.0, w, h),
+            "w": w, "h": h, "user_unit": 1.0}
+
+
+def _piezas_forma(nombre, cont, n, rotacion, borde_mm=2.0):
+    """`n` piezas iguales de un contorno sintético (como las arma `generar_pedido`)."""
+    B = borde_mm * MM
+    W, H = cont["w"], cont["h"]
+    out = []
+    for k in range(n):
+        base = {"cont": cont, "S": 1.0, "x0": 0.0, "y0": 0.0, "B": B, "W": W, "Hp": H + 2 * B}
+        out.append({"w": float(W) + 2 * float(B), "h": float(H + 2 * B), "base": base, "pieza": nombre,
+                    "talle": "U", "variante": None, "_molde": "sint", "etiqueta": f"{k + 1:02d}",
+                    "rotacion": rotacion, "borde_cm": 0})
+    return out
+
+
 def armar_fixture():
     with open(MOLDE, encoding="utf-8") as fh:
         d = json.load(fh)
@@ -85,7 +129,8 @@ def armar_fixture():
     # margen, resolución 4 mm (`TIZADA_RES_MM`), estrategias bl + bandas
     cfg = {"ancho_cm": 180, "altura_max_cm": 500, "espaciado_cm": 0.5,
            "margenes_cm": {"sup": 1, "inf": 1, "izq": 1, "der": 1},
-           "resolucion_mm": 4.0, "estrategias": ["bl", "bandas"]}
+           "resolucion_mm": 4.0, "estrategias": ["bl", "bandas"],
+           "optimizar": {"carriles": 3, "intentos": 2}}     # MAPA 728: chico, ver arriba
     esc = []
     # A · un talle, 3 prendas, sin rotación: 21 piezas (> 15 → un orden, sólo bl) con geometrías
     #     repetidas → el camino de los BLOQUES
@@ -99,6 +144,9 @@ def armar_fixture():
     esc.append({"nombre": "8 piezas, rotación 90, todos los órdenes y estrategias", "cfg": dict(cfg),
                 "piezas": _piezas_de(talles, "M", 1, "90", solo={0, 1, 2, 3, 4, 5})
                 + _piezas_de(talles, "2XL", 1, "90", solo={0, 5})})
+    # C' · las mismas, con 6 carriles: pasan los dos juegos de giros (todos y sólo 0/180) por los carriles mezclados
+    esc.append({"nombre": "8 piezas, giro 90, optimizador con 6 carriles", "cfg": dict(cfg, optimizar={"carriles": 6, "intentos": 4}),
+                "piezas": esc[-1]["piezas"]})
     # D · rotación libre cada 15° (grueso → fino, ndimage.rotate), 5 piezas
     esc.append({"nombre": "5 piezas, rotación libre cada 15°", "cfg": dict(cfg, paso_libre_grados=15),
                 "piezas": _piezas_de(talles, "Sfem", 1, "libre", solo={0, 1, 3, 5, 6})})
@@ -106,6 +154,67 @@ def armar_fixture():
     esc.append({"nombre": "11 prendas de 3 talles, varias hojas, rotación 180", "cfg": dict(cfg),
                 "piezas": _piezas_de(talles, "M", 5, "180") + _piezas_de(talles, "2XL", 3, "180")
                 + _piezas_de(talles, "Sfem", 3, "180")})
+    # F · COPIA QUE LLENA EL ANCHO (MAPA 701): tres filas sueltas con 19, 3 y 1 copias. Dos piezas
+    #     chicas por fila → entran varias a lo ancho: 19 = mesa llena ×N + resto; 3 = una mesa de 3
+    #     (no llena: se achica); 1 = sin repetir.
+    _f = []
+    for fila, cop in ((0, 19), (1, 3), (2, 1)):
+        for p in _piezas_de(talles, "M", 1, "180", solo={4, 5}):
+            p["_fila"], p["_copias"] = fila, cop
+            _f.append(p)
+    esc.append({"nombre": "copia: 19, 3 y 1 copias (mejor acomodo)", "cfg": dict(cfg, por_fila=True), "piezas": _f})
+    # G · COPIA CON GIRO 90: las copias en una mesa del largo máximo que se repite (MAPA 720; antes la
+    #     franja del alto de la pieza, 703); una pieza sola de 13 copias y dos piezas de 7
+    _g = []
+    for fila, cop, solo in ((0, 13, {5}), (1, 7, {4, 5})):
+        for p in _piezas_de(talles, "M", 1, "90", solo=solo):
+            p["_fila"], p["_copias"] = fila, cop
+            _g.append(p)
+    esc.append({"nombre": "copia con giro 90: el mejor acomodo de las copias", "cfg": dict(cfg, por_fila=True), "piezas": _g})
+    # L · TALLES SEPARADOS EN LA MISMA MESA (MAPA 710): M y 2XL juntos (grupo 1), Sfem aparte (2); cada
+    #     bloque solo y apilados, con las líneas punteadas (`cortes`) en `mesas`
+    _l = []
+    for t, g in (("M", 1), ("2XL", 1), ("Sfem", 2)):
+        for p in _piezas_de(talles, t, 2, "180"):
+            p["_grupo_mesa"] = g
+            _l.append(p)
+    esc.append({"nombre": "talles separados en la misma mesa", "cfg": dict(cfg, por_talles_mesa=True, talles_mesa_modo="separados"), "piezas": _l})
+    # H-K · FORMAS DE TODO TIPO (MAPA 706-708): el acomodo tiene que ser bueno con cualquier forma, no
+    #     sólo con el banderín. Contornos sintéticos en cm: triángulo (banderín 30×45), rectángulo
+    #     (bandera 60×90), círculo Ø40 y una mezcla.
+    cm = NC.CM
+    tri = _forma_cont([(0, 0), (30 * cm, 0), (15 * cm, 45 * cm)])
+    rec = _forma_cont([(0, 0), (60 * cm, 0), (60 * cm, 90 * cm), (0, 90 * cm)])
+    cir = _forma_cont(("circulo", 20 * cm))
+    cfg_b = dict(cfg, ancho_cm=157, altura_max_cm=5000)
+    esc.append({"nombre": "40 triángulos (banderín), giro 90", "cfg": cfg_b,
+                "piezas": _piezas_forma("Banderin", tri, 40, "90")})
+    esc.append({"nombre": "24 rectángulos 60×90, giro 90", "cfg": cfg_b,
+                "piezas": _piezas_forma("Bandera", rec, 24, "90")})
+    esc.append({"nombre": "30 círculos Ø40, giro 90", "cfg": cfg_b,
+                "piezas": _piezas_forma("Circulo", cir, 30, "90")})
+    esc.append({"nombre": "mezcla: 16 triángulos + 8 rectángulos + 10 círculos", "cfg": cfg_b,
+                "piezas": _piezas_forma("Banderin", tri, 16, "90") + _piezas_forma("Bandera", rec, 8, "90")
+                + _piezas_forma("Circulo", cir, 10, "90")})
+    # M · COPIA CON EL MISMO MOLDE EN DOS DISEÑOS (MAPA 717): dos filas de banderines (33 y 34 copias) con
+    #     la MISMA geometría y distinto diseño → mesas MEZCLADAS que se repiten (`filas` en `mesas`); y una
+    #     tercera fila de otra forma, que va sola
+    _m = []
+    for fila, (dis, cop, forma) in enumerate((("jugador", 33, tri), ("golero", 34, tri), ("jugador", 5, rec))):
+        for p in _piezas_forma("Banderin" if forma is tri else "Bandera", forma, 1, "90"):
+            p.update(_fila=fila, _copias=cop, _diseno=dis, _diseno_nombre=dis.upper())
+            _m.append(p)
+    esc.append({"nombre": "copia: mismo molde en dos diseños se mezcla", "cfg": dict(cfg_b, por_fila=True), "piezas": _m})
+    # N · SEPARAR DISEÑOS (MAPA 717): lo mismo con «Separar diseños» (cada diseño en sus mesas) y el modo
+    #     normal separando diseños
+    _n = [dict(p) for p in _m]
+    esc.append({"nombre": "copia separando diseños", "cfg": dict(cfg_b, por_fila=True, separar_disenos=True), "piezas": _n})
+    _o = []
+    for dis, n in (("jugador", 10), ("golero", 12)):
+        for p in _piezas_forma("Banderin", tri, n, "90"):
+            p.update(_diseno=dis, _diseno_nombre=dis.upper())
+            _o.append(p)
+    esc.append({"nombre": "normal separando diseños", "cfg": dict(cfg_b, separar_disenos=True), "piezas": _o})
     for e in esc:
         for i, p in enumerate(e["piezas"]):
             p["idx"] = i
@@ -115,7 +224,11 @@ def armar_fixture():
 def correr_python(esc):
     piezas = copy.deepcopy(esc["piezas"])
     t = time.time()
-    coloc, area = NC.anidar_contorno(piezas, dict(esc["cfg"]))
+    mesas = None
+    if esc["cfg"].get("por_fila") or esc["cfg"].get("por_talles_mesa") or esc["cfg"].get("separar_disenos"):
+        coloc, area, mesas = NC.anidar_por_fila(piezas, dict(esc["cfg"]))
+    else:
+        coloc, area = NC.anidar_contorno(piezas, dict(esc["cfg"]))
     seg = time.time() - t
     hojas = [[{"idx": c["pieza"]["idx"], "ang": c["ang"], "cx": c["cx"], "cy": c["cy"], "bw": c["bw"], "bh": c["bh"]}
               for c in h] for h in coloc]
@@ -123,12 +236,18 @@ def correr_python(esc):
     # la máscara de cada pieza: alto, ancho, celdas ocupadas y suma ponderada por posición (1-based)
     mascaras = {}
     for p in piezas:
+        # con la Copia mezclada (MAPA 717) las filas se acomodan con copias de la primera: la pieza de la
+        # fila nunca se prepara y no tiene máscara propia (en los dos motores)
+        if "_mask" not in p:
+            mascaras[str(p["idx"])] = None
+            continue
         m = p["_mask"]
         flat = m.ravel().astype(np.int64)
         mascaras[str(p["idx"])] = [int(m.shape[0]), int(m.shape[1]), int(flat.sum()),
                                    int((flat * np.arange(1, flat.size + 1)).sum())]
+    comun = None
     return {"segundos": seg, "area": area, "consumo": consumo, "hojas": hojas, "debug": dict(NC._DEBUG),
-            "mascaras": mascaras}
+            "mascaras": mascaras, "mesas": mesas, "comun": comun}
 
 
 def _cerca(a, b):
@@ -160,6 +279,8 @@ def comparar(py, js):
                     dif.append(f"hoja {hi + 1} #{k}: {campo} {a[campo]!r} vs {b[campo]!r}")
             if len(dif) > 12:
                 return dif
+    if py.get("mesas") != js.get("mesas"):
+        dif.append(f"mesas {py.get('mesas')!r} vs {js.get('mesas')!r}")
     if not _cerca(py["area"], js["area"]):
         dif.append(f"área {py['area']!r} vs {js['area']!r}")
     if not _cerca(py["consumo"], js["consumo"]):
@@ -197,6 +318,12 @@ def main():
                   f"consumo {a['consumo'] / NC.CM:.1f} cm · Python {a['segundos']:.2f} s · navegador {b['segundos']:.2f} s"
                   f" · bloques/búsquedas {a['debug'].get('bloque')}/{a['debug'].get('fft')}"
                   f" vs {b['debug'].get('bloque')}/{b['debug'].get('fft')}")
+            if a.get("comun") is not None:
+                print(f"      acomodo común solo: {a['comun'] / NC.CM:.1f} cm → ahora {a['consumo'] / NC.CM:.1f} cm"
+                      f" ({100 * (a['comun'] - a['consumo']) / a['comun']:.1f} % menos tela)")
+                if a["consumo"] > a["comun"] + 1e-6:
+                    print("      ✗ el acomodo nuevo NUNCA puede gastar más que el común")
+                    todo_ok = False
             for d in dif[:12]:
                 print("      " + d)
         print(f"  tiempo total: Python {t_py:.2f} s · navegador {t_js:.2f} s (proceso Node entero {t_node:.2f} s)")

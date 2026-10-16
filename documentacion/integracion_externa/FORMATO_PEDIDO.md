@@ -62,6 +62,7 @@ vez).
 | Foto del molde | `GET /moldes/{codigo}/foto` |
 | Telas (id, nombre, ancho, si se puede usar) | `GET /telas` |
 | Tipografías que TIZADA ya tiene | `GET /tipografias` |
+| Perfiles de color que tiene | `GET /perfiles` |
 | Catálogo de alarmas (sin llave) | `GET /alarmas` |
 | Formato y ejemplos (sin llave) | `GET /formato` |
 | **Revisar un pedido sin mandarlo** | `POST /pedidos/validar` |
@@ -145,6 +146,11 @@ que existe en más de una prenda. **Una variable por prenda** en cada diseño.
 | `tiras` | opcional · sólo **a medida** | Las marcas para coser las tiras: `{"lleva": true, "lados": {"arriba": 5, "abajo": 5, "izq": 1, "der": 0}}`. Cada número **cuenta las 2 puntas** (5 = una en cada esquina + 3 en el medio, a distancias iguales; 1 = una en el medio; 0 = ese lado sin tiras). También vale `true`/`false` (las del molde / no lleva) o los lados sueltos `{"arriba": 5}`. Sin `tiras`: las del molde. Grosor: el del molde. Color: siempre **negras con contorno blanco** (no se elige). **Triángulo:** `{"base": 5, "laterales": 4}` (cada lateral, contando sus puntas). **Círculo:** `{"alrededor": 12}` (parejas por todo el borde, la primera arriba; hasta 200). Con `"marcar": false` no se imprimen en la tizada pero salen en la ficha técnica (sin `marcar`: lo del molde). Errores: `tiras-invalidas`, `tiras-sin-margen` |
 | `editables` | opcional | Qué lleva cada objeto editable del arte. Ver abajo |
 | `tipografias` | opcional | Como en el diseño, pero sólo para este molde |
+| `tipografia_por_campo` | opcional | Como en el diseño, pero sólo para **este molde** (pisa la del diseño): `{"numero": "Anton Regular"}`. Una que no está en el catálogo (ni vino en `tipografias`) → `tipografia-desconocida` |
+| `reemplazos` | opcional | Reemplazar una tipografía **del arte** por otra **del catálogo**: `{"FuenteDelArte": "Anton Regular"}` (como «Tipografía» del paso Arte). Destino desconocido → `tipografia-desconocida` |
+| `ajustes` | opcional | **Mover, rotar, escalar o espejar** un objeto editable (el «Editar diseño» de la pantalla): `{"escudo": {"dx": 0.05, "dy": -0.02, "rot": 15, "scale": 1.2, "talles": ["M", "L"]}}`. `dx`/`dy` = fracción del ancho/alto del diseño (+dx derecha, +dy abajo); `rot` en grados; `scale` (o `sx`/`sy` por separado; negativo = espejo); `talles` opcional (sin `talles`: todos). Error: `ajuste-invalido`; objeto que el arte no tiene: `editable-desconocido` |
+| `colores` | opcional | El **color CMYK** (0 a 1) de un objeto editable: `{"escudo": {"fill": [0, 1, 1, 0], "stroke": [0, 0, 0, 1]}}`. Error: `color-invalido` |
+| `mapeo_arte` | opcional | Qué **mesa del arte** va en cada pieza, a mano (cuando la guía no trae el nombre de la pieza): `{"Frente": 1, "Espalda": "ESPALDA"}` — el número de la mesa o el rótulo escrito en ella. Manda sobre lo automático. Errores: `mapeo-arte-invalido`, `mapeo-arte-mesa` |
 
 #### `editables` — lo que no se sublima
 
@@ -164,6 +170,7 @@ El nombre del objeto es el de la capa del arte **sin** la palabra «Editable»
 | `"sublimado"` | Sale impreso con el diseño (es lo que pasa si no se nombra) |
 | `"tpu"`, `"bordado"`, `"dtf"` | **No se imprime**: en su lugar va una cruz de posición, y la ficha técnica dice qué aplicar y dónde |
 | `{"proceso": "…", "cruz": false}` | Igual, pero **sin** la cruz en la tela (queda sólo en la ficha) |
+| `"no_imprimir"` | No sale **ni el objeto ni una cruz** (el «Sin marca» de la pantalla sobre algo que se sublimaría) |
 
 ### `planilla[]` — una fila por prenda
 
@@ -176,7 +183,8 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 | la columna de talle | El talle **tal cual lo tiene el molde** (`M`, `2XL`, `10`). Cada molde lee **su** columna de talle (`planilla.columna_talle`). Si es `null` la planilla es **sin talles**: la fila no lleva talle |
 | las de rol `nombre` / `numero` | Lo que se estampa |
 | las de opciones (p. ej. `manga`) | Una de sus `opciones`, y el molde tiene que **tener** esa opción (`opciones_de_pieza`). Varias a la vez: `"Corta + Larga"` |
-| la de rol `cantidad` | Entero de 1 en adelante. Vacía = 1 |
+| `piezas` (Repo) | Opcional: **qué piezas hace esta fila** (reposición), por variable o molde: `{"v_redondo": ["Cuello", "Manga 1"]}` (un nombre genérico = todas las suyas). Sin `piezas`: todas. Errores: `repo-invalido`, `repo-no-admitido` |
+| la de rol `cantidad` | Entero de 1 en adelante. Vacía = 1. **Tiene dos usos según `mesas.modo`**: prendas iguales (`normal`) o copias de la mesa (`una_por_fila`) — ver [`COMO_USAR_CADA_OPCION.md`](COMO_USAR_CADA_OPCION.md) §1 |
 
 ### `opciones`
 
@@ -185,7 +193,7 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 | `si_falta_tipografia` | `"rechazar"` · `"predeterminada"` (estampa con la tipografía predeterminada y avisa) | `rechazar` |
 | `si_texto_no_entra` | `"achicar"` (avisa) · `"rechazar"` | `achicar` |
 | `si_piezas_en_blanco` | `"rechazar"` · `"seguir"` (salen sin diseño y avisa) | `rechazar` |
-| `perfil_color` | Nombre del archivo de perfil (.icc) para forzar uno | el del sistema |
+| `perfil_color` | El perfil a forzar: el archivo o el nombre de uno de `GET /perfiles`. Uno que no existe → `perfil-desconocido` | el del sistema |
 | `carpeta` | Subcarpeta de Drive donde guardar (`"2026-10/OV-2026-00123"`) | la referencia |
 
 ### `mesas`
@@ -193,8 +201,14 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 | `modo` | Qué hace |
 |---|---|
 | `"normal"` | Lo de siempre (por defecto) |
-| `"una_por_fila"` | Una mesa por fila; la cantidad pasa a ser copias de esa mesa |
+| `"una_por_fila"` | Una mesa por fila; la cantidad pasa a ser copias. Las copias se acomodan en una mesa del largo máximo (el del nesting o `largo_max_m`); si alcanzan para llenarla, sale UN archivo con la mesa llena que se imprime `copias` veces (19 con lugar para 5 → 5×3). Todo lo que no llena una mesa, de cualquier fila y talle, se acomoda JUNTO como en `normal` y se imprime 1 vez (MAPA 725). Cada archivo trae `por_mesa` unidades. Todas las mesas, del ancho imprimible de la tela |
 | `"por_talles"` | Los talles de cada grupo comparten mesa: `"grupos": [["S","M"],["L","XL"]]` |
+| `"talles_separados"` | Todos en la misma mesa sin mezclar talles: cada talle acomodado solo y apilado debajo del anterior, con una línea punteada entre talles; `grupos` opcional (esos sí van mezclados). Resultado: `"separados": true` |
+
+| Otro campo de `mesas` | Qué hace |
+|---|---|
+| `"separar_disenos"` | Opcional, `true`/`false` (por defecto `false`). Sin él, las piezas del **mismo molde se mezclan** aunque sean de diseños distintos (también con `una_por_fila`: mesas mezcladas que se repiten, con `filas` en el resultado). Con `true`, cada diseño va en sus propias mesas en cualquier `modo` y cada archivo trae su `diseno`. Otro tipo → `mesas-invalido` (el botón «Separar» de la planilla, MAPA 717) |
+| `"largo_max_m"` | Opcional. El **largo máximo de cada mesa** de este pedido, en metros (`12.5`; de 0,10 a 50). Sin él rige el del nesting del molde (`largo_mesa_cm` de `GET /variables` y del molde). Con él ninguna mesa lo pasa: lo que no entra sigue en otra mesa. Vale con cualquier `modo`. Un molde a medida se revisa contra este largo (`tela-no-entra`). Mal → `largo-mesa-invalido` (el botón «Largo» de la planilla, MAPA 716) |
 
 ---
 
@@ -242,7 +256,7 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 | `referencia`, `pedido_externo`, `cliente` | Lo que mandó el otro sistema, tal cual |
 | `tizada_id` | El número de la tizada dentro de TIZADA PRO |
 | `destino` | `tipo` = `drive` (con `carpeta_id` y `carpeta_enlace`) o `local` (Drive sin configurar o caído: se bajan con `descarga`). Nunca trae rutas del disco del servidor |
-| `archivos[]` | Cada PDF: `tipo` (`tizada` o `ficha`), `nombre`, `bytes`, `sha256`, `descarga` (la ruta para bajarlo de TIZADA, haya Drive o no), y si se subió a Drive `drive_id`, `enlace`, `carpeta_id`. Las tizadas traen además `tela`, `mesas`, `ancho_cm`, `largo_cm` (uno por mesa), `consumo_cm`, `aprovechamiento` y `moldes` |
+| `archivos[]` | Cada PDF: `tipo` (`tizada` o `ficha`), `nombre`, `bytes`, `sha256`, `descarga` (la ruta para bajarlo de TIZADA, haya Drive o no), y si se subió a Drive `drive_id`, `enlace`, `carpeta_id`. Las tizadas traen además `tela`, `mesas`, `ancho_cm`, `largo_cm` (uno por mesa), `consumo_cm`, `aprovechamiento` y `moldes`; con `una_por_fila`, `fila`, `copias` y `por_mesa` (y `filas` si la mesa mezcla varias filas del mismo molde); con `separar_disenos`, `diseno` |
 | `resumen` | Prendas, piezas, telas usadas y perfil de color |
 | `disenos[]` | Por diseño y variable: la `variable` (clave) y su `variable_nombre`, la prenda (`molde`, `nombre`), la tela y qué quedó **sin sublimar** (`no_sublimado`) |
 | `alarmas[]` | Los avisos que quedaron |

@@ -329,7 +329,7 @@ const TAREAS = {
    */
   async contexto_a({ clave, arte: arteBytes, registro, ordenVar, mapeoArte, editablesCfg, editablesTamano, editablesColor,
                      editablesMarca, editablesSinMarca, marcasComoCruz = true, referencia, borde, objetos = [], conPersonalizacion = false,
-                     molde = null }) {
+                     molde = null, clasico = null }) {
     await cargar()
     await cargarPieza()
     if (!abridor) throw new Error('primero hay que cargar las tipografías (`fuentes`)')
@@ -355,7 +355,7 @@ const TAREAS = {
     // moldería por talle (`geometrias_base`), que salen del molde abierto en este hilo. Antes el
     // navegador no lo sabía hacer y esos pedidos se generaban en el servidor.
     let capasMolde = null, geomsBase = null
-    const esClasico = !Object.keys(PA.normalizarMapeo(mapeoArte).base || {}).length
+    const esClasico = clasico === null || clasico === undefined ? !Object.keys(PA.normalizarMapeo(mapeoArte).base || {}).length : !!clasico
     if (esClasico && molde && moldesA.has(molde)) {
       const m = moldesA.get(molde)
       capasMolde = PA.capasDelDocumento(m.doc)
@@ -375,7 +375,7 @@ const TAREAS = {
       }
     }
     const ctx = PA.contextoCaminoA(mupdf, {
-      capasMolde, geomsBase,
+      capasMolde, geomsBase, clasico,
       arte: arteBytes, mapeoArte, mapeoVar, editables, editablesCfg, editablesTamano, editablesColor,
       editablesMarca, editablesSinMarca, marcasComoCruz, referencia: referencia || 'alto', borde,
       objetosAgregados: objetos.length ? { objetos: objetos.map(({ bytes: _b, ...o }) => o), abrir: (a) => porArchivo.get(a) } : null,
@@ -463,7 +463,7 @@ const TAREAS = {
     await cargar()
     const { prepararArte } = await import('./arte/preparar.js')
     const r = prepararArte(mupdf, bytes, contexto)
-    return { valor: { zip: r.zip, sha1: r.sha1, modo: r.modo, validacion: r.validacion, mapeo: r.mapeo }, transfer: [r.zip.buffer] }
+    return { valor: { zip: r.zip, sha1: r.sha1, modo: r.modo, validacion: r.validacion, mapeo: r.mapeo, mapeoManualErrores: r.mapeoManualErrores || null }, transfer: [r.zip.buffer] }
   },
   /**
    * VALIDAR EL ARTE CON UN MAPEO NUEVO, ACÁ (2026-09-22, «el servidor sólo sostiene el sistema y la
@@ -731,7 +731,7 @@ const TAREAS = {
     try { const d = new mupdf.PDFDocument(pdf.slice()); paginas = d.countPages(); d.destroy() } catch { paginas = 1 }
     return { valor: { pdf, paginas }, transfer: [pdf.buffer] }
   },
-  async hoja({ piezas, cfg, perfil, tela }, { avance = () => {} } = {}) {
+  async hoja({ piezas, cfg, perfil, tela, puertos = null }, { avance = () => {} } = {}) {
     await cargar()
     const N = await import('./nesting/contorno.js')
     const H = await import('./hoja/componer.js')
@@ -750,14 +750,30 @@ const TAREAS = {
     }
     avance(0.02, 'Acomodando las piezas en la tela')
     const _t = { t0: performance.now() }
-    // COPIA (MAPA 581): con `cfg.por_fila`, una mesa por fila y `mesas` = {fila, copias} de cada una
-    const { colocaciones, area, mesas: mesasFila } = N.anidarPorFila(piezas, cfg)
+    // COPIA (MAPA 581): con `cfg.por_fila`, una mesa por fila y `mesas` = {fila, copias} de cada una.
+    // 🔴 EL OPTIMIZADOR EN VARIOS HILOS (MAPA 728): la búsqueda y sus carriles corren a la vez en los hilos que
+    // abrió la página (`puertos`, ver `nesting/carriles.js`); el resultado es el mismo que en uno solo, sólo
+    // tarda menos. Sin puertos, acá mismo y en orden.
+    let ejecutor = null
+    if (puertos && puertos.length) {
+      const C = await import('./nesting/carriles.js')
+      ejecutor = C.crearEjecutor({ puertos, alAvance: (h, t) => avance(0.02 + 0.36 * (h / t), `Buscando el mejor acomodo (${h} de ${t})`) })
+    }
+    let colocaciones, area, mesasFila
+    try {
+      ({ colocaciones, area, mesas: mesasFila } = await N.anidarPorFila(piezas, cfg, ejecutor))
+    } finally {
+      if (ejecutor) ejecutor.cerrar()
+    }
     _t.acomodar = performance.now()
     avance(0.40, 'Armando la hoja')
     const origenes = {}
     for (const [clave, d] of mesas) origenes[String(clave)] = d
     Object.assign(origenes, origenesA)
-    const hoja = H.componerHoja(mupdf, { hojas: colocaciones, cfg, origenes })
+    // las líneas punteadas entre talles separados en una misma mesa (MAPA 710)
+    const cortes = mesasFila ? mesasFila.map((x) => (x && x.cortes) || []) : null
+    // los rótulos de la separación van en curvas con la tipografía ya cargada en este hilo (MAPA 711)
+    const hoja = H.componerHoja(mupdf, { hojas: colocaciones, cfg, origenes, cortes, fuente: abridor ? abridor.abrir : null })
     _t.armar = performance.now()
     avance(0.65, 'Preparando la hoja para el RIP')
     let pdf = hoja.pdf

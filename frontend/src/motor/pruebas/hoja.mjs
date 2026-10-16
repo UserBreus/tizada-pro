@@ -26,8 +26,15 @@ if (d.perfil) {
   perfil = { icc: new Uint8Array(fs.readFileSync(path.isAbsolute(d.perfil.icc) ? d.perfil.icc : path.join(carpeta, d.perfil.icc))),
     nombre: d.perfil.nombre, n: d.perfil.n }
 }
+// los rótulos de la separación entre talles (MAPA 711): la misma Arial Bold que usa Python
+let fuente = null
+if (d.fuente_archivo) {
+  const { FuenteCurvas } = await import('../texto/curvas.js')
+  const fc = new FuenteCurvas(new Uint8Array(fs.readFileSync(d.fuente_archivo)))
+  fuente = () => fc
+}
 const t = performance.now()
-const r = componerHoja(mupdf, { hojas, cfg: d.cfg, origenes, signoRotacion: d.signo_rotacion ?? 1, perfil })
+const r = componerHoja(mupdf, { hojas, cfg: d.cfg, origenes, signoRotacion: d.signo_rotacion ?? 1, perfil, cortes: d.cortes || null, fuente })
 const seg = (performance.now() - t) / 1000
 fs.writeFileSync(salida, r.pdf)
 console.log(JSON.stringify({ consumo_cm: r.consumoCm, alturas_cm: r.alturasCm, segundos: seg, bytes: r.pdf.length }))

@@ -249,6 +249,14 @@ ALARMAS = {
     "tela-desconocida":        ("datos", True,  "El id de tela no existe en el registro de telas.", "Usar un id de los que publica /telas."),
     "tela-no-usable":          ("datos", True,  "La tela está dada de baja o no tiene medida.", "Elegir otra tela."),
     "tela-no-permitida":       ("datos", True,  "El molde no admite esa tela (o no para esa pieza).", "Usar una de las telas que publica el molde."),
+    "ajuste-invalido":         ("datos", True,  "Un ajuste de objeto editable (`ajustes`) vino mal: dx/dy/rot/scale/sx/sy tienen que ser números y `talles` una lista.", "Ver el campo indicado (FORMATO_PEDIDO §3)."),
+    "color-invalido":          ("datos", True,  "Un color de objeto editable (`colores`) vino mal: `fill`/`stroke` son [C, M, Y, K] con valores de 0 a 1.", "Ver el campo indicado."),
+    "mapeo-arte-invalido":     ("datos", True,  "`mapeo_arte` nombra una pieza que el molde no tiene o una mesa que no es un número ni un rótulo.", "Pieza: su nombre (genérico o exacto). Mesa: su número (1, 2…) o el rótulo escrito en el arte."),
+    "mapeo-arte-mesa":         ("arte",  True,  "`mapeo_arte` pide una mesa del arte que no existe (o un rótulo que ninguna mesa tiene).", "Revisar el número o el rótulo de la mesa en el arte."),
+    "tipografia-desconocida":  ("datos", True,  "`reemplazos` o `tipografia_por_campo` nombra una tipografía que no está en el catálogo.", "Usar un nombre de `GET /tipografias` o mandar el archivo en `tipografias`."),
+    "perfil-desconocido":      ("datos", True,  "`opciones.perfil_color` no es un perfil de color que tenga el sistema.", "Usar uno de `GET /perfiles` (el archivo o el nombre)."),
+    "repo-invalido":           ("datos", True,  "`piezas` de una fila (Repo) vino mal: nombra un molde que no es del diseño de la fila o una pieza que la variable no tiene.", "Formato: {\"<variable o molde>\": [\"Frente\", \"Manga 1\"…]}."),
+    "repo-no-admitido":        ("datos", True,  "La planilla de ese molde no admite Repo (está configurada «no»).", "Mandar la fila sin `piezas`."),
     "pieza-desconocida":       ("datos", True,  "Se nombró una pieza que el molde no tiene.", "Usar el nombre genérico de la pieza, sin número («Manga», no «Manga 2»)."),
     "pieza-sin-tela":          ("datos", True,  "Hay piezas que quedarían sin tela.", "Indicar la tela principal o la de esas piezas."),
     "todas-las-piezas-apagadas": ("datos", True, "Se apagaron todas las piezas de un molde: no saldría nada.", "Dejar al menos una pieza prendida."),
@@ -275,6 +283,7 @@ ALARMAS = {
     "opcion-sin-piezas":       ("datos", True,  "Una fila pide una opción (p. ej. manga larga) que el molde no tiene.", "Elegir una opción que el molde sí tenga."),
     "cantidad-invalida":       ("datos", True,  "La cantidad tiene que ser un número entero de 1 en adelante.", "Corregir la cantidad."),
     "mesas-invalido":          ("datos", True,  "La forma de repartir las mesas no se entiende o nombra un talle que no existe.", "Ver `mesas` en el formato."),
+    "largo-mesa-invalido":     ("datos", True,  "`mesas.largo_max_m` no es un largo de mesa válido (va de 0,10 a 50 m).", "Mandar el largo máximo de cada mesa en metros, o no mandarlo (rige el del nesting del molde)."),
     "pedido-rechazado-por-reglas": ("datos", True, "Las reglas del pedido (las mismas de la pantalla) lo rechazaron.", "Leer el mensaje: dice qué fila o qué pieza."),
     "aviso-url-no-permitida":  ("datos", False, "La dirección de aviso del pedido no es del mismo sitio que la configurada: se usa la configurada.", "Configurarla en Integraciones."),
     # ── arte ──
@@ -368,7 +377,26 @@ def _molde_listo(prod, reg):
     return True, ""
 
 
-def _medida_del_pedido(m, prod, cat, tela_p, tpp, telas, cm, nom, A):
+def _largo_nesting_cm(prod, cat):
+    """El largo máximo de mesa del nesting del molde (cm): el que rige si el pedido no elige otro (MAPA 716)."""
+    try:
+        return float(S._nesting_de(prod, cat).get("alto_max_cm") or 500)
+    except Exception:
+        return None
+
+
+def _largo_mesa_ext(valor, A, campo="mesas.largo_max_m"):
+    """`mesas.largo_max_m` (MAPA 716) en cm, o None si no vino (rige el del nesting del molde). Mal → alarma."""
+    if valor in (None, ""):
+        return None
+    try:
+        return S.largo_mesa_pedido_cm(float(str(valor).replace(",", ".")) * 100)
+    except (TypeError, ValueError):
+        A.append(alarma("largo-mesa-invalido", f"«{valor}»", campo=campo))
+        return None
+
+
+def _medida_del_pedido(m, prod, cat, tela_p, tpp, telas, cm, nom, A, largo_cm=None):
     """La MEDIDA de un molde a medida en el pedido (`medida: {ancho_m, alto_m}`, o los dos campos
     sueltos): que esté, que sea válida y que la pieza entre en sus telas (regla del usuario
     2026-10-06). Devuelve `{ancho_m, alto_m}` o None (con la alarma puesta)."""
@@ -396,7 +424,8 @@ def _medida_del_pedido(m, prod, cat, tela_p, tpp, telas, cm, nom, A):
     for t in [tela_p] + [por_nombre.get(x) for x in (tpp or {}).values()]:
         if not t:
             continue
-        ok, mot = S._cabe_en_tela(an, al, pub.get("borde_mm") or 0, t.get("ancho_cm") or 180, n.get("alto_max_cm") or 500,
+        # el largo de mesa del PEDIDO (`mesas.largo_max_m`, MAPA 716) manda sobre el del nesting
+        ok, mot = S._cabe_en_tela(an, al, pub.get("borde_mm") or 0, t.get("ancho_cm") or 180, largo_cm or n.get("alto_max_cm") or 500,
                                   n.get("margen_mm") or 0, n.get("rotacion") or "auto", margen=S._margen_de_terminacion(pub, term),
                                   resolucion_mm=n.get("resolucion_mm") or S._RESOLUCION_DEFECTO_MM, forma=f, orientacion=o,
                                   terminacion=term)
@@ -630,6 +659,7 @@ def molde_publico(prod, cat, detalle=True):
                      "con_talles": _columna_talle_que_lee(prod, tpl.get("columnas") or []) is not None},
         "opciones_de_pieza": opciones,
         "a_medida": _a_medida_publico_ext(prod, cat),
+        "largo_mesa_cm": _largo_nesting_cm(prod, cat),          # sin `mesas.largo_max_m`, rige éste (MAPA 716)
         "telas": {"todas": [_tela(i) for i in (tcfg.get("todas") or [])],
                   "por_pieza": {k: [_tela(i) for i in v] for k, v in (tcfg.get("por_pieza") or {}).items()}},
         "foto": f"/api/externo/v1/moldes/{pid}/foto",
@@ -707,6 +737,9 @@ def revisar_datos(pedido, archivos, estado_previo=None):
     nombres_zip = {str(n).replace("\\", "/") for n in (archivos or [])}
     sin_may = {n.lower(): n for n in nombres_zip}
     opc = pedido.get("opciones") if isinstance(pedido.get("opciones"), dict) else {}
+    # el LARGO DE MESA del pedido (MAPA 716): se lee antes que los moldes, porque un molde a medida se
+    # revisa contra él («¿entra en la tela?»)
+    largo_mesa_cm = _largo_mesa_ext((pedido.get("mesas") if isinstance(pedido.get("mesas"), dict) else {}).get("largo_max_m"), A)
 
     def _archivo(valor, campo, exts, cod_formato):
         if valor is None:
@@ -839,6 +872,12 @@ def revisar_datos(pedido, archivos, estado_previo=None):
             for obj, val in (m.get("editables") or {}).items() if isinstance(m.get("editables"), dict) else []:
                 proc = val.get("proceso") if isinstance(val, dict) else val
                 proc = str(proc or "").strip().lower()
+                if proc in ("no_imprimir", "no imprimir"):
+                    # «Sin marca» de la pantalla sobre un objeto que se sublimaría (MAPA 712): no sale ni
+                    # el objeto ni una cruz
+                    declarados.append(str(obj))
+                    sin_marca[str(obj)] = True
+                    continue
                 if proc not in PROCESOS:
                     A.append(alarma("editable-proceso-invalido", f"«{obj}»: «{proc}»", campo=f"{cm}.editables.{obj}")); continue
                 declarados.append(str(obj))
@@ -846,10 +885,62 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                     marcas[str(obj)] = proc
                     if isinstance(val, dict) and val.get("cruz") is False:
                         sin_marca[str(obj)] = True
+            # ── LO QUE LA PANTALLA DEJA HACER CON EL ARTE (MAPA 712) ──
+            # mover / rotar / escalar / espejar un objeto editable (el «Editar diseño» del paso Arte)
+            ajustes = {}
+            for obj, tf in (m.get("ajustes") or {}).items() if isinstance(m.get("ajustes"), dict) else []:
+                cpo = f"{cm}.ajustes.{obj}"
+                if not isinstance(tf, dict):
+                    A.append(alarma("ajuste-invalido", f"«{obj}»", campo=cpo)); continue
+                try:
+                    limpio = {k: float(tf[k]) for k in ("dx", "dy", "rot", "scale", "sx", "sy") if tf.get(k) is not None}
+                except (TypeError, ValueError):
+                    A.append(alarma("ajuste-invalido", f"«{obj}»", campo=cpo)); continue
+                tl = tf.get("talles")
+                if tl is not None and not (isinstance(tl, list) and all(isinstance(x, (str, int, float)) for x in tl)):
+                    A.append(alarma("ajuste-invalido", f"«{obj}»: `talles` tiene que ser una lista", campo=cpo + ".talles")); continue
+                ajustes[str(obj)] = {"tf": limpio, "talles": [str(x) for x in tl] if tl else None}
+            # el color CMYK de un objeto editable (relleno y/o trazo)
+            colores = {}
+            for obj, col in (m.get("colores") or {}).items() if isinstance(m.get("colores"), dict) else []:
+                cpo = f"{cm}.colores.{obj}"
+                okc, res_c = isinstance(col, dict), {}
+                for canal in ("fill", "stroke"):
+                    v = (col or {}).get(canal) if okc else None
+                    if v is None:
+                        continue
+                    if not (isinstance(v, list) and len(v) == 4 and all(isinstance(x, (int, float)) and 0 <= x <= 1 for x in v)):
+                        okc = False; break
+                    res_c[canal] = [float(x) for x in v]
+                if not okc or not res_c:
+                    A.append(alarma("color-invalido", f"«{obj}»", campo=cpo)); continue
+                colores[str(obj)] = res_c
+            # qué mesa del arte va en cada pieza, a mano (cuando la guía no trae el nombre de la pieza)
+            mapeo_m = {}
+            for pz, mesa in (m.get("mapeo_arte") or {}).items() if isinstance(m.get("mapeo_arte"), dict) else []:
+                cpo = f"{cm}.mapeo_arte.{pz}"
+                exactas = [p for p in reg if _norm(p) == _norm(pz)] or [p for p in reg if _norm(_gen(p)) == _norm(_gen(pz))]
+                if not exactas or not (isinstance(mesa, int) and not isinstance(mesa, bool) and mesa >= 1
+                                        or isinstance(mesa, str) and mesa.strip()):
+                    A.append(alarma("mapeo-arte-invalido", f"«{pz}» → «{mesa}»", campo=cpo)); continue
+                for p in exactas:
+                    mapeo_m[p] = mesa if isinstance(mesa, int) else mesa.strip()
+            # reemplazar una tipografía del arte por otra del catálogo, y la de cada campo para ESTE molde
+            _cat_f = _tipografias_del_catalogo()
+            reempl_m = {}
+            for falt, dest in (m.get("reemplazos") or {}).items() if isinstance(m.get("reemplazos"), dict) else []:
+                if _norm(dest) not in _cat_f:
+                    A.append(alarma("tipografia-desconocida", f"«{dest}»", campo=f"{cm}.reemplazos.{falt}")); continue
+                reempl_m[str(falt)] = _cat_f[_norm(dest)]
+            tpc_m = {}
+            for campo, fte in (m.get("tipografia_por_campo") or {}).items() if isinstance(m.get("tipografia_por_campo"), dict) else []:
+                if _norm(fte) not in _cat_f and not (m.get("tipografias") or d.get("tipografias")):
+                    A.append(alarma("tipografia-desconocida", f"«{fte}»", campo=f"{cm}.tipografia_por_campo.{campo}")); continue
+                tpc_m[str(campo)] = _cat_f.get(_norm(fte), str(fte))
             # MOLDE A MEDIDA (MAPA 623): un rectángulo de una pieza; la medida viene en el pedido
             medida, tiras_p = None, None
             if isinstance(prod.get("a_medida"), dict):
-                medida = _medida_del_pedido(m, prod, cat, tela_p, tpp, telas, cm, nom, A)
+                medida = _medida_del_pedido(m, prod, cat, tela_p, tpp, telas, cm, nom, A, largo_cm=largo_mesa_cm)
                 tiras_p = _tiras_del_pedido(m.get("tiras"), prod, cat, cm, A, (medida or {}).get("forma") or "rectangulo",
                                             (medida or {}).get("terminacion") or "dobladillo")   # MAPA 644-645, 652
             elif m.get("tiras") is not None:
@@ -864,6 +955,9 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                                  **({"medida": medida} if medida else {}),
                                  **({"tiras": tiras_p} if tiras_p is not None else {}),
                                  "sin_marca": sin_marca, "editables_declarados": declarados, "arte": arte,
+                                 **({"ajustes": ajustes} if ajustes else {}), **({"colores": colores} if colores else {}),
+                                 **({"mapeo_arte": mapeo_m} if mapeo_m else {}), **({"reemplazos": reempl_m} if reempl_m else {}),
+                                 **({"tipografia_por_campo": tpc_m} if tpc_m else {}),
                                  "tipografias": fuentes_d + [x for x in (_archivo(f, f"{cm}.tipografias[{k}]", EXT_FUENTE, "tipografia-formato")
                                                                          for k, f in enumerate(m.get("tipografias") or [])) if x]})
         norm_d.append(nd)
@@ -911,10 +1005,13 @@ def revisar_datos(pedido, archivos, estado_previo=None):
         if not isinstance(f, dict):
             A.append(alarma("campo-tipo", f"la fila {n} tiene que ser un objeto", fila=n, campo=cf)); continue
         fila, dnom = {}, None
+        repo_crudo = None
         for k, v in f.items():
             kk = str(k)
             if kk in ("diseno", "diseño") and kk not in por_id:
                 dnom = str(v or "").strip(); continue
+            if kk in ("piezas", "repo") and kk not in por_id:
+                repo_crudo = v; continue                     # REPO: qué piezas hace esta fila (MAPA 712)
             c = por_id.get(kk) or por_titulo.get(_norm(kk))
             if c is None:
                 A.append(alarma("columna-desconocida", f"fila {n}: «{kk}»", fila=n, campo=f"{cf}.{kk}")); continue
@@ -985,6 +1082,34 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                     ok.append(hit)
             if len(ok) == len(partes):
                 fila[cid] = " + ".join(ok)
+        # REPO (MAPA 578 → 712): `piezas` = {"<variable o molde>": ["Frente", "Manga 1"…]} → las piezas
+        # EXACTAS que hace esta fila en ese molde (un nombre genérico = todas las suyas)
+        if repo_crudo not in (None, {}, []):
+            if not isinstance(repo_crudo, dict):
+                A.append(alarma("repo-invalido", f"fila {n}: `piezas` tiene que ser un objeto", fila=n, campo=cf + ".piezas")); continue
+            rx, mal = {}, False
+            for clave_m, lista in repo_crudo.items():
+                mm = next((x for x in d["moldes"] if _norm(clave_m) in {_norm(x.get("variable") or ""), _norm(x.get("variable_nombre") or ""),
+                                                                      _norm(x["pid"]), _norm(x.get("molde_nombre") or "")}), None)
+                if mm is None or not isinstance(lista, list):
+                    A.append(alarma("repo-invalido", f"fila {n}: «{clave_m}»", fila=n, campo=f"{cf}.piezas.{clave_m}")); mal = True; continue
+                if str((_plantilla_de(prods[mm["pid"]], cat) or {}).get("repo") or "").lower() == "no":
+                    A.append(alarma("repo-no-admitido", f"fila {n}: «{mm['molde_nombre']}»", fila=n, campo=f"{cf}.piezas.{clave_m}")); mal = True; continue
+                regm = S._cargar("registro_producto.json", mm["pid"]) or {}
+                pv = sorted(S._piezas_de_variable(prods[mm["pid"]], mm.get("variable"), regm) or regm.keys()) if mm.get("variable") else sorted(regm.keys())
+                sel = []
+                for pz in lista:
+                    ex = [p for p in pv if _norm(p) == _norm(pz)] or [p for p in pv if _norm(_gen(p)) == _norm(_gen(pz))]
+                    if not ex:
+                        A.append(alarma("repo-invalido", f"fila {n}: «{pz}» no es una pieza de «{mm['molde_nombre']}»", fila=n,
+                                        campo=f"{cf}.piezas.{clave_m}")); mal = True
+                    sel.extend(x for x in ex if x not in sel)
+                if sel:
+                    rx[mm["pid"]] = sel
+            if mal:
+                continue
+            if rx:
+                fila["__repo_ext"] = rx
         # la variable de la fila: la del primer molde de su diseño (cada molde resuelve la suya)
         v0 = next((m["variable"] for m in d["moldes"] if m.get("variable")), None)
         if v0:
@@ -996,31 +1121,47 @@ def revisar_datos(pedido, archivos, estado_previo=None):
     mesas = pedido.get("mesas") if isinstance(pedido.get("mesas"), dict) else {}
     modo = str(mesas.get("modo") or "normal").strip().lower()
     talles_mesa = {}
-    if modo not in ("normal", "una_por_fila", "por_talles"):
+    if modo not in ("normal", "una_por_fila", "por_talles", "talles_separados"):
         A.append(alarma("mesas-invalido", f"modo «{modo}»", campo="mesas.modo"))
-    elif modo == "por_talles":
+    elif modo in ("por_talles", "talles_separados"):
+        # «talles_separados» (MAPA 710): cada talle acomodado solo y apilados en la MISMA mesa con una
+        # línea punteada; `grupos` es OPCIONAL (los talles que sí van juntos)
         todos = {t for d_ in talles_de.values() for t in d_}
         for gi, grupo in enumerate(mesas.get("grupos") or [], 1):
             for t in (grupo if isinstance(grupo, list) else []):
                 if str(t).strip().lower() not in todos:
                     A.append(alarma("mesas-invalido", f"el talle «{t}» no es de ningún molde del pedido", campo="mesas.grupos"))
                 talles_mesa[str(t).strip().lower()] = gi
-        if not talles_mesa:
+        if not talles_mesa and modo == "por_talles":
             A.append(alarma("mesas-invalido", "`por_talles` necesita `grupos`", campo="mesas.grupos"))
+    # SEPARAR DISEÑOS (MAPA 717): sin esto el mismo molde se mezcla aunque cambie el diseño
+    separar_dis = mesas.get("separar_disenos", False)
+    if not isinstance(separar_dis, bool):
+        A.append(alarma("mesas-invalido", "`separar_disenos` es true o false", campo="mesas.separar_disenos"))
+        separar_dis = False
     if modo == "una_por_fila" and col_cant is None:
         A.append(alarma("mesas-invalido", "«una_por_fila» necesita que la planilla tenga columna de cantidad", campo="mesas.modo"))
+    perfil_ok = None
+    if opc.get("perfil_color"):
+        perfil_ok = _perfil_por_nombre(opc.get("perfil_color"))
+        if perfil_ok is None:
+            A.append(alarma("perfil-desconocido", f"«{opc.get('perfil_color')}»", campo="opciones.perfil_color"))
     for k, permitidos in (("si_falta_tipografia", ("rechazar", "predeterminada")), ("si_texto_no_entra", ("achicar", "rechazar")),
                           ("si_piezas_en_blanco", ("rechazar", "seguir"))):
         if opc.get(k) is not None and opc.get(k) not in permitidos:
             A.append(alarma("campo-tipo", f"`opciones.{k}` admite: " + ", ".join(permitidos), campo="opciones." + k))
     normal = {
         "referencia": ref, "disenos": norm_d, "filas": filas_n,
-        "columnas": [{"id": c.get("id"), "label": c.get("label"), "role": c.get("role") or "none"} for c in cols],
-        "mesas": {"modo": modo, "talles_mesa": talles_mesa},
+        # 🔴 la ficha sólo con las columnas que el pedido USA (la pantalla manda las activas): sin esto salía
+        # una columna vacía por cada una de la plantilla que el otro sistema no mandó (MAPA 712)
+        "columnas": [{"id": c.get("id"), "label": c.get("label"), "role": c.get("role") or "none"} for c in cols
+                     if c.get("role") in ("talle", "diseno") or any(str(f_.get(str(c.get("id"))) or "").strip() for f_ in filas_n)]
+                    + ([{"id": "__repo_txt", "label": "Repo", "role": "none"}] if any(f_.get("__repo_ext") for f_ in filas_n) else []),
+        "mesas": {"modo": modo, "talles_mesa": talles_mesa, "largo_cm": largo_mesa_cm, "separar_disenos": separar_dis},
         "opciones": {"si_falta_tipografia": opc.get("si_falta_tipografia") or "rechazar",
                      "si_texto_no_entra": opc.get("si_texto_no_entra") or "achicar",
                      "si_piezas_en_blanco": opc.get("si_piezas_en_blanco") or "rechazar",
-                     "perfil_color": opc.get("perfil_color") or None,
+                     "perfil_color": perfil_ok,
                      "carpeta": _ruta_segura(opc.get("carpeta") or "") or None},
     }
     if _frenan(A):
@@ -1035,13 +1176,27 @@ def cuerpo_de(normal):
     (`cuerpoDelPedido` de App.jsx): a partir de acá todo el sistema lo trata igual."""
     molds, mpd, vpd = [], {}, {}
     tela_p, asig, fuera, marcas, sin_marca, reempl = {}, {}, {}, {}, {}, {}
+    editables, colores = {}, {}                  # MAPA 712: ajuste y color de objetos editables del pedido
+    pid_de = {}                                  # el molde original → el que se usa (la copia a medida)
     for d in normal["disenos"]:
         sl = d["slug"]
         for m in d["moldes"]:
             pid = m["pid"]
+            pid_de[m.get("plantilla") or pid] = pid
             if pid not in molds:
                 molds.append(pid)
             mpd.setdefault(sl, []).append(pid)
+            # el ajuste de los objetos editables: {diseño: {variable|*: {objeto: {talle: tf}}}} (el que lee
+            # `_editables_cfg`); los nombres y los talles ya los resolvió `robot_arte` con el arte
+            if m.get("ajustes_ident"):
+                ed = editables.setdefault(sl, {})
+                for var in (["*"] + ([m["variable"]] if m.get("variable") else [])):
+                    for obj, porT in m["ajustes_ident"].items():
+                        ed.setdefault(var, {})[obj] = dict(porT)
+            if m.get("colores_ident"):
+                cc = colores.setdefault(sl, {})
+                for var in (["*"] + ([m["variable"]] if m.get("variable") else [])):
+                    cc.setdefault(var, {}).update(m["colores_ident"])
             if m.get("variable"):
                 vpd.setdefault(sl, {})[pid] = m["variable"]
             if m.get("tela"):
@@ -1062,13 +1217,22 @@ def cuerpo_de(normal):
             r = {}
             for campo, fuente in (d.get("tipografia_por_campo") or {}).items():
                 r[S.MP.clave_fuente_campo(campo)] = str(fuente)   # con los alias: «texto» = el campo nombre
+            # …y la del MOLDE pisa la del diseño (en la pantalla se elige por diseño y molde, MAPA 712)
+            for campo, fuente in (m.get("tipografia_por_campo") or {}).items():
+                r[S.MP.clave_fuente_campo(campo)] = str(fuente)
             r.update(m.get("reemplazos") or {})
             if r:
                 reempl[f"{sl}|{pid}"] = r
     prendas, filas_ficha = [], []
     for f in normal["filas"]:
-        prendas.append({k: v for k, v in f.items() if k != "__diseno"})
+        pr = {k: v for k, v in f.items() if k not in ("__diseno", "__repo_ext")}
+        if f.get("__repo_ext"):
+            # REPO (MAPA 712): con el molde que se usa de verdad (un molde a medida es su copia)
+            pr["__repo"] = {pid_de.get(k, k): list(v) for k, v in f["__repo_ext"].items()}
+        prendas.append(pr)
         ff = {k: v for k, v in f.items() if not k.startswith("__")}
+        if f.get("__repo_ext"):
+            ff["__repo_txt"] = " · ".join(", ".join(v) for v in f["__repo_ext"].values())
         filas_ficha.append(ff)
     modo = normal["mesas"]["modo"]
     cuerpo = {
@@ -1080,10 +1244,20 @@ def cuerpo_de(normal):
         "planilla": {"columnas": normal["columnas"], "filas": filas_ficha},
         "fuentes_reemplazo_por": reempl,
     }
-    if modo == "por_talles" and normal["mesas"].get("talles_mesa"):
+    if modo in ("por_talles", "talles_separados") and normal["mesas"].get("talles_mesa"):
         cuerpo["talles_mesa"] = normal["mesas"]["talles_mesa"]
+    if modo == "talles_separados":
+        cuerpo["talles_mesa_modo"] = "separados"           # MAPA 710
+    if normal["mesas"].get("separar_disenos"):
+        cuerpo["separar_disenos"] = True                    # el botón «Separar diseños» (MAPA 717)
+    if normal["mesas"].get("largo_cm"):
+        cuerpo["largo_mesa_cm"] = normal["mesas"]["largo_cm"]   # el botón «Largo» de la planilla (MAPA 716)
     if normal["opciones"].get("perfil_color"):
         cuerpo["perfil_forzado"] = normal["opciones"]["perfil_color"]
+    if editables:
+        cuerpo["editables"] = editables
+    if colores:
+        cuerpo["editables_color"] = colores
     # en la ficha el diseño va con su nombre, no con el código interno
     nombres = {d["slug"]: d["nombre"] for d in normal["disenos"]}
     for ff in filas_ficha:
@@ -1098,7 +1272,9 @@ def _reglas_de_la_pantalla(cuerpo):
     sin tela, talles cruzados, tela de baja…). Todavía no hay arte cargado, así que el final
     esperado es «ninguna fila tiene un diseño con arte»: eso acá significa que los datos pasaron."""
     try:
-        S._plan_del_pedido(cuerpo)
+        # `_solo_reglas`: sin leer el arte — eso se le pediría a un navegador (428) y acá no hay
+        # ninguno; el arte del pedido lo revisa y lo lee el robot después (MAPA 708)
+        S._plan_del_pedido({**cuerpo, "_solo_reglas": True})
         return []
     except S._PlanInvalido as e:
         r = e.resp[0] if isinstance(e.resp, tuple) else e.resp
@@ -1250,6 +1426,9 @@ def variables_publicas(cat):
             out.append({"clave": cl, "nombre": v.get("label") or cl, "molde": prod["id"], "molde_nombre": prod.get("nombre") or prod["id"],
                         "piezas": sorted({_gen(x) for x in pz}), "n_piezas": len(pz), "planilla": prod.get("planilla_template_id"),
                         "foto": f"/api/externo/v1/variables/{cl}/foto",
+                        # el largo máximo de mesa del nesting del molde: el que rige si el pedido no
+                        # manda `mesas.largo_max_m` (MAPA 716)
+                        "largo_mesa_cm": _largo_nesting_cm(prod, cat),
                         # MOLDE A MEDIDA (MAPA 623): el pedido tiene que traer la medida
                         **({"a_medida": _a_medida_publico_ext(prod, cat)} if _a_medida_publico_ext(prod, cat) else {})})
     return out
@@ -1339,13 +1518,24 @@ def v1_tipografias():
                     "nota": "si el arte usa una que no está acá, mandar el archivo en `tipografias`"})
 
 
+@bp.get("/api/externo/v1/perfiles")
+def v1_perfiles():
+    """Los perfiles de color que tiene el sistema (para `opciones.perfil_color`, MAPA 712)."""
+    try:
+        lst = [{"archivo": p.get("archivo"), "nombre": p.get("nombre"), "espacio": p.get("espacio")} for p in (S._listar_perfiles() or [])]
+    except Exception:
+        lst = []
+    return jsonify({"perfiles": lst, "nota": "mandar en `opciones.perfil_color` el archivo o el nombre"})
+
+
 @bp.post("/api/externo/v1/a_medida/calcular")
 def v1_a_medida_calcular():
     """MOLDE A MEDIDA (MAPA 644): ANTES de mandar el pedido, el otro sistema pregunta con la medida (y la
     tela y las tiras, si ya las tiene) y TIZADA contesta lo mismo que la pantalla: el TOTAL con el
     margen, en qué telas entra (y si no, cuánto se pasa y lo máximo), las tiras (cuántas en total y cada
     cuánto en cada lado) y las filas de la ficha técnica. No guarda nada.
-    Cuerpo: `{variable | molde, ancho_m, alto_m (o diametro_m), forma?, orientacion?, terminacion?, tela?, tiras?}`."""
+    Cuerpo: `{variable | molde, ancho_m, alto_m (o diametro_m), forma?, orientacion?, terminacion?, tela?, tiras?,
+    largo_max_m?}` (`largo_max_m`: el largo de mesa del pedido, MAPA 716)."""
     d = request.get_json(force=True, silent=True) or {}
     cat = S._cargar_catalogo()
     prods = {p["id"]: p for p in cat.get("productos", [])}
@@ -1377,6 +1567,9 @@ def v1_a_medida_calcular():
     tp = _tiras_del_pedido(d.get("tiras"), prod, cat, "tiras", A, f, term)
     pub = _a_medida_publico_ext(prod, cat)
     n = (S._a_medida_publico(prod, cat) or {}).get("nesting") or {}
+    _largo_ped = _largo_mesa_ext(d.get("largo_max_m"), A, campo="largo_max_m")     # MAPA 716
+    if _largo_ped:
+        n = {**n, "alto_max_cm": _largo_ped}
     _mt = S._margen_a_medida(S._margen_de_terminacion(am, term))
     _mt0 = float(_mt.get("todos") or 0)
     mg = {k: float(_mt.get(k, _mt0) or 0) for k in _LADOS_TIRAS}       # el margen que rige con ESTA terminación
@@ -1418,7 +1611,7 @@ def v1_a_medida_calcular():
                     "medida_diseno_cm": {"ancho": round(an * 100, 1), "alto": round(al * 100, 1)},
                     "total_cm": {"ancho": round(W, 1), "alto": round(H, 1)},
                     "margen_cm": mg, "borde_corte_mm": pub["borde_corte_mm"], "gira": pub["gira"],
-                    "largo_maximo_cm": pub["largo_maximo_cm"],
+                    "largo_maximo_cm": _largo_ped or pub["largo_maximo_cm"],
                     "telas": out_t, "entra_en_alguna": any(x["entra"] for x in out_t),
                     "tiras": tiras_out, "ficha": ficha.get("filas") or [], "alarmas": A}), (422 if frena else 200)
 
@@ -1689,6 +1882,9 @@ def _pedidos():
 @bp.post("/api/externo/robot/tomar")
 def robot_tomar():
     """El robot pide trabajo: el pedido más viejo en cola (o una prueba de Drive pendiente)."""
+    if not _robot_de_este_turno():
+        # un robot de un arranque anterior (código viejo): sin trabajo, y que se cierre (MAPA 698)
+        return jsonify({"tarea": None, "salir": True})
     with _LOCK:
         c = _cfg()
         _latido("esperando")
@@ -1776,6 +1972,24 @@ def robot_avance(ref):
         _guardar_estado(ref, est)
         _latido("trabajando", ref)
     return jsonify({"seguir": True})
+
+
+def _tipografias_del_catalogo():
+    """{nombre normalizado: nombre} de las tipografías del catálogo (las de `GET /tipografias`)."""
+    try:
+        fu = {"carpetas": [S.FUENTES], "alias": {}}
+        return {_norm(n): n for n in {str(i.get("interno") or i.get("completo") or "") for i in S.MP.catalogo_fuentes(fu).values()} - {""}}
+    except Exception:
+        return {}
+
+
+def _perfil_por_nombre(valor):
+    """El ARCHIVO del perfil de color pedido (por archivo o por nombre), o None si el sistema no lo tiene."""
+    v = _norm(valor)
+    for p in (S._listar_perfiles() or []):
+        if v in (_norm(p.get("archivo")), _norm(os.path.splitext(str(p.get("archivo") or ""))[0]), _norm(p.get("nombre"))):
+            return p.get("archivo")
+    return None
 
 
 def _nombre_editable(capa):
@@ -1871,6 +2085,25 @@ def robot_arte(ref):
                 usa = any(str(f.get(col) or "").strip() for f in normal["filas"] if f.get("__diseno") == dis["nombre"])
                 if usa and campo not in campos:
                     A.append(alarma("arte-campo-sin-capa", f"{quien}: la planilla trae «{'texto' if campo == 'nombre' else campo}» y el arte no tiene esa capa", **donde))
+        # AJUSTES y COLORES (MAPA 712): el objeto con su nombre real; los talles, los del molde
+        _reg_m = S._cargar("registro_producto.json", mol["pid"]) or {}
+        _talles_m = [str(t) for t in S._talles_de_registro(_reg_m, mol["pid"])]
+        aj_id, col_id = {}, {}
+        for obj, aj in (mol.get("ajustes") or {}).items():
+            real = por_nombre.get(_norm(obj)) or por_nombre.get(_norm(_nombre_editable(obj)))
+            if real is None:
+                A.append(alarma("editable-desconocido", f"{quien}: «{obj}» (en `ajustes`)", **donde)); continue
+            ts = _talles_m if not aj.get("talles") else [t for t in _talles_m if _norm(t) in {_norm(x) for x in aj["talles"]}]
+            aj_id[real] = {t: dict(aj["tf"]) for t in ts}
+        for obj, col in (mol.get("colores") or {}).items():
+            real = por_nombre.get(_norm(obj)) or por_nombre.get(_norm(_nombre_editable(obj)))
+            if real is None:
+                A.append(alarma("editable-desconocido", f"{quien}: «{obj}» (en `colores`)", **donde)); continue
+            col_id[real] = {"fill": col.get("fill"), "stroke": col.get("stroke")}
+        mol["ajustes_ident"], mol["colores_ident"] = aj_id, col_id
+        # MAPEO DEL ARTE A MANO (MAPA 712): una mesa pedida que el arte no tiene frena
+        for pz, err in (d.get("mapeo_manual_errores") or {}).items():
+            A.append(alarma("mapeo-arte-mesa", f"{quien}: «{pz}» → {err}", **donde))
         mol["marcas_ident"], mol["sin_marca_ident"] = marcas, sin_marca
         _escribir_json(os.path.join(_dir_pedido(ref), "normal.json"), normal)
         est["alarmas"] = [a for a in est.get("alarmas", [])
@@ -2056,7 +2289,9 @@ def robot_terminar(ref):
                              "ancho_cm": h.get("ancho_cm"), "largo_cm": [largo] if largo is not None else None, "consumo_cm": largo,
                              "aprovechamiento": h.get("aprovechamiento"), "moldes": h.get("moldes")})
                 if isinstance(mf, dict):
-                    for k in ("fila", "copias", "talles"):
+                    # por_mesa (MAPA 701) · separados: talles apilados en la misma mesa (710) · filas: Copia mezclada
+                    # (varias filas del mismo molde, MAPA 717) · diseno: con `separar_disenos` (717)
+                    for k in ("fila", "filas", "copias", "por_mesa", "talles", "separados", "diseno"):
                         if mf.get(k) is not None:
                             item[k] = mf[k]
             elif a.get("tipo") == "tizada":
@@ -2963,6 +3198,50 @@ def purgar(forzar=False):
 
 
 _ROBOT = {"proc": None, "motivo": ""}
+# 🔴 UN SOLO ROBOT: EL QUE LANZÓ ESTE SERVIDOR (MAPA 698). En el publicado (Linux, actualización «reinicio» con
+# `KillMode=process`, para que el ayudante sobreviva) el robot del servidor viejo TAMBIÉN sobrevivía al reinicio:
+# cada actualización dejaba otro robot vivo con el código de su versión, tomando pedidos. El de la 1.0.49 no sabe de
+# moldes a medida (no arma la copia) → «el arte es de 154 × 99,7 cm y la pieza de 103,6 × 103,6 cm», pida la medida
+# que pida (reclamo del sistema externo 2026-10-13, desde las 13:59). Cada arranque del servidor tiene su TURNO y
+# sólo el robot que lo trae recibe trabajo; los demás reciben «salir» (los nuevos se cierran; los viejos, que no
+# entienden «salir», quedan sin trabajo) y al arrancar se cierran los que quedaron (`_cerrar_robots_viejos`).
+_TURNO_ROBOT = secrets.token_hex(16)
+
+
+def _robot_de_este_turno():
+    """¿El robot que pide trabajo es el que lanzó ESTE servidor? Sin robot propio (las pruebas lo corren a mano
+    contra un servidor que no lanza ninguno) vale cualquiera que traiga la llave."""
+    if _ROBOT.get("proc") is None:
+        return True
+    return (request.headers.get("X-Robot-Turno") or "") == _TURNO_ROBOT
+
+
+def _cerrar_robots_viejos(guion):
+    """Los robots que quedaron vivos de arranques anteriores (Linux: sobreviven al reinicio, ver arriba). Se
+    buscan por su línea de comando EXACTA (`node <este robot.mjs>`) y se cierran DE A UNO, por su número de
+    proceso — nunca «todos los node». En Windows el Job del servidor ya se lleva a sus hijos."""
+    if os.name == "nt" or not os.path.isdir("/proc"):
+        return []
+    import signal
+    cerrados = []
+    for d in os.listdir("/proc"):
+        if not d.isdigit() or int(d) == os.getpid():
+            continue
+        try:
+            with open(f"/proc/{d}/cmdline", "rb") as fh:
+                partes = [x.decode("utf-8", "replace") for x in fh.read().split(b"\x00") if x]
+        except OSError:
+            continue
+        if (len(partes) >= 2 and os.path.basename(partes[0]).startswith("node")
+                and os.path.realpath(partes[1]) == os.path.realpath(guion)):
+            try:
+                os.kill(int(d), signal.SIGTERM)
+                cerrados.append(int(d))
+            except OSError:
+                pass
+    if cerrados:
+        print(f"[externo] se cerraron {len(cerrados)} robot(s) de arranques anteriores: {cerrados}", flush=True)
+    return cerrados
 
 
 def arrancar_robot(url, extra_env=None):
@@ -2978,6 +3257,10 @@ def arrancar_robot(url, extra_env=None):
         print(f"[externo] el robot no arranca: {_ROBOT['motivo']}", flush=True)
         return
     token = robot_token()
+    try:
+        _cerrar_robots_viejos(guion)
+    except Exception as e:
+        print(f"[externo] no se pudieron revisar los robots viejos: {e}", flush=True)
 
     def _vigilar():
         espera = 2
@@ -2985,7 +3268,8 @@ def arrancar_robot(url, extra_env=None):
             try:
                 os.makedirs(os.path.join(S.AQUI, "logs"), exist_ok=True)
                 salida = open(os.path.join(S.AQUI, "logs", "robot.log"), "ab")
-                env = dict(os.environ, TIZADA_URL=url, TIZADA_ROBOT_TOKEN=token, TIZADA_DATOS=S.DATOS, **(extra_env or {}))
+                env = dict(os.environ, TIZADA_URL=url, TIZADA_ROBOT_TOKEN=token, TIZADA_DATOS=S.DATOS,
+                           TIZADA_ROBOT_TURNO=_TURNO_ROBOT, **(extra_env or {}))
                 t0 = time.time()
                 p = subprocess.Popen([node, guion], cwd=S.AQUI, env=env, stdout=salida, stderr=subprocess.STDOUT,
                                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))

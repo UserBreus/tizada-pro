@@ -461,13 +461,15 @@ const ident = (nombre, objId) => (objId ? `${nombre}${SEP}${objId}` : nombre)
  *   · `objetosAgregados` — `{objetos: [{id, archivo, pieza, w_cm, h_cm, transforms}], abrir(archivo)}`
  *                          (`abrir` devuelve los bytes o el `PDFDocument` del PDF suelto);
  *   · `fuente(nombrePs)` — el abridor de tipografías (la cruz lleva la letra en Arial-BoldMT);
- *   · `capasMolde`, `geomsBase(mesa, talle)` — sólo para el arte CLÁSICO (ver `armarBaseClasico`).
+ *   · `capasMolde`, `geomsBase(mesa, talle)` — sólo para el arte CLÁSICO (ver `armarBaseClasico`);
+ *   · `clasico` — lo que dice la VALIDACIÓN del arte (true/false); null = deducirlo del mapeo (lo de antes).
  */
 export function contextoCaminoA(mupdf, opciones) {
   const {
     arte, mapeoArte = null, mapeoVar = {}, editables = [], editablesCfg = null, editablesTamano = null,
     editablesColor = null, editablesMarca = null, editablesSinMarca = null, marcasComoCruz = true,
     referencia = 'alto', borde = null, objetosAgregados = null, fuente = null, capasMolde = null, geomsBase = null,
+    clasico = null,
   } = opciones
   const bc = configBorde(borde)
   const B = bc.B
@@ -480,7 +482,11 @@ export function contextoCaminoA(mupdf, opciones) {
   let arteCrudo = null                                   // el archivo tal cual (capas, `arte_rect`)
   const arteTalCual = () => { if (arteCrudo === null) arteCrudo = nuevoArte(); return arteCrudo }
   const mapeo = normalizarMapeo(mapeoArte)
-  const separado = Object.keys(mapeo.base).length > 0
+  // 🔴 SEPARADO O CLÁSICO LO DICE LA VALIDACIÓN DEL ARTE (MAPA 700). Deducirlo de «el mapeo está
+  // vacío» mandaba un arte separado SIN asignar al camino clásico: se pegaba como si estuviera
+  // dibujado sobre la plantilla, sin escalar y corrido (el banderín «con el diseño movido»). Con la
+  // validación en la mano, una pieza sin asignar sale en blanco, como dice el aviso.
+  const separado = clasico === null || clasico === undefined ? Object.keys(mapeo.base).length > 0 : !clasico
   const capasArte = separado ? capasDelDocumento(arteTalCual()) : new Set()   // `CAPAS_ARTE`
 
   // ── editables: qué se saca del diseño base y se redibuja aparte ──

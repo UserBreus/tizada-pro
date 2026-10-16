@@ -262,6 +262,8 @@ async function _armarContextoA(m, rutaApi, h, d, k, firma, cfg, conPersonalizaci
     marcasComoCruz: cfg.marcasComoCruz !== false, referencia: cfg.referencia || m.info.referencia_medida || 'alto',
     borde: cfg.borde === undefined ? m.info.borde : cfg.borde, objetos, conPersonalizacion,
     molde: m.pid,               // el arte clásico se limpia con las capas y la moldería del molde
+    // separado o clásico: lo que dijo la validación al subir el arte, no «el mapeo está vacío» (MAPA 700)
+    clasico: cfg.clasico ?? ((d.validacion && d.validacion.modo) ? d.validacion.modo === 'clasico' : null),
   }, [...objetos.map((o) => o.bytes.buffer)])
   h.contextosA.set(k, { firma, pers: r.pers })
   return { clave: k, pers: r.pers }

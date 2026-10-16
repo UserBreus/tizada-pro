@@ -32,10 +32,12 @@ PERMISOS = [
     ("fuente.gestionar", "config",  "Gestionar fuentes",           "Subir y eliminar tipografías del catálogo."),
     ("usuario.ver",      "usuario", "Ver usuarios",                "Ver usuarios, roles y permisos."),
     ("usuario.gestionar","usuario", "Gestionar usuarios y roles",  "Crear/editar usuarios, roles y sus permisos."),
-    # La AYUDA la usa todo el mundo (ver y seguir tutoriales no pide permiso); GRABARLOS sí:
-    # un tutorial mal grabado se lo come todo el taller (decisión del usuario, 2026-08-28).
-    ("ayuda.grabar",     "config",  "Grabar tutoriales de ayuda",  "Grabar, editar y borrar los tutoriales guiados."),
+    # (`ayuda.grabar` se retiró en MAPA 689 junto con los tutoriales grabados: ver PERMISOS_RETIRADOS)
 ]
+
+# Permisos que existieron y se sacaron. `sincronizar_permisos` no borra filas de la base (podrían
+# estar asignados), así que la pantalla de roles los FILTRA para no ofrecer algo que ya no hace nada.
+PERMISOS_RETIRADOS = {"ayuda.grabar"}
 
 # Roles propuestos por defecto (el usuario los puede editar/borrar desde la pantalla).
 # `admin` es de SISTEMA: no se borra, para no quedarse sin quién gestione permisos.

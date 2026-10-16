@@ -33,7 +33,7 @@
  */
 import { ESLint } from 'eslint';
 
-const ARCHIVOS = ['src/tutor.jsx', 'src/guion.js', 'src/localizar.js', 'src/diccionario.js'];
+const ARCHIVOS = ['src/ayudaVideos.jsx'];   // (los del tutorial paso a paso se fueron con él, MAPA 689)
 
 const eslint = new ESLint({ overrideConfigFile: 'eslint.tdz.config.mjs' });
 const res = await eslint.lintFiles(ARCHIVOS);

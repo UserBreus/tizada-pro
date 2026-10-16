@@ -18,6 +18,7 @@ import { motorDe, cerrarMotores, asegurarMoldeA, asegurarContextoA, disenoDe } f
 import { piezasDe } from '../arte/prendas.js'
 import { traerConCache, claveDe, urlDe } from '../cache.js'
 import { pyRound } from '../py.js'
+import { fichaAMedida, agruparAMedidaFicha } from '../molde/aMedidaFicha.js'
 import { puedeHacer } from '../capacidad.js'
 import { resolverFuente } from '../texto/fuentes.js'
 import { fuentesConPc, fuentesDePers } from '../texto/fuentesPc.js'
@@ -118,9 +119,11 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
   if (plan.perfil) {
     // el perfil que eligió el plan (el que trae el arte, o el que se unificó a mano)
     const _pfArch = cuerpo.perfil_forzado || plan.perfil.archivo || ''
-    const r = await fetch(rutaApi('/api/pedido/perfil_salida' + (_pfArch ? '?forzado=' + encodeURIComponent(_pfArch) : '')))
-    if (r.ok) perfil = { icc: new Uint8Array(await r.arrayBuffer()), nombre: plan.perfil.nombre, n: plan.perfil.n }
-    else await r.text().catch(() => '')            // siempre leída (MAPA 671: una respuesta sin leer tumba al robot)
+    // con caché (MAPA 694): antes se bajaba entero (0,5–2 MB) en CADA tizada; sin el perfil la hoja sale igual
+    try {
+      const icc = await traerConCache(claveDe.perfil(_pfArch, plan.perfil.nombre, plan.perfil.bytes), rutaApi(urlDe.perfil(_pfArch)))
+      if (icc && icc.length) perfil = { icc, nombre: plan.perfil.nombre, n: plan.perfil.n }
+    } catch { /* sin perfil: la hoja sale sin OutputIntent, como cuando el servidor no tenía ninguno */ }
   }
   const archivos = {}            // nombre → Uint8Array
   const hojas = []
@@ -241,8 +244,11 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
       return { nombre: g.molde || md.nombre, diseno: g.diseno_nombre || 'Principal', variante: vnom ? (vnom.label || vnom.nombre) : null,
                    opciones, ejemplo: null, piezas, pdf_guia: rg.pdf, fuentes: fuentesGuia(md.pers || pers, talle, md.fuentes, resolverGuia),
                    procesos,    // TPU/Bordado/DTF y «sin marca»: el servidor dice cuáles, el dibujo es de acá
-                   a_medida: g.a_medida || null,   // molde a medida: medida, margen, borde y tiras (MAPA 643)
-                   am: g.am || null }               // …y su bloque compacto en la ficha (MAPA 666)
+                   // MOLDE A MEDIDA (MAPA 643 → 692): la sección «MEDIDA Y TERMINACIÓN» se arma ACÁ con lo guardado
+                   // del molde (`a_medida_datos`); el bloque compacto (`am`) y el agrupado, al final (`agruparAMedidaFicha`)
+                   a_medida: g.a_medida_datos ? fichaAMedida(g.a_medida_datos) : null,
+                   pid: g.pid, molde: g.molde, diseno_nombre: g.diseno_nombre, _diseno_slug: g.diseno,
+                   a_medida_datos: g.a_medida_datos || null }
 
     } finally {
       _tGuia += (performance.now() - _t0) / 1000
@@ -301,6 +307,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
                                  variante: pr.variante_clave || null, etiqueta: String(nro).padStart(2, '0'),
                                  _fila: Number.isInteger(pr._fila) ? pr._fila : null, _copias: pr._copias || 1,   // COPIA (MAPA 581)
                                  _grupo_mesa: Number.isInteger(pr._grupo_mesa) ? pr._grupo_mesa : null,   // TALLES POR MESA (MAPA 593)
+                                 _diseno: pr._diseno || null, _diseno_nombre: pr._diseno_nombre || null,   // SEPARAR DISEÑOS (MAPA 717)
                                  rotacion: rot, borde_cm: 0, _molde: md.pid, _mesa: null }])
         totalPiezas++
         }
@@ -359,6 +366,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
                                    variante: pr.variante_clave || null, etiqueta: String(nro).padStart(2, '0'),
                                  _fila: Number.isInteger(pr._fila) ? pr._fila : null, _copias: pr._copias || 1,   // COPIA (MAPA 581)
                                  _grupo_mesa: Number.isInteger(pr._grupo_mesa) ? pr._grupo_mesa : null,   // TALLES POR MESA (MAPA 593)
+                                 _diseno: pr._diseno || null, _diseno_nombre: pr._diseno_nombre || null,   // SEPARAR DISEÑOS (MAPA 717)
                                    rotacion: rot, borde_cm: 0, _molde: md.pid, _mesa: mesa }])
           totalPiezas++
         }
@@ -412,8 +420,17 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
           await copiarMesa(otro, mm, rutaApi, pid, mesa)
         }
       }
-      const r = await mm.pool.enviar('hoja', { piezas, cfg, perfil, tela }, undefined,
-        (f, txt) => decir(`${txt || 'Armando la hoja'} · tela «${tela}»…`, _iniT + _parteT * f))
+      // 🔴 LOS HILOS DEL OPTIMIZADOR DEL ACOMODO (MAPA 728) los abre la página: un hilo no puede abrir otro;
+      // la hoja recibe un canal a cada uno y los usa para buscar la tizada en paralelo
+      const C = await import('../nesting/carriles.js')
+      const carriles = await C.abrirCarriles(await C.hilosParaCarriles())
+      let r
+      try {
+        r = await mm.pool.enviar('hoja', { piezas, cfg, perfil, tela, puertos: carriles.puertos }, carriles.puertos,
+          (f, txt) => decir(`${txt || 'Armando la hoja'} · tela «${tela}»…`, _iniT + _parteT * f))
+      } finally {
+        carriles.cerrar()
+      }
       const slug = slugTela(`g${gi}_`, tela)
       const archivo = `HOJA_${slug}.pdf`
       archivos[archivo] = r.pdf
@@ -436,6 +453,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
     if (!mm0) throw new Error('sin motor abierto')
     decir('Armando la ficha técnica…', 92)
     const guias = await Promise.all(_guiasProm)
+    agruparAMedidaFicha(guias)     // una sección a medida por configuración y su bloque compacto (MAPA 665-666, 692)
     const fecha = new Date()
     const dd = String(fecha.getDate()).padStart(2, '0'), mmx = String(fecha.getMonth() + 1).padStart(2, '0')
     const planilla = plan.planilla_ficha || { columnas: [], filas: plan.prendas }

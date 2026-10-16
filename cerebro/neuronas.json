@@ -4,8 +4,7 @@
     "frontend/src/App.jsx",
     "servidor.py",
     "MAPA_DEL_SISTEMA.md",
-    "MANUAL_HERRAMIENTAS.md",
-    "frontend/src/diccionario.js"
+    "MANUAL_HERRAMIENTAS.md"
   ],
   "leyes": [
     "El arte se ve igual que la tizada (vectorial, pixel-idéntico).",
@@ -274,23 +273,27 @@
         "Con `X-Calculos: 200` se contesta 200 + `X-Calcular: 1` + no-store; sin la cabecera, 428 (otros clientes).",
         "La cabecera X-Calculos SÓLO a la misma origen (a otro host dispara preflight de CORS: rompe el puente de Illustrator).",
         "Sin tope de vueltas: lo que corta es que el mismo cálculo se pida 3 veces (bucle).",
-        "Los contratos prueban la REFERENCIA en Python: `correr_contratos.py` les pasa `TIZADA_SOLO_NAVEGADOR=0` por defecto (MAPA 624); el que prueba el modo prendido lo pone él (`verificar_navegador_solo.py`). Corriendo uno suelto, ponerlo a mano."
+        "Los contratos prueban la REFERENCIA en Python: `correr_contratos.py` les pasa `TIZADA_SOLO_NAVEGADOR=0` por defecto (MAPA 624); el que prueba el modo prendido lo pone él (`verificar_navegador_solo.py`). Corriendo uno suelto, ponerlo a mano.",
+        "Todo `except Exception` que envuelva un cálculo (`_calcular`/`_arte_calc`, directo o a través de otra función) empieza con `_relanzar_calculo(e)`; si no, el pedido al navegador sale como error con el nombre del cálculo. Lo vigila `verificar_calculos_no_se_tragan.py` (MAPA 721)."
       ],
       "cicatrices": [
         "MAPA 551: tope de 25 vueltas cortaba guías con muchos talles.",
         "MAPA 591: 428 rojos en la consola.",
         "2026-10-06 (MAPA 624): la suite tenía ~10 rojos por `_FaltaCalculo`/409 (contratos sin la variable) y 3 contratos que seguían esperando poder apagar «no calcula» o que el servidor leyera un molde pelado: estuvieron rojos desde el 2026-09-24.",
-        "2026-10-06 (MAPA 624): contratos con dobles de `db` sin `filas` (`verificar_config_con_diseno.py`, `verificar_navegador_subida_a.py`), con dobles de firma vieja (`extraer_editables` sin `con_thumb` en `verificar_marcas_proceso.py`) y atados a datos del usuario (`verificar_color_nativo_cid.py`, el arte del GOLERO cambió): se corrigieron sin tocar lo que miden."
+        "2026-10-06 (MAPA 624): contratos con dobles de `db` sin `filas` (`verificar_config_con_diseno.py`, `verificar_navegador_subida_a.py`), con dobles de firma vieja (`extraer_editables` sin `con_thumb` en `verificar_marcas_proceso.py`) y atados a datos del usuario (`verificar_color_nativo_cid.py`, el arte del GOLERO cambió): se corrigieron sin tocar lo que miden.",
+        "2026-10-15 (MAPA 721): «no se pudo leer el molde: analizar_variantes» parpadeando al subir un molde: `/api/plantilla/variantes` se tragaba el `_FaltaCalculo`."
       ],
       "contratos": [
         "verificar_navegador_solo.py",
-        "verificar_monitor.py"
+        "verificar_monitor.py",
+        "verificar_calculos_no_se_tragan.py"
       ],
       "mapa": [
         528,
         551,
         591,
-        624
+        624,
+        721
       ],
       "memoria": "servidor-calcula-pendiente.md",
       "conexiones": [
@@ -589,6 +592,58 @@
         [
           "frontend/src/motor/nesting/contorno.js",
           "anidarPorFila"
+        ],
+        [
+          "frontend/src/motor/vista/vista.js",
+          "export function anchoMesaCm"
+        ],
+        [
+          "nesting_contorno.py",
+          "def repartir_copias"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "export async function repartirCopias"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _copia_llenas"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _firma_geo"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _patron"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function copiaLlenas"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function firmaGeo"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function patronCopia"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _area_hoja"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function areaHoja"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _copia_por_filas"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function copiaPorFilas"
         ]
       ],
       "palabras": [
@@ -597,23 +652,52 @@
         "_copias",
         "copiaActivaRef",
         "hoja.mesas",
-        "copia"
+        "copia",
+        "anchos_cm",
+        "anchoMesaCm",
+        "repartirCopias",
+        "repartir_copias",
+        "por_mesa"
       ],
       "reglas": [
-        "Paridad de motores: anidar_por_fila (py) == anidarPorFila (js)."
+        "Paridad de motores: anidar_por_fila (py) == anidarPorFila (js).",
+        "🔴 LA MESA SIEMPRE DEL ANCHO IMPRIMIBLE DE LA TELA, también con Copia (regla del usuario 2026-10-14, MAPA 704): nunca recortar ni cambiar el ancho de la página. El recorte de la 699 se sacó.",
+        "La mesa del RESTO también con el mejor acomodo (MAPA 705): compite el acomodo común contra todas las franjas probadas y gana la más corta; una mesa con menos copias nunca puede medir más que la llena.",
+        "Cada lugar de una mesa mezclada lleva la pieza DE VERDAD de su fila: las copias marcan `_copia_i`/`_pieza_i` (`_copias_de` ↔ `copiasDe`); no sacar esas marcas.",
+        "COPIA = LA MESA LLENA DEL LARGO MÁXIMO QUE SE REPITE (MAPA 720): se acomodan las copias que llenan una mesa de `altura_max_cm` (como mucho las que entran por superficie + 1); la primera mesa con sus copias COMPLETAS se imprime `copias // n` veces y el resto va en su mesa; todas en una mesa → una sola. Nada de franjas del alto de la pieza (703) ni repetir al costado (701). Sólo con Copia.",
+        "🔴 COPIA NO SEPARA POR TALLE (MAPA 725): sólo las mesas LLENAS que se repiten ×N van aparte (por familia = misma pieza); TODO lo que no llena una mesa va a UN pozo (uno por diseño con «Separar») acomodado junto, en el orden de las filas. Separar talles es SÓLO el botón «Mesas».",
+        "El atajo de «no llena una mesa» mide por la CAJA (w·h), nunca preparando máscaras de antemano: mezclar piezas preparadas y no preparadas en el mismo acomodo lo hace más lento en el navegador (MAPA 725)."
       ],
-      "cicatrices": [],
+      "cicatrices": [
+        "2026-10-14: la 701 repetía la mesa de 1 copia al costado → con banderines 19 copias gastaban ~1,80 m donde encastradas gastan ~1,20 (MAPA 703).",
+        "2026-10-13/14: se recortó el ancho del PDF con Copia (699) y el usuario lo rechazó: «el ancho de la mesa no se cambia, es el imprimible real de cada tela» (MAPA 704).",
+        "2026-10-14: la mesa del resto (6 banderines) medía 49 cm y la llena (9) 46 cm: el resto sólo usaba el acomodo común (MAPA 705).",
+        "2026-10-14 (MAPA 717): JUGADOR 33 + GOLERO 34 de la misma bandera con Copia salían en 4 archivos (459 cm); el usuario: «mismo molde, diferente diseño, debe mezclar».",
+        "2026-10-15 (MAPA 720): la Copia achicaba la mesa a una franja del alto de la pieza (689 banderines = franja de 9 ×76); el usuario la quiere del largo máximo y repetida.",
+        "2026-10-15 (MAPA 725): la 717 armaba una mesa por familia = una por talle (20 camisetas con Copia: 19,7 m en 5 mesas contra 15,5 m sin Copia); el usuario: «¿por qué me separó por talle si no apreté Mesas?»."
+      ],
       "contratos": [
-        "verificar_cantidad.py"
+        "verificar_cantidad.py",
+        "verificar_navegador_hoja.py",
+        "verificar_navegador_nesting.py"
       ],
       "mapa": [
-        581
+        581,
+        699,
+        701,
+        703,
+        704,
+        705,
+        717,
+        720,
+        725
       ],
       "memoria": "copia-mesa-por-fila.md",
       "conexiones": [
         "nesting",
         "planilla",
-        "talles-mesa"
+        "talles-mesa",
+        "integracion-externa"
       ]
     },
     {
@@ -632,6 +716,142 @@
         [
           "frontend/src/motor/nesting/contorno.js",
           "function anidarEstrategia"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function puedeFila"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function mascarasIguales"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _perfil_inferior"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function perfilInferior"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _contacto"
+        ],
+        [
+          "nesting_contorno.py",
+          "CONTACTO_PESO"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function contactoEn"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function bajaHasta"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function cabenTramos"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _anidar_busqueda"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function anidarBusqueda"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _carril"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _compactar_hoja"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _pulir"
+        ],
+        [
+          "nesting_contorno.py",
+          "def parametros_optimizar"
+        ],
+        [
+          "nesting_contorno.py",
+          "def optimizar_de_entorno"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "export function carril"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function compactarHoja"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function pulir"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "export function tareaCarril"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function rangosX"
+        ],
+        [
+          "frontend/src/motor/nesting/carriles.js",
+          "export async function abrirCarriles"
+        ],
+        [
+          "frontend/src/motor/nesting/carriles.js",
+          "export function crearEjecutor"
+        ],
+        [
+          "frontend/src/motor/nesting/carril.worker.js",
+          "tareaCarril"
+        ],
+        [
+          "frontend/src/motor/pedido/generar.js",
+          "abrirCarriles"
+        ],
+        [
+          "servidor.py",
+          "def _optimizar_de_entorno"
+        ],
+        [
+          "correr_contratos.py",
+          "TIZADA_NESTING_OPTIMIZAR"
+        ],
+        [
+          "frontend/src/motor/obrero.worker.js",
+          "crearEjecutor"
+        ],
+        [
+          "verificar_navegador_nesting.py",
+          "CONTRATO_LENTO"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _compactar_vector"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _capsula"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "export function compactarVector"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function capsula"
+        ],
+        [
+          "servidor.py",
+          "def _guardar_cuerpo_plan"
         ]
       ],
       "palabras": [
@@ -642,16 +862,49 @@
         "solo_ang",
         "soloAng",
         "acotado",
-        "repuesto_todos"
+        "repuesto_todos",
+        "puedeFila",
+        "libres"
       ],
       "reglas": [
         "Todo cambio va en LOS DOS motores y se mide la paridad (mismas colocaciones).",
         "Medir mesa chica Y pedido grande antes de dar un arreglo por bueno.",
-        "LA SEPARACIÓN ES ENTRE PIEZAS (MAPA 633): la grilla se agranda `esp_c` de cada lado (`_preparar` ↔ `preparar`) y las posiciones se devuelven corridas `esp_c` (`_anidar_estrategia` ↔ `colocar`); el borde de la mesa lo decide sólo `margenes_cm`. Cambiarlo en un motor y no en el otro rompe la paridad."
+        "LA SEPARACIÓN ES ENTRE PIEZAS (MAPA 633): la grilla se agranda `esp_c` de cada lado (`_preparar` ↔ `preparar`) y las posiciones se devuelven corridas `esp_c` (`_anidar_estrategia` ↔ `colocar`); el borde de la mesa lo decide sólo `margenes_cm`. Cambiarlo en un motor y no en el otro rompe la paridad.",
+        "La clave de caché de cada pieza (`_cache_key`/`cacheKey`) lleva el TAMAÑO DE LA MESA (`alto_c`, `ancho_c`): los giros guardados son los que ENTRAN en esa mesa (MAPA 703).",
+        "🔴 NADA HARDCODEADO (MAPA 708): cada pieza se evalúa en TODOS los giros de su regla y en TODA la mesa; nunca copiar el lugar/giro de la anterior ni armar formas fijas (franjas, panal…). Compiten órdenes de colocación y la variante sin giros de costado; gana el de menos tela. Sólo el contorno: el diseño se pone después.",
+        "Velocidad EXACTA en el navegador: retomar la búsqueda de cada máscara donde quedó (`G._re`), `libres[y]`+`puedeFila`, giros con la misma silueta una sola vez. Cualquier aceleración tiene que dar el MISMO resultado que la búsqueda completa (contrato de paridad).",
+        "COMPITEN CRITERIOS DE COLOCACIÓN GENERALES (MAPA 714): «bl» (más arriba, más a la izquierda) y «hueco» (más arriba, el que menos hueco deja atrapado según el frente `prof` de la hoja). Siempre los dos; gana la mesa más corta y en empate el de antes → agregar un criterio nunca empeora. Un criterio nuevo entra igual: en los dos motores y compitiendo, nunca reemplazando.",
+        "CORTE EXACTO entre giros (MAPA 715): `elegirPosicion(..., tope)` busca un giro sólo hasta donde todavía puede ganar (`y + hh <= tope`, el fondo del mejor ya encontrado). Vale para «bl» y «hueco» (el fondo decide primero), NO para «bandas».",
+        "COMPITEN «bl», «hueco» y «contacto» (MAPA 719; contacto hasta 200 piezas): «contacto» = anillo ocupado/pared − CONTACTO_PESO × filas que alarga, sólo lugares APOYADOS arriba. Python lo calcula con FFT; el navegador con aceleraciones EXACTAS (tramos libres, cota, columnas/bajaHasta, union-find): cualquier cambio en una tiene que dar el mismo resultado (contrato).",
+        "🔴 LA ÚLTIMA MESA SE VUELVE A ACOMODAR SOLA (MAPA 726): con más de una mesa, sus piezas pasan otra vez por la búsqueda completa; se usa sólo si queda en UNA mesa y más corta (nunca empeora). `anidar_contorno` = búsqueda + ese paso; la búsqueda sola es `_anidar_busqueda` ↔ `anidarBusqueda`.",
+        "🔴 EL OPTIMIZADOR (MAPA 728): `anidar_contorno` = búsqueda de siempre + 16 carriles con semilla fija (el 0 = lo de antes pulido: nunca peor) + pulir (última mesa sola + compactar) → gana el de menos tela (empate: el número más bajo). Los dos motores corren LOS MISMOS carriles; el navegador en paralelo, Python en orden: mismo resultado.",
+        "Los hilos de carriles los abre la PÁGINA (`abrirCarriles` en generar.js) y la tarea `hoja` les habla por MessagePort: un hilo del navegador no puede abrir otro desde un archivo (MAPA 728).",
+        "Las piezas viajan a los hilos de carriles CON sus máscaras ya hechas (`_mask`, `_candidatos_angulo`, `_cache_key`): sin eso cada hilo las rearma (3,8 s con 100 piezas).",
+        "Para medir una mejora del acomodo: reproducir el PEDIDO EXACTO del usuario (su `pedido.json`, el `borde_corte` y el preset del molde) y comprobar que da los mismos largos que su trabajo ANTES de medir (MAPA 728).",
+        "`cfg.optimizar` = `{carriles, intentos}` o `false`; `TIZADA_NESTING_OPTIMIZAR` («0» o «CxI») es SÓLO para contratos y viaja en el plan (`cfg_nesting.optimizar`) para que los dos motores acomoden igual.",
+        "Contratos (MAPA 728): `correr_contratos.py` pone `TIZADA_NESTING_OPTIMIZAR=0` (los pedidos enteros en Python con 16 carriles tardan minutos); `verificar_navegador_nesting.py` prueba el optimizador con carriles chicos en sus escenarios y es `CONTRATO_LENTO` (~12-15 min, va con `--todos`).",
+        "🔴 Medir una mejora del acomodo SÓLO con la entrada EXACTA del navegador (piezas en su orden + cfg): con el optimizador el orden de la lista cambia el resultado; el fixture de Python sirve para la paridad, no para prometer metros (MAPA 730).",
+        "🔴 COMPACTAR CON EL CONTORNO REAL (MAPA 731): el último paso de `anidar_contorno` desliza cada pieza (arriba/izquierda) con su polígono girado igual que la hoja hasta espaciado + bordes + 0,3 mm de sus vecinas. La grilla de 4 mm dejaba 16,8 mm donde se piden 11. Usa `cosdg`/`sindg` (mismo bit en los dos motores) y el tope es la CAJA de la pieza dentro de la mesa.",
+        "Para medir el aire real entre piezas: polígonos del contorno + el giro de `matrizColocacion` y distancia vértice-segmento en los dos sentidos (la validación de la hoja sólo informa el valor configurado).",
+        "Para reproducir el acomodo EXACTO de un pedido del usuario: `logs/planes/plan_*.json` (los últimos 10 cuerpos planificados) → `_plan_del_pedido` + `frontend/src/motor/pruebas/tizada.mjs` (MAPA 731).",
+        "🔴 Con más de 120 piezas NO hay carriles y la compactación por grilla va hasta 120 piezas por mesa y 2 pasadas (MAPA 732): la Copia acomoda cientos de copias varias veces. Todo cambio del acomodo se mide también con la Copia de 593 banderines y con 689 banderines."
       ],
       "cicatrices": [
         "MAPA 579: la primera versión (sólo acotado) arreglaba la mesa chica y empeoraba los pedidos grandes (25,74 → 27,53 m).",
-        "2026-10-07 (MAPA 633): el aire de separación quedaba también contra el borde de la mesa (8 mm por lado): una bandera de 156 cm no entraba en una mesa de 157 y el cartel le decía al usuario que lo máximo era 1,55."
+        "2026-10-07 (MAPA 633): el aire de separación quedaba también contra el borde de la mesa (8 mm por lado): una bandera de 156 cm no entraba en una mesa de 157 y el cartel le decía al usuario que lo máximo era 1,55.",
+        "2026-10-14: una pieza preparada para una mesa grande, acomodada en una más chica, reusaba giros que no entraban: Python reventaba y el navegador escribía fuera de la grilla (MAPA 703).",
+        "2026-10-14: el atajo de piezas iguales nunca encastraba (después de la caja y con el mismo giro): 300 banderines 31,8 m en vez de ~17,8; 475 del usuario 42,9 m al 55 % (MAPA 707).",
+        "2026-10-14: el atajo de piezas iguales hacía que 500 piezas salieran todas con el mismo giro y 19 en otro orden; el usuario lo vio como «formas hardcodeadas» y pidió un nesting de verdad (MAPA 708).",
+        "2026-10-14 (MAPA 714): Copia salía más corta que el acomodo por defecto (689 banderines 3534 vs 3554 cm) porque el desempate era siempre «más a la izquierda». Meter la búsqueda de Copia dentro del acomodo normal se probó y no ganó nunca una vez que estuvo «hueco»: se sacó (sumaba 1-2 s).",
+        "2026-10-14 (MAPA 715): 593 banderines con giro libre tardaban 20 s en acomodar (de 53 s del pedido): cada uno de los 24 giros se buscaba en toda la franja de abajo aunque ya no pudiera ganar.",
+        "2026-10-14 (MAPA 719): «las mangas están mal ubicadas y no se rotan para incrustar»: «bl» no encastraba (mangas solas al 60 %). Contar contacto en todos los lugares tardaba 83 s en el navegador.",
+        "2026-10-15 (MAPA 726): la última mesa de 20 camisetas quedaba con los cuellos apilados al pie y ~70 cm libres al costado (5,23 m; acomodada sola, 5,01 m).",
+        "2026-10-16 (MAPA 728): la 726/727 se midieron sobre un fixture que no era el pedido del usuario (otro borde y otra tela): en su pedido la tizada salió idéntica y el usuario: «tiré una tizada y quedó igual, ¿me estás tomando el pelo?».",
+        "2026-10-16 (MAPA 728): los cuellos (51 × 6 cm) se apilaban en filas al final porque el orden era fijo (grandes primero); se arregla buscando el orden, no con una regla para piezas finas.",
+        "2026-10-16 (MAPA 729): con 10 m (2 mesas) salían 14,91 m y con 30 m (1 mesa) 14,99 m: la mesa partida tenía una búsqueda propia en su segunda parte y la entera no.",
+        "2026-10-16 (MAPA 730): la 729 (tramos) prometió 14,86 m medido en un fixture; en el navegador del usuario dio 14,98 m y tardó 1 min 20 s → revertida.",
+        "2026-10-16 (MAPA 731): un separador por superposición sobre la grilla (muestreo de lugares) dio peor que el motor (15,37 contra 15,06 m): sin búsqueda exacta del mejor lugar no sirve.",
+        "2026-10-16 (MAPA 732): Copia de 593 banderines clavada en «Buscando el mejor acomodo (9 de 16)»: 16 carriles + compactación por grilla sin tope = 520 s."
       ],
       "contratos": [
         "verificar_molde_a_medida.py"
@@ -659,7 +912,20 @@
       "mapa": [
         158,
         579,
-        633
+        633,
+        703,
+        706,
+        707,
+        708,
+        714,
+        715,
+        719,
+        726,
+        728,
+        729,
+        730,
+        731,
+        732
       ],
       "memoria": "nesting-aprovechamiento.md",
       "conexiones": [
@@ -686,6 +952,10 @@
         [
           "servidor.py",
           "def _rev_registro"
+        ],
+        [
+          "servidor.py",
+          "_productos_cambiados"
         ]
       ],
       "palabras": [
@@ -700,10 +970,13 @@
         "Un test NUNCA toca MSSQL (TIZADA_DATOS no aísla la base: reemplazar el módulo db).",
         "Reciclado de pyodbc apagado a propósito (MAPA 549): no prenderlo para «acelerar».",
         "Para MODIFICAR el catálogo: _cargar_catalogo_para_editar(), nunca _cargar_catalogo().",
-        "Un doble de `db` en un contrato que llama un GET tiene que contestar `filas(\"SELECT legacy_id, registro_rev FROM producto\")` (las revisiones se leen todas juntas, MAPA 582); un doble que devuelve None da 422 «'NoneType' object is not iterable»."
+        "Un doble de `db` en un contrato que llama un GET tiene que contestar `filas(\"SELECT legacy_id, registro_rev FROM producto\")` (las revisiones se leen todas juntas, MAPA 582); un doble que devuelve None da 422 «'NoneType' object is not iterable».",
+        "Guardar el catálogo re-proyecta a las tablas SÓLO los moldes que cambiaron (`db.guardar_catalogo(..., solo=)` + `_productos_cambiados(base, cat)`); sin copia de partida, todos. Los dobles de `guardar_catalogo` en los contratos aceptan `solo` (MAPA 694).",
+        "Todo doble de `db.guardar_catalogo` en un contrato acepta `solo=None` (MAPA 694/698: sin eso el contrato de la integración daba 500 al tomar un pedido)."
       ],
       "cicatrices": [
-        "MAPA 582: cada GET /api/productos abría 14 conexiones (0,43 s c/u con la PC ocupada)."
+        "MAPA 582: cada GET /api/productos abría 14 conexiones (0,43 s c/u con la PC ocupada).",
+        "2026-10-13 (MAPA 694): en el publicado cada guardado del catálogo tardaba 1,7–2,2 s porque re-proyectaba TODOS los moldes; cambiar la medida de una bandera guardaba 2-3 veces."
       ],
       "contratos": [
         "verificar_db_conexiones.py",
@@ -715,7 +988,8 @@
         386,
         549,
         582,
-        624
+        624,
+        694
       ],
       "memoria": "test-no-toca-mssql.md",
       "conexiones": [
@@ -792,7 +1066,8 @@
       "reglas": [
         "La pieza i es la misma en todos los talles por canonizar_orden (el orden del dibujo puede cruzar piezas).",
         "Del archivo del molde sólo se toma el TALLE; nombres de capa/objeto se ignoran.",
-        "Los efímeros se anotan como del pedido ANTES de subir (el barrido de huérfanos se los llevaba)."
+        "Los efímeros se anotan como del pedido ANTES de subir (el barrido de huérfanos se los llevaba).",
+        "El PLAN no arma mesas del desplegado con «el servidor no calcula»: lee lo que hay (`personalizacion_guardada(armar=False)`, igual que `motor_b`) y avisa si falta (MAPA 694: antes un ProcessPool EN EL SERVIDOR)."
       ],
       "cicatrices": [
         "MAPA 2026-09-16: el barrido de huérfanos borró un molde a mitad del alta.",
@@ -808,7 +1083,8 @@
       "mapa": [
         400,
         491,
-        684
+        684,
+        694
       ],
       "memoria": "molde-con-diseno.md",
       "conexiones": [
@@ -868,6 +1144,10 @@
         [
           "frontend/src/motor/obrero.worker.js",
           "async contexto_a_soltar("
+        ],
+        [
+          "frontend/src/motor/pieza/caminoA.js",
+          "clasico = null"
         ]
       ],
       "palabras": [
@@ -882,13 +1162,16 @@
         "«Tintas planas en el PDF» del arte se listan POR NOMBRE en los dos gemelos (`validar_arte` ↔ `arte/mapeo.js`): Python las juntaba en un set y el orden cambiaba por corrida (MAPA 624).",
         "«Mesa vacía» la decide el NOMBRE, no el color: una mesa cuya guía nombra una pieza no se revisa con `mesaTieneDiseno`/`_mesa_tiene_diseno` (variación de color); sólo las mesas SIN nombre. Igual en los dos gemelos (`validar_arte_separado` ↔ `arte/mapeo.js validarArteSeparado`).",
         "Caché de las previas del Arte (App.jsx): vaciarlo SIEMPRE con `_pvLimpiar()` (sube `_pvGen`), y todo dibujo guarda con `_pvGuardar(k, piezas, gen)` anotando la generación AL ARRANCAR; la pasada de todos los talles es de una generación. Si no, lo que estaba en camino guarda lo viejo con la clave de ahora (MAPA 674).",
-        "El hilo del motor atiende varios pedidos A LA VEZ: nunca rearmar un contexto (`contexto_a`) que otro dibujo puede estar usando. El visor tiene un contexto POR CONFIGURACIÓN (clave con `huella(cfg)`, los últimos 4, `previasEnUso`) y suelta los viejos con `contexto_a_soltar` (MAPA 675)."
+        "El hilo del motor atiende varios pedidos A LA VEZ: nunca rearmar un contexto (`contexto_a`) que otro dibujo puede estar usando. El visor tiene un contexto POR CONFIGURACIÓN (clave con `huella(cfg)`, los últimos 4, `previasEnUso`) y suelta los viejos con `contexto_a_soltar` (MAPA 675).",
+        "`_orden_var(reg, pid)`: el orden de talles sale de la plantilla DE ESE molde (`pid` o la ruta `pl`), nunca de la del molde activo de la sesión (MAPA 694).",
+        "SEPARADO O CLÁSICO LO DICE LA VALIDACIÓN DEL ARTE (`modo_arte` del plan → `clasico`; `contextoCaminoA({clasico})`, worker `contexto_a`, `previa.js` con `d.validacion.modo`), NUNCA «el mapeo está vacío»: un arte separado sin asignar salía como clásico (pegado sin escalar y corrido). Una pieza sin asignar sale en blanco. UNA pieza + UNA mesa sin rótulo se asignan solas (`mapeo_por_nombre` ↔ `mapeoPorNombre`). Una variable con mapeo vacío no tapa al automático si no hay nada asignado (MAPA 700)."
       ],
       "cicatrices": [
         "2026-10-07: un costadillo de relleno liso (rosa) salía «mesas vacías: [7, 8]» y el pedido externo se frenaba con `arte-mesa-vacia`; el negro «pasaba» sólo porque el borde de la miniatura de 0,04 se mezcla con el blanco del fondo y suma contraste. Arreglado: las mesas nombradas en la guía no se miden por color.",
         "2026-10-07: `verificar_navegador_camino_a.py` comparaba los archivos de detección del paquete contra el talle CRUDO; el paquete los nombra limpios como la caché del servidor («1,00x1,00» → «1_00x1_00», mismo archivo). Rojo recién con los moldes a medida (primer talle con coma). También saltea un molde efímero que se borra mientras corre.",
         "MAPA 674: «cargo el arte y no se cambia»: un dibujo del arte anterior se guardaba después de vaciar el caché, la segunda carga se colgaba de la pasada de la primera y el visor caía al servidor (409) cuando el hilo se rearmaba.",
-        "MAPA 675: un solo contexto `…|previa` por diseño, rearmado por el visor / la pasada de talles / la precarga con configuraciones distintas, cerraba documentos en uso → el visor caía al servidor → 409 → «El visor del arte no puede dibujar: … recargá la página»."
+        "MAPA 675: un solo contexto `…|previa` por diseño, rearmado por el visor / la pasada de talles / la precarga con configuraciones distintas, cerraba documentos en uso → el visor caía al servidor → 409 → «El visor del arte no puede dibujar: … recargá la página».",
+        "2026-10-13: banderín con arte sin guía → «faltan asignar» → el motor lo armó como arte CLÁSICO: el diseño corrido 3,8 cm y sin escalar en visor y tizada; el usuario lo vio como «se mueve el diseño al rotar» (MAPA 700)."
       ],
       "contratos": [
         "verificar_navegador_camino_a.py",
@@ -901,7 +1184,9 @@
         495,
         624,
         674,
-        675
+        675,
+        694,
+        700
       ],
       "memoria": "camino-a-navegador.md",
       "conexiones": [
@@ -1078,6 +1363,10 @@
         [
           "frontend/src/App.jsx",
           "function useVistaLocal"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "urlDe.reintentar"
         ]
       ],
       "palabras": [
@@ -1090,12 +1379,14 @@
       "reglas": [
         "Pixel-idéntico al archivo (misma lista de dibujo, mismo recorte).",
         "«Dibujando la mesa…» mientras carga: un blanco parece «no se ve».",
-        "UNA FOTO POR MESA a una sola calidad (`calidadFoto`, `FOTO_PXCM`; decisión del usuario 2026-09-18): no hay recortes de zoom ni en la pantalla ni pre-dibujados en el servidor (`_predibujar_recortes_fondo` sacado en la 624). La descarga de una mesa es `mesaSuelta` → `paginaComoPdf` (la página, sin rasterizar)."
+        "UNA FOTO POR MESA a una sola calidad (`calidadFoto`, `FOTO_PXCM`; decisión del usuario 2026-09-18): no hay recortes de zoom ni en la pantalla ni pre-dibujados en el servidor (`_predibujar_recortes_fondo` sacado en la 624). La descarga de una mesa es `mesaSuelta` → `paginaComoPdf` (la página, sin rasterizar).",
+        "🔴 La vista de la mesa NUNCA cae al servidor con «no calcula» prendido (contesta 409): se reintenta en la PC (abrir ×4, dibujo ×3) y si no sale, «Reintentar» (MAPA 733)."
       ],
       "cicatrices": [
         "MAPA 433: «las mesas tardan o no se ven» era el pool del desplegado abandonado, no la PC.",
         "MAPA 468: recortes en serie de 4-17 s.",
-        "2026-10-06 (MAPA 624): el servidor seguía pre-dibujando 128 recortes por mesa que la pantalla dejó de pedir el 09-18, y dos contratos (`verificar_mesa_por_talle.py`, `verificar_visor_display_list.py`) seguían exigiendo los recortes: estuvieron rojos semanas."
+        "2026-10-06 (MAPA 624): el servidor seguía pre-dibujando 128 recortes por mesa que la pantalla dejó de pedir el 09-18, y dos contratos (`verificar_mesa_por_talle.py`, `verificar_visor_display_list.py`) seguían exigiendo los recortes: estuvieron rojos semanas.",
+        "2026-10-16 (MAPA 733): un fallo pasajero al abrir la hoja dejaba la mesa para siempre en «No se pudo traer la vista previa» (el servidor contestaba 409)."
       ],
       "contratos": [
         "verificar_navegador_vista.py",
@@ -1108,7 +1399,8 @@
         468,
         484,
         503,
-        624
+        624,
+        733
       ],
       "memoria": "pool-desplegado-no-se-abandona.md",
       "conexiones": [
@@ -1170,25 +1462,40 @@
         [
           "frontend/src/App.jsx",
           "function _snapAContorno"
+        ],
+        [
+          "motor_pedido.py",
+          "def _adentro_del_borde"
+        ],
+        [
+          "frontend/src/motor/pieza/estampar.js",
+          "export function adentroDelBorde"
         ]
       ],
       "palabras": [
         "_snapAContorno",
         "etiqueta",
-        "cargarEtiqueta"
+        "cargarEtiqueta",
+        "adentroDelBorde",
+        "_adentro_del_borde"
       ],
       "reglas": [
         "`t` es posición RELATIVA en el contorno, nunca largo de arco.",
-        "Baseline protegida: no romper."
+        "Baseline protegida: no romper.",
+        "LA ETIQUETA NUNCA ENCIMA DEL BORDE (MAPA 702): con el borde por DENTRO (B) o CENTRADO (B/2) la baseline se corre ese ancho + 0,25·tamaño hacia adentro (`_adentro_del_borde` ↔ `adentroDelBorde`, en `_eops_borde`/`_eops_tramo`/`_eops_zonas` y sus gemelos, y `_offIn` del visor). Borde por fuera o apagado: 0 (lo de siempre)."
       ],
-      "cicatrices": [],
+      "cicatrices": [
+        "2026-10-13: el banderín triangular (borde por dentro) salía con la etiqueta encima del borde de corte, tapándolo: la baseline se apoyaba en el contorno pensando sólo en el borde por fuera (MAPA 702)."
+      ],
       "contratos": [
         "verificar_etiqueta_posicion.py",
         "verificar_etiqueta_tamano.py",
         "verificar_etiqueta_nombre.py",
         "verificar_etiqueta_del_archivo.py"
       ],
-      "mapa": [],
+      "mapa": [
+        702
+      ],
       "memoria": "etiqueta-baseline-no-romper.md",
       "conexiones": [
         "camino-b",
@@ -1438,7 +1745,8 @@
         "Aplanado: un Form con /Group que se pinta con transparencia vigente (SMask, ca/CA < 1, BM no Normal) NO se des-anida; y no se borran los «opacos por defecto» de un ExtGState de un diccionario con transparencia real (son los que la apagan). Gemelos aplanar_rip._flatten ↔ rip/aplanar.js flatten.",
         "FICHA TÉCNICA (MAPA 624): cada pieza del molde guía va en VECTOR en los dos gemelos — `ficha_tecnica.py` `show_pdf_page` ↔ `ficha.js` `pegarPiezaGuia` (de `pdf_guia` o del PDF suelto con su graft map). Nunca `get_pixmap`/imagen. El peso de la mesa repetida lo saca el guardado (`garbage=4`).",
         "Aplanado y validación de la hoja: cada Form del molde se aplana UNA vez por archivo (`_listos` ↔ `listos`) y toda mesa del molde lleva `/TizadaMolde` (la validación no la recorre); `/TizadaBase` sigue siendo sólo la que no anida (MAPA 667).",
-        "La transparencia del arte que el aplanado conserva a propósito (grupos bajo opacidad/SMask/fusión, MAPA 615) NO se avisa al pedido como «un RIP podría rechazar» (`_rip_fallas_para_avisar`); sólo los problemas reales (fuentes, color, capas) (MAPA 686)."
+        "La transparencia del arte que el aplanado conserva a propósito (grupos bajo opacidad/SMask/fusión, MAPA 615) NO se avisa al pedido como «un RIP podría rechazar» (`_rip_fallas_para_avisar`); sólo los problemas reales (fuentes, color, capas) (MAPA 686).",
+        "Una tinta plana con nombre (Separation/DeviceN, un Pantone) es válida para el RIP con CUALQUIER respaldo (Lab/ICC-3 de Illustrator): `_cs_ok` ↔ `csOk` no la marcan; el color del archivo nunca se toca (MAPA 713)."
       ],
       "cicatrices": [
         "«Me cambió el color»: Illustrator muestra enteros pero guarda 0.996.",
@@ -1458,7 +1766,8 @@
         613,
         624,
         667,
-        686
+        686,
+        713
       ],
       "memoria": "vector-original-siempre.md",
       "conexiones": [
@@ -1468,11 +1777,9 @@
     },
     {
       "id": "ui-reglas",
-      "nombre": "Reglas de pantalla (tutoriales, diccionario, carteles, TDZ)",
-      "que": "Cada ancla data-tour tiene su entrada en diccionario.js; los carteles de «cargando» bloquean; el contador de «usado antes de declarar» no sube.",
+      "nombre": "Reglas de pantalla (carteles, avisos, TDZ, sin diálogos nativos)",
+      "que": "Los carteles de «cargando» bloquean; los avisos no empujan la grilla; el contador de «usado antes de declarar» no sube; nada de alert/confirm. (La ayuda paso a paso y su diccionario se quitaron en MAPA 689.)",
       "archivos": [
-        "frontend/src/diccionario.js",
-        "frontend/verificar_diccionario.mjs",
         "frontend/verificar_tdz.mjs",
         "frontend/verificar_estilo_ui.mjs"
       ],
@@ -1488,8 +1795,6 @@
       ],
       "palabras": [
         "data-tour",
-        "ancla=",
-        "diccionario",
         "pintarYa",
         "alert(",
         "confirm("
@@ -1498,25 +1803,23 @@
         "Nunca subir TOPE_APP del contador TDZ: usar refs / mover código.",
         "Nada de alert/confirm nativos: modales y avisos propios.",
         "Botones: texto corto + «?» con la explicación.",
-        "Tutoriales: NADA automático, sólo lo grabado.",
         "Editores en modal aparte, nunca inline en la lista.",
         "Un botón que el sistema apaga mientras hace algo DICE qué está haciendo (giro + estado corto, p. ej. «Armando la medida…»); nunca apagado y mudo (MAPA 678).",
         "Un aviso pasajero (cargando, escaneando) no puede empujar ni tapar la grilla: va en un renglón que YA existe (p. ej. al lado del título), chico, y el porqué en el `title` (MAPA 683)."
       ],
       "cicatrices": [
-        "Anclas pasadas como argumento de función = «texto muerto» en el diccionario: usar data-tour literal."
+        "(histórica, del diccionario ya quitado) anclas pasadas como argumento de función quedaban como «texto muerto»: un `data-tour` se escribe literal."
       ],
       "contratos": [
-        "frontend/verificar_diccionario.mjs",
         "frontend/verificar_tdz.mjs",
-        "frontend/verificar_estilo_ui.mjs",
-        "verificar_tutorial_ventana.py"
+        "frontend/verificar_estilo_ui.mjs"
       ],
       "mapa": [
         372,
         373,
         678,
-        683
+        683,
+        689
       ],
       "memoria": "botones-texto-corto.md",
       "conexiones": []
@@ -1610,6 +1913,18 @@
         [
           "frontend/src/App.jsx",
           "const tallesEnPlanilla"
+        ],
+        [
+          "hoja_pike.py",
+          "def ops_cortes"
+        ],
+        [
+          "frontend/src/motor/hoja/componer.js",
+          "export function opsCortes"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "tallesMesaModo"
         ]
       ],
       "palabras": [
@@ -1619,21 +1934,31 @@
         "por_talles_mesa",
         "tmDraft",
         "tallesEnPlanilla",
-        "_norm_talle_mesa"
+        "_norm_talle_mesa",
+        "tallesMesaModo",
+        "talles_mesa_modo",
+        "separados",
+        "cortes",
+        "opsCortes",
+        "Sugerir"
       ],
       "reglas": [
         "Paridad de motores: anidar_por_fila (py) == anidarPorFila (js) también con por_talles_mesa.",
         "Copia manda sobre los grupos (cada fila ya es su mesa); con Copia no viaja talles_mesa.",
         "El talle que se agrupa es el de la columna de ESE molde (ya resuelto en la prenda traducida).",
         "Sin grupos = exactamente lo de siempre.",
-        "La ventana se usa en dos toques (marcar talles → tocar mesa) o arrastrando; el usuario pidió que sea intuitiva: no volver a listas de botones por talle."
+        "La ventana se usa en dos toques (marcar talles → tocar mesa) o arrastrando; el usuario pidió que sea intuitiva: no volver a listas de botones por talle.",
+        "Dos modos (MAPA 710): «mesas» (cada grupo su mesa, los sin grupo juntos — lo de siempre) y «separados» (todos en la misma mesa, cada talle o grupo acomodado solo y APILADO con línea punteada; un talle sin grupo va solo; si no entra en el largo, otra mesa). `mesas[].cortes` = y de cada línea; `ops_cortes` ↔ `opsCortes` la dibujan igual. «Sugerir» junta los talles con ≤ N prendas.",
+        "La separación (MAPA 711): línea 1,2 mm punteada 6/4 mm + «Talle(s) …» del bloque de arriba y de abajo, 7 mm, centrados, en CURVAS; franja entre bloques = espaciado + SEP_BANDA_MM (21,2 mm). `cortes` = [{y, arriba, abajo}]. Sin tipografía disponible va sólo la línea."
       ],
       "cicatrices": [
         "MAPA 593: la primera ventana (un renglón por talle con botones Mesa 1/2/…) le resultó poco intuitiva al usuario."
       ],
       "contratos": [],
       "mapa": [
-        593
+        593,
+        710,
+        711
       ],
       "memoria": "talles-por-mesa.md",
       "conexiones": [
@@ -2450,7 +2775,9 @@
         "empaquetar.py",
         "verificar_integracion_externa.py",
         "documentacion/integracion_externa/FORMATO_PEDIDO.md",
-        "documentacion/integracion_externa/pedido_ejemplo.json"
+        "documentacion/integracion_externa/pedido_ejemplo.json",
+        "documentacion/integracion_externa/como_usar_cada_opcion.html",
+        "documentacion/integracion_externa/COMO_USAR_CADA_OPCION.md"
       ],
       "anclas": [
         [
@@ -2612,6 +2939,38 @@
         [
           "servidor.py",
           "_entra_hasta_cm"
+        ],
+        [
+          "integracion_externa.py",
+          "_TURNO_ROBOT"
+        ],
+        [
+          "integracion_externa.py",
+          "_robot_de_este_turno"
+        ],
+        [
+          "integracion_externa.py",
+          "_cerrar_robots_viejos"
+        ],
+        [
+          "frontend/src/motor/robot/robot.mjs",
+          "X-Robot-Turno"
+        ],
+        [
+          "servidor.py",
+          "_solo_reglas"
+        ],
+        [
+          "integracion_externa.py",
+          "def _perfil_por_nombre"
+        ],
+        [
+          "integracion_externa.py",
+          "def v1_perfiles"
+        ],
+        [
+          "servidor.py",
+          "def _editables_color_con_pedido"
         ]
       ],
       "palabras": [
@@ -2624,7 +2983,13 @@
         "ALARMAS",
         "pedido_externo",
         "drive",
-        "integracion"
+        "integracion",
+        "ajustes",
+        "colores",
+        "mapeo_arte",
+        "no_imprimir",
+        "__repo_ext",
+        "mapeoManual"
       ],
       "reglas": [
         "El pedido llega como si se cargara a mano: cada DISEÑO con sus MOLDES, y cada molde con su arte, variable, telas y editables. El arte puede ir en el diseño (para todos sus moldes) o en cada molde.",
@@ -2655,7 +3020,11 @@
         "MOLDE A MEDIDA (MAPA 623): el pedido manda `medida: {ancho_m, alto_m}` por molde a medida (`_medida_del_pedido`, alarmas `medida-falta`/`medida-invalida`/`tela-no-entra`) y la plantilla `{variable, medida}`; el robot arma la copia (`armarCopiaAMedida` → `/api/externo/robot/a_medida/<ref>` → `/api/plantilla` → `/listo`) y se borra al terminar.",
         "La columna del campo nombre se rotula «Texto»; las filas pueden mandarla con el título viejo «Nombre» o con «Texto» (`por_titulo`); la tipografía por campo pasa por `clave_fuente_campo` (alias) (MAPA 624).",
         "MOLDE A MEDIDA DESDE EL OTRO SISTEMA (MAPA 644): `a_medida` publica todo (límites, margen, borde, telas con `entra_hasta_cm`, largo máximo, gira, tiras por defecto); el pedido manda `medida` (la del DISEÑO) y `tiras` (`_tiras_del_pedido`); `POST /a_medida/calcular` contesta lo mismo que la pantalla sin guardar. Las cuentas salen de las MISMAS funciones del servidor (`_cabe_en_tela`, `_entra_hasta_cm`, `_segmentos_tiras`, `_ficha_a_medida`).",
-        "Toda respuesta de `fetch` en el robot (Node) se LEE siempre, también en error y en 409: una sin leer hace reventar a undici (`assert(!this.paused)`) y se cae el robot (MAPA 671)."
+        "Toda respuesta de `fetch` en el robot (Node) se LEE siempre, también en error y en 409: una sin leer hace reventar a undici (`assert(!this.paused)`) y se cae el robot (MAPA 671).",
+        "La documentación de la integración tiene que decir los DOS usos de la cantidad: `mesas.modo` normal = prendas (se repite la fila y se mezcla) vs `una_por_fila` = copias de la mesa (vuelven `fila`/`copias`); está en `COMO_USAR_CADA_OPCION.md` y su PDF (`como_usar_cada_opcion.html` → `TIZADA_PRO_Como_usar_cada_opcion.pdf`). Si cambia una opción del pedido, se actualizan los dos (MAPA 697).",
+        "UN SOLO ROBOT (MAPA 698): `robot_tomar` le da trabajo sólo al robot que trae el turno de ESTE arranque (`X-Robot-Turno` = `_TURNO_ROBOT`, que el servidor le pasa en `TIZADA_ROBOT_TURNO`); a los demás, `salir`. `arrancar_robot` cierra antes los robots viejos de esta instalación (`_cerrar_robots_viejos`, por PID y comando exacto, sólo Linux).",
+        "La revisión de los DATOS corre `_plan_del_pedido` con `_solo_reglas: True`: sólo las trabas, nunca leer el arte (eso es del robot).",
+        "🔴 TODO LO QUE EL USUARIO HACE EN EL PEDIDO SE PUEDE MANDAR POR LA API (MAPA 712): una opción nueva del Panel de Pedidos va también a `revisar_datos` + `cuerpo_de` (+ robot si toca el arte), al esquema `pedido.schema.json` (additionalProperties:false), a FORMATO_PEDIDO y con su alarma en ALARMAS. Los nombres de objetos editables los resuelve `robot_arte` con el arte."
       ],
       "cicatrices": [
         "2026-10-02: breusplanilla@gmail.com es cuenta PERSONAL con la carpeta en su Mi unidad: la cuenta de servicio del 606 no podía guardar ahí. Se agregó OAuth de la persona. Pendiente: la app de Google sigue en «Prueba» → el permiso vence a los 7 días hasta publicarla (pide página principal + política de privacidad públicas) (MAPA 607).",
@@ -2669,7 +3038,10 @@
         "2026-10-06 (MAPA 624): el chequeo «sin silueta calculada → 404» es el modo «no calcula» de verdad; con el corredor apagándolo por defecto daba 200: el contrato lo prende sólo para ese chequeo.",
         "2026-10-07 (SOL-1031, «Camiseta Goes 2026»): `arte-mesa-vacia` FRENA y salía por un falso positivo de la regla de color con costadillos lisos; en la pantalla el mismo check era sólo aviso, por eso «a mano andaba». Ahora manda el nombre de la guía (ver neurona camino-a).",
         "2026-10-08 (MAPA 644): el sistemita de prueba nunca mandaba la `medida` del molde a medida (`_armar` sólo copiaba variable/tela).",
-        "2026-10-12 (MAPA 671): el robot se caía en ~la mitad de las corridas: `subirTipografias` no leía la respuesta de `fuente_resolver`. Y el contrato dependía del arte real «jugador» del usuario (cambiado ese día)."
+        "2026-10-12 (MAPA 671): el robot se caía en ~la mitad de las corridas: `subirTipografias` no leía la respuesta de `fuente_resolver`. Y el contrato dependía del arte real «jugador» del usuario (cambiado ese día).",
+        "2026-10-13 (MAPA 698): la actualización «reinicio» en Linux (KillMode=process) dejaba vivo al robot del servidor viejo; el de la 1.0.49 no arma la copia a medida y los pedidos «a medida» salían «la pieza de 103,6 × 103,6 cm» pida la medida que pida.",
+        "2026-10-14 (MAPA 708): un pedido con datos sanos volvía RECHAZADO «no se pudo revisar el pedido: arte_personalizacion»: la revisión corría el plan entero y, si el molde ya tenía un diseño con arte guardado, llegaba a leer ese arte → 428 al «navegador» que no existe.",
+        "2026-10-14: `moldes[].reemplazos` se leía en `cuerpo_de` pero `revisar_datos` nunca lo copiaba: se perdía sin avisar (MAPA 712)."
       ],
       "contratos": [
         "verificar_integracion_externa.py",
@@ -2690,7 +3062,11 @@
         620,
         622,
         644,
-        671
+        671,
+        697,
+        698,
+        708,
+        712
       ],
       "memoria": "integracion-pedido-externo",
       "conexiones": [
@@ -2795,7 +3171,6 @@
         "2026-10-05: en «Por rango» sin talles marcados se avisaba pero se dejaba crear; ahora bloquea (sinRango)."
       ],
       "contratos": [
-        "frontend/verificar_diccionario.mjs",
         "frontend/verificar_tdz.mjs"
       ],
       "mapa": [
@@ -2822,7 +3197,9 @@
         "verificar_molde_a_medida.py",
         "frontend/src/motor/pruebas/a_medida.mjs",
         "frontend/src/motor/molde/formas.js",
-        "ficha_a_medida.py"
+        "ficha_a_medida.py",
+        "frontend/src/motor/molde/aMedidaFicha.js",
+        "frontend/src/motor/ficha/aMedidaDibujos.js"
       ],
       "anclas": [
         [
@@ -3251,10 +3628,6 @@
         ],
         [
           "frontend/src/App.jsx",
-          "amFondoRef"
-        ],
-        [
-          "frontend/src/App.jsx",
           "geo_v: versionGeo(fo)"
         ],
         [
@@ -3304,6 +3677,50 @@
         [
           "frontend/src/motor/pieza/base.js",
           "export const TIRA_CONTORNO_MM"
+        ],
+        [
+          "frontend/src/motor/molde/aMedida.js",
+          "amEnTela"
+        ],
+        [
+          "frontend/src/motor/molde/aMedidaFicha.js",
+          "fichaAMedida"
+        ],
+        [
+          "frontend/src/motor/molde/aMedidaFicha.js",
+          "agruparAMedidaFicha"
+        ],
+        [
+          "servidor.py",
+          "_datos_ficha_a_medida"
+        ],
+        [
+          "frontend/src/motor/pedido/generar.js",
+          "agruparAMedidaFicha(guias)"
+        ],
+        [
+          "frontend/src/motor/ficha/aMedidaDibujos.js",
+          "dibujosAMedida"
+        ],
+        [
+          "frontend/src/motor/ficha/aMedidaDibujos.js",
+          "anchoTexto"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "asegurarCopiaAMedida"
+        ],
+        [
+          "frontend/src/motor/molde/aMedida.js",
+          "rotacionAMedida"
+        ],
+        [
+          "servidor.py",
+          "_rotacion_a_medida"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "_amMedidaInvalida"
         ]
       ],
       "palabras": [
@@ -3323,7 +3740,7 @@
         "El TALLE de un molde a medida se llama como la medida («1,50x0,90»): gemelos `talleDeMedida` ↔ `_talle_de_medida`. Nunca lo trae la fila: `_sin_col_talle` es siempre verdadero para un molde a medida y su talle nunca es obligatorio.",
         "La variable se crea sola después de cada alta (`_a_medida_variable`) con clave FIJA por molde (`v_`+sha1(pid)[:7]): el mapeo del arte y la etiqueta (`v§pieza`) sobreviven a cambiar la medida. Al cambiar la medida, lo guardado por talle de los editables pasa al talle nuevo (`/api/productos/a_medida`).",
         "La COPIA del pedido es efímera (`crear {efimero, a_medida_de, ancho_m, alto_m}`), copia toda la config menos `_AM_NO_COPIAR` y reemplaza a la plantilla SÓLO en ese diseño (`disenoVars`/`disenoMoldes`). Las copias no se listan en el catálogo ni en «Mis artículos» ni se publican en la API.",
-        "¿Entra en la tela? Gemelos EXACTOS `cabeEnTela` (js) ↔ `_cabe_en_tela` (py): la pieza = medida del DISEÑO + margen (`medidaPieza` ↔ `_medida_pieza`); mesa y largo máximo menos el margen del nesting; se cuenta en celdas de `resolucion_mm` del lado SEGURO (la separación del armado es sólo entre piezas, MAPA 633) (lo que dice «entra» lo acepta el armado real; MAPA 632); girar 90° sólo con «90»/«libre». La pantalla no ofrece una tela donde no entra y frena el paso; el plan frena 409; la API da `tela-no-entra`.",
+        "¿Entra en la tela? Gemelos EXACTOS `cabeEnTela` (js) ↔ `_cabe_en_tela` (py): la pieza = medida del DISEÑO + margen (`medidaPieza` ↔ `_medida_pieza`); mesa y largo máximo menos el margen del nesting; se cuenta en celdas de `resolucion_mm` del lado SEGURO (la separación del armado es sólo entre piezas, MAPA 633) (lo que dice «entra» lo acepta el armado real; MAPA 632); un molde a medida SIEMPRE puede girar 90° (`rotacionAMedida` ↔ `_rotacion_a_medida`, MAPA 696; «libre» queda libre). La pantalla no ofrece una tela donde no entra y frena el paso (`amEnTela`, la decide la computadora del usuario); el plan YA NO frena (MAPA 692); la API da `tela-no-entra`.",
         "Las copias que hace el robot llevan `externo: <ref>` y se borran al terminar/fallar el pedido o la plantilla y con la limpieza (`_borrar_copias_a_medida`); sólo efímeras, con esa referencia y salidas de una plantilla.",
         "Un molde del catálogo SIN archivo se puede pasar a medida desde Moldería (`MolderiaSinBase` → `POST /api/productos/a_medida {convertir}`); con `plantilla.ai` ya subido, efímero o camino B → 409: nunca se pisa un molde con piezas (MAPA 624).",
         "Ajustes de un molde a medida: sin Moldería; «Variables» = nombre de la pieza + medida de muestra; «Margen» = herramienta propia al lado de «Nombre y número». El nombre y el número NUNCA salen del margen: `_limite_texto_de` sube los límites al mayor borde y agrega «*» (gemelos `pers_con_limite` ↔ `persConLimite`) (MAPA 624).",
@@ -3365,7 +3782,12 @@
         "El paso Arte de un molde a medida tiene UNA sola pantalla, armado o no: sin armar es el mismo `MapeadorArteVisual` con la forma en el visor (`visorReemplazo`) y lo que necesita la copia apagado (`_amSinArmar`). Nunca una tarjeta aparte sin cabecera ni panel de Diseños (MAPA 676).",
         "En el paso Moldes la variable de una copia a medida cuenta como la de su plantilla (`_claveOrigen`, `varsVistasDe`): marcada si el diseño tiene la copia; tocarla saca la variable y sus copias; nunca dos del mismo molde en un diseño (MAPA 677).",
         "El NOMBRE de una copia a medida se deriva SIEMPRE de su plantilla + su medida guardada (`_normalizar_catalogo`, «Bandera 3,00x1,45»); nunca queda el de la primera medida (MAPA 679).",
-        "La marca de tira es SIEMPRE negra con contorno blanco: gemelos `_ops_tiras` ↔ `opsTiras` (blanca `TIRA_CONTORNO_MM` más ancha de cada lado, encima la negra); el color no se elige en ningún lado (ni Ajustes, ni pedido, ni API); sólo el grosor es del molde (MAPA 682)."
+        "La marca de tira es SIEMPRE negra con contorno blanco: gemelos `_ops_tiras` ↔ `opsTiras` (blanca `TIRA_CONTORNO_MM` más ancha de cada lado, encima la negra); el color no se elige en ningún lado (ni Ajustes, ni pedido, ni API); sólo el grosor es del molde (MAPA 682).",
+        "TODA llamada a `cabeEnTela`/`_cabe_en_tela`/`medidaPieza`/`_medida_pieza` lleva forma, punta, terminación y el margen que RIGE (`margenDeTerminacion`/`_margen_de_terminacion`): el freno del plan, el de la pantalla, el visor, la ficha y la API miden la MISMA pieza (MAPA 691).",
+        "NADA DEL USO DEPENDE DEL SERVIDOR (regla del usuario 2026-10-13, MAPA 692): el servidor guarda y entrega lo guardado (`_a_medida_publico`, `_datos_ficha_a_medida`); la computadora del usuario decide y calcula (`amEnTela`, `fichaAMedida`, `agruparAMedidaFicha`). Los gemelos Python (`_cabe_en_tela`, `_ficha_a_medida`, `_agrupar_a_medida_ficha`) quedan SÓLO para la API del otro sistema y la ficha del servidor, y el contrato exige que den lo mismo.",
+        "Los DIBUJOS de la ficha a medida (plano, terminación en corte, esquina/punta, pasos) se calculan en el navegador con `dibujosAMedida` (aMedidaDibujos.js), gemelo EXACTO de `ficha_a_medida.dibujos_a_medida` (que queda para la ficha del servidor y la API); `verificar_ficha_a_medida_navegador.py` los compara (MAPA 692).",
+        "ELEGIR LA MEDIDA NO TOCA EL SERVIDOR (MAPA 695): la copia del pedido se arma recién al cargar el arte (`asegurarCopiaAMedida` dentro de `cargarDisenoWizard`) o al tocar «Crear plantilla»/«Asignar telas»; automático sólo el re-armado de una copia que ya existe. Nunca armar copias de fondo ni al entrar al paso.",
+        "Elegir la tela de un molde a medida NO arma la copia (dato del pedido); «Poner medida» se marca con una medida válida (`_amMedidaInvalida`), no con «hay copia» (MAPA 696)."
       ],
       "cicatrices": [
         "2026-10-06 (MAPA 623): el doble de la base del entorno aislado no tenía `guardar_registro` y el molde se daba de alta con 0 piezas: se agregó al doble.",
@@ -3404,12 +3826,18 @@
         "2026-10-09 (MAPA 666): «mucho título, los diseños re lejos, mucho espacio en blanco»: cada diseño de la bandera era un «MOLDE GUÍA» con una tarjeta cuadrada de 5 columnas.",
         "MAPA 660/676: la pantalla «sin armar» era otra tarjeta sin barra ni botones; con la máquina lenta (~30 s de armado) el usuario la vio dos veces como «me rompiste el espacio».",
         "MAPA 677: la copia reemplazaba a la plantilla en el diseño y la tarjeta (de la plantilla) se apagaba; volver a tocarla armaba otra copia → el molde dos veces.",
-        "MAPA 679: al cambiar la medida, la copia seguía llamándose «Bandera 1,00x1,00» en todo el pedido."
+        "MAPA 679: al cambiar la medida, la copia seguía llamándose «Bandera 1,00x1,00» en todo el pedido.",
+        "2026-10-13 (MAPA 691): `_a_medida_telas_que_no_entran` (409 del plan) y `_amTelaNoEntra` (pantalla) llamaban sin forma/punta/terminación → un triángulo de 300 × 153,4 se frenaba como rectángulo 300,4 × 158,8 en el servidor publicado. El contrato comparaba gemelos sólo con rectángulos.",
+        "2026-10-13 (MAPA 692): el freno 409 del plan repetía en el servidor la cuenta de «entra en la tela» y llegó a medir otra pieza que el visor; se sacó: decide la pantalla.",
+        "2026-10-13: `_ancho_texto` de PyMuPDF avanza por BYTES UTF-8 sobre un índice de caracteres (después de una «ó» se saltea la letra siguiente): el gemelo `anchoTexto` copia la rareza a propósito; si cambia la versión de MuPDF del servidor, la tabla puede quedar vieja (lo detecta `verificar_ficha_a_medida_navegador.py`).",
+        "2026-10-13 (MAPA 695): armar de fondo la copia de cada diseño apenas se elegía el molde (MAPA 662/663) y a cada medida escrita llenaba la cola del publicado (8 hilos, 43 en espera) y el «Armando la medida» tardaba.",
+        "2026-10-13 (MAPA 696): en el publicado la Bandera tenía la regla «Estándar» (no gira) y 3 × 1,50 «no entraba» en 1,60; en el taller giraba por su regla «Productos simples». El giro de una pieza plana no puede depender de la regla."
       ],
       "contratos": [
         "verificar_molde_a_medida.py",
         "verificar_planilla_sin_talles.py",
-        "verificar_navegador_ficha.py"
+        "verificar_navegador_ficha.py",
+        "verificar_ficha_a_medida_navegador.py"
       ],
       "mapa": [
         622,
@@ -3443,7 +3871,11 @@
         679,
         680,
         681,
-        682
+        682,
+        691,
+        692,
+        695,
+        696
       ],
       "memoria": "molde-a-medida.md",
       "conexiones": [
@@ -3453,6 +3885,358 @@
         "plantilla-pedido",
         "generar-navegador",
         "etiqueta"
+      ]
+    },
+    {
+      "id": "ayuda-video",
+      "nombre": "Ayuda en video (tutoriales de Drive + reproductor propio)",
+      "que": "El botón «Ayuda» abre la lista de videos de la carpeta de Drive «TUTORIALES TIZADA PRO» y un reproductor propio (velocidades, ±10 s, siguiente automático, PiP, pantalla completa, atajos, retomar). El servidor baja cada video una vez a datos/cache_ayuda/ y lo sirve con Range.",
+      "archivos": [
+        "ayuda_videos.py",
+        "frontend/src/ayudaVideos.jsx",
+        "generar_api_rutas.py"
+      ],
+      "anclas": [
+        [
+          "ayuda_videos.py",
+          "_entradas"
+        ],
+        [
+          "ayuda_videos.py",
+          "_bajar"
+        ],
+        [
+          "ayuda_videos.py",
+          "_en_castellano"
+        ],
+        [
+          "ayuda_videos.py",
+          "api_estado"
+        ],
+        [
+          "frontend/src/ayudaVideos.jsx",
+          "Reproductor"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "AyudaVideos"
+        ],
+        [
+          "servidor.py",
+          "AYV.configurar"
+        ],
+        [
+          "frontend/src/index.css",
+          ".tzv-ventana"
+        ],
+        [
+          "auth.py",
+          "PERMISOS_RETIRADOS"
+        ],
+        [
+          "ayuda_videos.py",
+          "_cuadro_del_video"
+        ],
+        [
+          "ayuda_videos.py",
+          "_videos_de"
+        ],
+        [
+          "ayuda_videos.py",
+          "_podar"
+        ],
+        [
+          "ayuda_videos.py",
+          "_imagenes"
+        ]
+      ],
+      "palabras": [
+        "cache_ayuda",
+        "/api/ayuda",
+        "tzv-",
+        "AyudaVideos",
+        "embeddedfolderview"
+      ],
+      "reglas": [
+        "Agregar un tutorial = subir el .mp4 a la carpeta de Drive; nada de cargarlo en el código ni en el catálogo.",
+        "El video se sirve desde el caché del servidor con Range (send_file conditional): nunca re-bajarlo de Drive por cada vista.",
+        "Todo error que llega a la pantalla, en castellano (`_en_castellano`): urllib los da en inglés.",
+        "La ventana topa su alto con el del navegador (100vh - 36px): si no, los controles quedan fuera de la pantalla.",
+        "Escritura del video a .tmp + os.replace; una respuesta text/html de Drive (carpeta no compartida) se rechaza.",
+        "Lo guardado en el catálogo de la ayuda vieja (`tutoriales`) NO se borra: es del usuario.",
+        "Un permiso que se saca va a `auth.PERMISOS_RETIRADOS`: la fila queda en la base (podría estar asignada) y `/api/permisos` lo filtra para que la pantalla de roles no lo ofrezca.",
+        "Subir a la carpeta desde esta PC: Drive para escritorio (G:\\.shortcut-targets-by-id\\<id carpeta>\\...), copiar como a un disco.",
+        "Sacar un tutorial = borrarlo de la carpeta de Drive: `_podar` limpia el caché del servidor; nunca con una lista vacía.",
+        "Miniatura: .jpg con el mismo nombre en la subcarpeta «miniaturas» (no es sección) o al lado del video › cuadro de ffmpeg (opcional) › la de Drive (primer cuadro, negro: caché corto). La URL lleva ?m=."
+      ],
+      "cicatrices": [
+        "2026-10-12: la primera versión no topaba el alto y la barra de controles quedaba debajo del borde de la ventana.",
+        "2026-10-12: un video inexistente mostraba «HTTP Error 404: Not Found» (inglés) en la pantalla.",
+        "2026-10-12: la miniatura de Drive es el primer cuadro y nuestros videos arrancan en negro: todas iguales.",
+        "2026-10-12: se subieron dos videos VIEJOS repetidos (Cargar el arte, Molde con el diseño adentro): los tutoriales de pedido los reemplazan; no volver a subirlos.",
+        "2026-10-13: las miniaturas al lado de cada video hacían que en Drive pareciera todo duplicado: van en la subcarpeta «miniaturas»."
+      ],
+      "contratos": [
+        "frontend/verificar_tdz.mjs",
+        "verificar_permisos_rutas.py"
+      ],
+      "mapa": [
+        689
+      ],
+      "memoria": "ayuda-en-video.md",
+      "conexiones": [
+        "ui-reglas"
+      ]
+    },
+    {
+      "id": "compartir-integracion",
+      "nombre": "Compartir la integración al subir main (repo de Santiago y useryoania)",
+      "que": "El gancho pre-push de este repo, al subir `main`, corre `compartir_integracion.py`: saca `documentacion/integracion_externa/` DEL COMMIT que se sube, la copia al repo privado `UserBreus/tizada-pro-integracion` (carpeta hermana `TIZADAPRO PRUEBAEXT`, con su `actualizar_integracion.py`), revisa que no lleve llaves ni tokens y hace commit + push allá. Además adelanta la rama `entrega-programadores` de `tizada-pro` al mismo commit (de ahí toma TIZADA el servidor de ellos).",
+      "archivos": [
+        "compartir_integracion.py"
+      ],
+      "anclas": [
+        [
+          "compartir_integracion.py",
+          "def compartir"
+        ],
+        [
+          "compartir_integracion.py",
+          "def _revisar_secretos"
+        ],
+        [
+          "compartir_integracion.py",
+          "def instalar"
+        ],
+        [
+          "compartir_integracion.py",
+          "def _rama_entrega"
+        ]
+      ],
+      "palabras": [
+        "compartir_integracion",
+        "actualizar_integracion",
+        "tizada-pro-integracion",
+        "pre-push",
+        "TIZADA_INTEGRACION_DIR"
+      ],
+      "reglas": [
+        "Se comparte lo del COMMIT que se sube (git archive), nunca la copia de trabajo: lo que otra sesión tiene a medio escribir no sale.",
+        "Si lo que va a subir lleva una llave real (`tzp_` + 43 con variedad), un token de GitHub o una clave privada, NO sube nada. El ejemplo `tzp_xxxx…` de API.md es relleno y pasa.",
+        "Compartir nunca frena la subida de TIZADA PRO: el gancho siempre sale con 0 y sólo avisa.",
+        "El gancho vive en `.git/hooks` (no viaja con git): en otra PC hay que correr `py compartir_integracion.py --instalar`.",
+        "`entrega-programadores` va siempre igual a `main`, sólo hacia adelante (push sin force)."
+      ],
+      "cicatrices": [
+        "2026-10-12: Santiago y useryoania veían el repo de integración de hacía 4 días (08/10) mientras `main` estaba al día: compartir era un paso aparte, a mano, y se olvidaba (MAPA 690).",
+        "2026-10-12: «ven los commits y no está el de hoy»: `entrega-programadores` (la rama que les indica la portada) seguía en el 05/10 porque se subía sólo a main."
+      ],
+      "contratos": [],
+      "mapa": [
+        690,
+        614
+      ],
+      "memoria": "santiago-programador-github.md",
+      "conexiones": [
+        "integracion-externa"
+      ]
+    },
+    {
+      "id": "largo-mesa-pedido",
+      "nombre": "Largo de mesa elegido en el pedido",
+      "que": "El botón «Largo» de la planilla (y `mesas.largo_max_m` de la API externa) fija el largo máximo de cada mesa de ESE pedido; sin elegir rige el `alto_max_cm` del nesting del molde.",
+      "archivos": [
+        "frontend/src/App.jsx",
+        "servidor.py",
+        "integracion_externa.py",
+        "frontend/src/motor/molde/aMedida.js"
+      ],
+      "anclas": [
+        [
+          "servidor.py",
+          "def largo_mesa_pedido_cm"
+        ],
+        [
+          "integracion_externa.py",
+          "def _largo_mesa_ext"
+        ],
+        [
+          "integracion_externa.py",
+          "def _largo_nesting_cm"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "largoMesaCm"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "planilla-largo-mesa"
+        ]
+      ],
+      "palabras": [
+        "largo de mesa",
+        "largo máximo",
+        "largo_mesa_cm",
+        "largo_max_m",
+        "alto_max_cm",
+        "altura_max_cm"
+      ],
+      "reglas": [
+        "El largo del pedido reemplaza `altura_max_cm` en una COPIA de `telas_cfg` del plan: nunca tocar la config del molde.",
+        "Navegador y motor Python leen la MISMA `telas_cfg` del plan: el override va ahí, no en `cfg_nesting` (lo pisa `telas_cfg`).",
+        "Todo «¿entra?» del molde a medida usa el largo del pedido si hay (pantalla `amEnTela`/`estadoMedida`, API `_medida_del_pedido`).",
+        "Lo que haga la pantalla con el largo, también la API (`mesas.largo_max_m` → `largo_mesa_cm`), con su alarma y su doc."
+      ],
+      "cicatrices": [],
+      "contratos": [
+        "verificar_integracion_externa.py"
+      ],
+      "mapa": [
+        716
+      ],
+      "memoria": "largo-mesa-pedido.md",
+      "conexiones": [
+        "nesting",
+        "copia",
+        "talles-mesa",
+        "planilla",
+        "plan-pedido"
+      ]
+    },
+    {
+      "id": "separar-disenos",
+      "nombre": "Separar diseños (botón «Separar» de la planilla)",
+      "que": "Por defecto el mismo molde se mezcla aunque cambie el diseño; con «Separar» (o `mesas.separar_disenos` de la API) cada diseño va en sus propias mesas en cualquier modo, y cada mesa dice su `diseno`.",
+      "archivos": [
+        "nesting_contorno.py",
+        "frontend/src/motor/nesting/contorno.js",
+        "servidor.py",
+        "frontend/src/App.jsx",
+        "integracion_externa.py",
+        "frontend/src/motor/pdf/mesaPorArchivo.js"
+      ],
+      "anclas": [
+        [
+          "frontend/src/App.jsx",
+          "planilla-separar-disenos"
+        ],
+        [
+          "servidor.py",
+          "_diseno_nombre"
+        ],
+        [
+          "integracion_externa.py",
+          "separar_disenos"
+        ],
+        [
+          "frontend/src/motor/pedido/generar.js",
+          "_diseno_nombre"
+        ],
+        [
+          "motor_pedido.py",
+          "_diseno_nombre"
+        ]
+      ],
+      "palabras": [
+        "separar diseños",
+        "separar_disenos",
+        "_diseno",
+        "_diseno_nombre",
+        "mezclar diseños"
+      ],
+      "reglas": [
+        "Apagado = el mismo molde se mezcla (regla 439 + 717); nunca separar diseños por defecto.",
+        "El diseño entra PRIMERO en la clave de grupo de `anidar_por_fila` (orden de aparición); gemelos idénticos.",
+        "El rótulo es el NOMBRE del diseño del molde, no el slug (los externos tienen código interno).",
+        "Con Copia, «Separar» = un pozo por diseño para lo que no llena una mesa (MAPA 725)."
+      ],
+      "cicatrices": [
+        "2026-10-14: el rótulo salía «x-7e3557db-golero» en los pedidos externos (MAPA 717)."
+      ],
+      "contratos": [
+        "verificar_navegador_nesting.py",
+        "verificar_integracion_externa.py"
+      ],
+      "mapa": [
+        717,
+        725
+      ],
+      "memoria": "mismo-molde-se-mezcla.md",
+      "conexiones": [
+        "copia",
+        "nesting",
+        "talles-mesa",
+        "planilla",
+        "plan-pedido"
+      ]
+    },
+    {
+      "id": "van-juntas",
+      "nombre": "Piezas que van juntas (vínculo por variable)",
+      "que": "Dos o más piezas que en una VARIABLE van y se nombran juntas (manga + su vivo): al elegir una entra la otra, y es lo único que deja dos piezas con el mismo nombre en una variable. Cada variable tiene los suyos (`v.juntas`).",
+      "archivos": [
+        "frontend/src/App.jsx",
+        "servidor.py",
+        "verificar_juntas_grupo.py"
+      ],
+      "anclas": [
+        [
+          "frontend/src/App.jsx",
+          "_materializarJuntasGrupo"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const crearVinculoJuntas"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const juntasDeVariable"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "var-vincular"
+        ],
+        [
+          "servidor.py",
+          "juntas_piezas"
+        ]
+      ],
+      "palabras": [
+        "van juntas",
+        "vincular piezas",
+        "vínculo",
+        "juntas",
+        "juntas_piezas"
+      ],
+      "reglas": [
+        "El vínculo es de la VARIABLE (MAPA 722): vincular en una no toca a las otras aunque las piezas se llamen igual; una pieza está en UN vínculo POR variable.",
+        "Los vínculos viejos del GRUPO (`g.juntas`) se leen para todas sus variables (front y `_traducir_prendas`, grupo ∪ variable sin duplicar por id) hasta que se toca un vínculo de una: ahí se copian a cada variable y el grupo queda vacío. Nunca borrarlos sin copiarlos.",
+        "Elegir piezas para un vínculo va sobre UN talle (`etqData`), nunca sobre el lienzo de todos los talles ni el nido: `!vinculandoJuntas` en cada condición del visor de la variable abierta.",
+        "Un nombre = un lugar: crear un vínculo mete sus piezas en la variable y saca la que ocupaba ese nombre sin vínculo (sin cartel).",
+        "Cada pieza de una variable lleva SU nombre en `label` (nunca el del vínculo): el visor de la variable muestra sus piezas POR NOMBRE (MAPA 723).",
+        "Vincular es de corrido: «Crear vínculo» limpia la selección y se queda en el panel; sólo «Listo» sale (MAPA 723).",
+        "Al VINCULAR, el visor muestra SÓLO las piezas de la variable abierta (nunca las de todo el grupo): `aisladoSet` no lleva `vinculandoJuntas` (MAPA 724)."
+      ],
+      "cicatrices": [
+        "2026-08-21 (MAPA 264): elegir piezas sobre el lienzo de todos los talles guardaba piezas de otro talle.",
+        "2026-10-15 (MAPA 722): en el grupo una pieza sólo podía estar en un vínculo: vincularla para una variable la desvinculaba de la otra.",
+        "2026-10-15 (MAPA 723): con `label` = nombre del vínculo, las piezas vinculadas desaparecían del visor y aparecía otra que se llamaba como el vínculo.",
+        "2026-10-15 (MAPA 724): la 723 mostró las piezas de todo el grupo al vincular sin que se pidiera; el usuario lo marcó como error. Revertido."
+      ],
+      "contratos": [
+        "verificar_juntas_grupo.py"
+      ],
+      "mapa": [
+        263,
+        264,
+        722,
+        723,
+        724
+      ],
+      "memoria": "van-juntas-en-el-grupo.md",
+      "conexiones": [
+        "manga-toggle",
+        "plan-pedido"
       ]
     }
   ]

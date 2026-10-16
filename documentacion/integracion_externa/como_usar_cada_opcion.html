@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Cómo pedirle a TIZADA PRO cada cosa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --cian: #00b8d4; --cian-claro: #e0f7fb; --magenta: #d6007e; --magenta-claro: #fde6f2;
+    --amarillo: #f5b800; --amarillo-claro: #fff6d6; --verde: #10a36b; --verde-claro: #e3f6ee;
+    --rojo: #e0443a; --rojo-claro: #fdeceb; --tinta: #16202a; --gris: #5b6875; --gris-claro: #eef1f4;
+    --borde: #dde3e9;
+  }
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  @page portada { margin: 0; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', 'Segoe UI', sans-serif; color: var(--tinta); font-size: 10pt; line-height: 1.55; margin: 0; }
+  h1, h2, h3, h4 { line-height: 1.2; margin: 0; }
+  p { margin: 0 0 8pt; }
+  code, .mono { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.8pt; }
+  code { background: var(--gris-claro); padding: 1px 4px; border-radius: 4px; }
+  td code { font-size: 8pt; }
+  b { font-weight: 700; }
+  .ti { vertical-align: -2px; }
+
+  /* ── portada ── */
+  .portada { page: portada; height: 297mm; width: 210mm; position: relative; overflow: hidden;
+    background: radial-gradient(circle at 85% 12%, rgba(0,184,212,0.55), transparent 42%),
+                radial-gradient(circle at 10% 90%, rgba(214,0,126,0.45), transparent 45%),
+                radial-gradient(circle at 70% 80%, rgba(245,184,0,0.35), transparent 40%),
+                linear-gradient(160deg, #0b1118 0%, #111b26 60%, #0b1118 100%);
+    color: #fff; padding: 30mm 22mm; break-after: page; }
+  .portada .logo { width: 30mm; filter: drop-shadow(0 0 18px rgba(0,184,212,0.7)); }
+  .portada .marca { font-size: 13pt; letter-spacing: 0.3em; font-weight: 700; margin-top: 8mm; opacity: 0.85; }
+  .portada .marca span { color: #3fe3ff; }
+  .portada h1 { font-size: 34pt; font-weight: 800; margin-top: 42mm; max-width: 150mm; }
+  .portada h1 em { font-style: normal; color: #3fe3ff; text-shadow: 0 0 22px rgba(63,227,255,0.45); }
+  .portada .sub { font-size: 13pt; margin-top: 8mm; max-width: 140mm; color: #c9d6e2; }
+  .portada .chips { margin-top: 14mm; display: flex; gap: 8px; flex-wrap: wrap; }
+  .portada .chip { border: 1px solid rgba(255,255,255,0.35); border-radius: 999px; padding: 5px 13px; font-size: 9.5pt; color: #e6eef5; }
+  .portada .pie { position: absolute; bottom: 20mm; left: 22mm; right: 22mm; display: flex; justify-content: space-between; font-size: 9pt; color: #9fb0c0; border-top: 1px solid rgba(255,255,255,0.18); padding-top: 5mm; }
+
+  /* ── secciones ── */
+  section { break-before: page; }
+  .seccion-titulo { display: flex; align-items: center; gap: 12px; margin-bottom: 12pt; }
+  .num { min-width: 36px; padding: 0 5px; width: auto; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15pt; color: #fff; background: linear-gradient(135deg, var(--cian), #0088a3); flex-shrink: 0; }
+  .num.m { background: linear-gradient(135deg, var(--magenta), #a3005f); }
+  .num.a { background: linear-gradient(135deg, var(--amarillo), #d99400); }
+  .num.v { background: linear-gradient(135deg, var(--verde), #0a7a50); }
+  h2 { font-size: 20pt; font-weight: 800; }
+  .kicker { font-size: 8.5pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gris); font-weight: 700; }
+  h3 { font-size: 13pt; font-weight: 700; margin: 14pt 0 6pt; display: flex; align-items: center; gap: 7px; }
+  h3 .ti { color: var(--cian); font-size: 15pt; }
+  h4 { font-size: 11pt; font-weight: 700; margin: 10pt 0 4pt; }
+  .lead { font-size: 11.5pt; color: #2d3b48; margin-bottom: 12pt; }
+
+  /* ── cajas ── */
+  .caja { border-radius: 12px; padding: 11pt 13pt; margin: 9pt 0; break-inside: avoid; border: 1px solid var(--borde); }
+  .caja .t { font-weight: 800; display: flex; align-items: center; gap: 7px; margin-bottom: 4pt; }
+  .caja p:last-child { margin-bottom: 0; }
+  .c-info { background: var(--cian-claro); border-color: #a9e7f2; } .c-info .t { color: #007a8f; }
+  .c-ojo { background: var(--amarillo-claro); border-color: #f3dc8a; } .c-ojo .t { color: #9a6d00; }
+  .c-mal { background: var(--rojo-claro); border-color: #f4b9b4; } .c-mal .t { color: #b3261e; }
+  .c-bien { background: var(--verde-claro); border-color: #a6dcc4; } .c-bien .t { color: #0a7a50; }
+  .c-mag { background: var(--magenta-claro); border-color: #f3b2d6; } .c-mag .t { color: #a3005f; }
+
+  .grilla { display: grid; gap: 9pt; }
+  .g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: 1fr 1fr 1fr; } .g4 { grid-template-columns: repeat(4, 1fr); }
+  .tarjeta { border: 1px solid var(--borde); border-radius: 12px; padding: 10pt 11pt; break-inside: avoid; background: #fff; }
+  .tarjeta .ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 17px; color: #fff; margin-bottom: 6pt; }
+  .tarjeta h4 { margin-top: 0; }
+  .tarjeta p { font-size: 9.6pt; color: #394856; margin: 0; }
+  .i-c { background: var(--cian); } .i-m { background: var(--magenta); } .i-a { background: var(--amarillo); } .i-v { background: var(--verde); } .i-g { background: #52606d; }
+
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9.2pt; margin: 6pt 0 10pt; break-inside: auto; }
+  th { background: var(--tinta); color: #fff; text-align: left; font-weight: 600; padding: 6pt 7pt; }
+  th:first-child { border-top-left-radius: 8px; } th:last-child { border-top-right-radius: 8px; }
+  td { padding: 5.5pt 7pt; border-bottom: 1px solid var(--borde); vertical-align: top; }
+  tr { break-inside: avoid; }
+  tr:nth-child(even) td { background: #f7f9fb; }
+  .si { color: var(--verde); font-weight: 700; } .no { color: var(--rojo); font-weight: 700; } .medio { color: #b58300; font-weight: 700; }
+  .pill { display: inline-block; font-size: 8pt; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .p-obl { background: var(--rojo-claro); color: #b3261e; } .p-opc { background: var(--gris-claro); color: var(--gris); }
+
+  pre.json { background: #0f1720; color: #d7e3ee; border-radius: 12px; padding: 11pt 13pt; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.3pt; line-height: 1.5; white-space: pre-wrap; break-inside: avoid; margin: 8pt 0; }
+  pre.json .k { color: #7fdcff; } pre.json .s { color: #ffd479; } pre.json .c { color: #7d8e9e; font-style: italic; } pre.json .n { color: #ff8fc8; }
+
+  .mermaid { display: flex; justify-content: center; margin: 8pt 0 10pt; break-inside: avoid; }
+  .mermaid svg { max-height: 118mm; height: auto; }
+  .figura.baja .mermaid svg { max-height: 88mm; }
+  .figura.baja2 .mermaid svg { max-height: 58mm; }
+  .figura.alta .mermaid svg { max-height: 175mm; }
+  .figura { border: 1px solid var(--borde); border-radius: 14px; padding: 8pt; background: linear-gradient(180deg, #fbfdfe, #f3f7fa); break-inside: avoid; margin: 8pt 0; }
+  .figura .pie-fig { font-size: 8.6pt; color: var(--gris); text-align: center; margin-top: 2pt; }
+
+  .pasos { counter-reset: paso; }
+  .paso { display: flex; gap: 11px; margin: 8pt 0; break-inside: avoid; }
+  .paso .b { width: 26px; height: 26px; border-radius: 50%; background: var(--cian); color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 10pt; }
+  .paso .b.m { background: var(--magenta); } .paso .b.a { background: var(--amarillo); } .paso .b.v { background: var(--verde); }
+  .paso .x { flex: 1; }
+  .paso .x b.tit { display: block; font-size: 10.8pt; }
+
+  .etapas { display: flex; align-items: stretch; gap: 5px; margin: 6pt 0 12pt; break-inside: avoid; }
+  .etapas .et { flex: 1; border: 1.5px solid; border-radius: 10px; padding: 7pt 8pt; font-size: 8.8pt; line-height: 1.35; text-align: center; min-height: 52pt; display: flex; flex-direction: column; justify-content: center; }
+  .etapas .et b { display: block; font-size: 9.6pt; margin-bottom: 2pt; }
+  .etapas .ti { color: var(--gris); font-size: 14px; align-self: center; }
+  .indice { columns: 2; column-gap: 16pt; margin-top: 8pt; }
+  .indice div { break-inside: avoid; padding: 5pt 0; border-bottom: 1px dashed var(--borde); display: flex; gap: 9px; align-items: baseline; }
+  .indice .n { font-weight: 800; color: var(--cian); width: 26px; }
+
+  .arbol { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.6pt; background: #f7f9fb; border: 1px solid var(--borde); border-radius: 12px; padding: 10pt 12pt; white-space: pre; line-height: 1.6; break-inside: avoid; }
+  .arbol .d { color: #007a8f; font-weight: 600; } .arbol .f { color: #a3005f; } .arbol .c { color: var(--gris); font-family: 'Inter', sans-serif; font-style: italic; }
+  .chico { font-size: 8.8pt; color: var(--gris); }
+
+  /* secciones con mucho contenido: que entren en su página */
+  section.apretada table { font-size: 8.6pt; margin: 4pt 0 6pt; }
+  section.apretada td { padding: 3.8pt 6pt; }
+  section.apretada th { padding: 4.5pt 6pt; }
+  section.apretada h3 { margin: 8pt 0 4pt; }
+  section.apretada .lead { margin-bottom: 6pt; }
+  section.apretada pre.json { font-size: 7.5pt; padding: 8pt 10pt; margin: 5pt 0; line-height: 1.42; }
+  section.apretada .arbol { font-size: 8pt; padding: 7pt 10pt; line-height: 1.5; }
+  section.apretada .figura.media .mermaid svg { max-height: 84mm; }
+</style>
+</head>
+<body>
+<style>
+  /* lo propio de esta guía */
+  .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; margin: 8pt 0; }
+  .simple { border-left: 4px solid var(--verde); background: var(--verde-claro); border-radius: 0 12px 12px 0; padding: 9pt 12pt; margin: 8pt 0; break-inside: avoid; }
+  .simple .t { font-weight: 800; color: #0a7a50; font-size: 8.5pt; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 3pt; display: flex; align-items: center; gap: 6px; }
+  .prog { border-left: 4px solid #0f1720; background: #f4f6f8; border-radius: 0 12px 12px 0; padding: 9pt 12pt; margin: 8pt 0; break-inside: avoid; }
+  .prog .t { font-weight: 800; color: #0f1720; font-size: 8.5pt; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 4pt; display: flex; align-items: center; gap: 6px; }
+  .prog pre.json { margin: 4pt 0 2pt; }
+  .simple p, .prog p { margin-bottom: 4pt; }
+  .uso { border-radius: 14px; padding: 10pt 12pt; break-inside: avoid; border: 1.5px solid; }
+  .uso.u1 { border-color: #a9e7f2; background: var(--cian-claro); }
+  .uso.u2 { border-color: #f3dc8a; background: var(--amarillo-claro); }
+  .uso h4 { margin: 0 0 4pt; font-size: 12pt; }
+  .uso .modo { font-family: 'JetBrains Mono', monospace; font-size: 8.4pt; font-weight: 600; }
+  .uso ul { margin: 4pt 0 0; padding-left: 15pt; } .uso li { margin: 2pt 0; font-size: 9.4pt; }
+  .gran { font-size: 15pt; font-weight: 800; }
+</style>
+
+<!-- ═══════════════════════════ PORTADA ═══════════════════════════ -->
+<div class="portada">
+  <img class="logo" src="../logo.svg" alt="">
+  <div class="marca"><span>USER</span> PRO · TIZADA PRO</div>
+  <h1>Cómo pedirle a TIZADA PRO <em>cada cosa</em></h1>
+  <div class="sub">Para el que vende y para el que programa: qué se puede pedir desde el otro sistema, para qué sirve, cuándo conviene y cómo se manda. Sobre todo, los <b>dos usos de la cantidad</b>.</div>
+  <div class="chips">
+    <span class="chip">La cantidad: prendas o copias</span>
+    <span class="chip">Talles por mesa</span>
+    <span class="chip">Diseños y planilla</span>
+    <span class="chip">Telas y piezas</span>
+    <span class="chip">TPU · bordado · DTF</span>
+    <span class="chip">Banderas a medida</span>
+    <span class="chip">Antes de mandar</span>
+  </div>
+  <div class="pie"><span>API <b>/api/externo/v1</b> · detalle en <b>FORMATO_PEDIDO.md</b> y <b>API.md</b></span><span>13 de octubre de 2026</span></div>
+</div>
+
+<!-- ═══════════════════════════ 0 · CÓMO LEER ═══════════════════════════ -->
+<section style="break-before: auto;">
+  <div class="seccion-titulo"><div class="num">0</div><div><div class="kicker">Antes de empezar</div><h2>Cómo se lee esta guía</h2></div></div>
+  <p class="lead">El otro sistema le manda a TIZADA PRO un <b>pedido</b>: qué prendas, con qué diseño, en qué tela y la lista de personas (la <b>planilla</b>). TIZADA arma la <b>tizada</b>: los archivos que se imprimen para fabricar todo. Cada tema de esta guía tiene dos partes:</p>
+  <div class="dos">
+    <div class="simple"><div class="t"><i class="ti ti-user"></i> En simple</div><p>Para el que vende o atiende al cliente: qué es, para qué sirve y cuándo elegirlo. Sin nada técnico.</p></div>
+    <div class="prog"><div class="t"><i class="ti ti-code"></i> Para el programador</div><p>El campo exacto del <code>pedido.json</code>, con un ejemplo listo para copiar.</p></div>
+  </div>
+
+  <h3><i class="ti ti-map-2"></i> Lo que elige el cliente y dónde va</h3>
+  <table>
+    <tr><th>Lo que se elige</th><th>Dónde va en el pedido</th><th>Sección</th></tr>
+    <tr><td><b>Cuántas prendas iguales</b> de una fila</td><td><code>planilla[].cantidad</code> con <code>mesas.modo = "normal"</code></td><td>1</td></tr>
+    <tr><td><b>Cada fila en su mesa</b>, impresa varias veces</td><td><code>planilla[].cantidad</code> con <code>mesas.modo = "una_por_fila"</code></td><td>1</td></tr>
+    <tr><td>Qué <b>talles van juntos</b> en una mesa</td><td><code>mesas.modo = "por_talles"</code> + <code>grupos</code></td><td>2</td></tr>
+    <tr><td>Todos en la <b>misma mesa</b> sin mezclar talles</td><td><code>mesas.modo = "talles_separados"</code></td><td>2</td></tr>
+    <tr><td>El <b>largo máximo</b> de cada mesa</td><td><code>mesas.largo_max_m</code></td><td>2</td></tr>
+    <tr><td>Cada <b>diseño en sus mesas</b> (por defecto el mismo molde se mezcla)</td><td><code>mesas.separar_disenos = true</code></td><td>2</td></tr>
+    <tr><td>Los <b>diseños</b> (jugador, golero…) y la prenda</td><td><code>disenos[]</code> + <code>planilla[].diseno</code></td><td>3</td></tr>
+    <tr><td>Talle, nombre, número, manga</td><td>las columnas de <code>planilla[]</code></td><td>3</td></tr>
+    <tr><td>La <b>tela</b> (y otra para algunas piezas)</td><td><code>tela</code> y <code>telas_por_pieza</code></td><td>4</td></tr>
+    <tr><td><b>Piezas que no se hacen</b></td><td><code>piezas_apagadas</code></td><td>4</td></tr>
+    <tr><td>Escudo <b>bordado</b>, logo en <b>TPU</b> o <b>DTF</b></td><td><code>editables</code></td><td>4</td></tr>
+    <tr><td><b>Banderas</b> y piezas a medida</td><td><code>medida</code>, <code>forma</code>, <code>terminacion</code>, <code>tiras</code></td><td>5</td></tr>
+    <tr><td>Qué hacer si algo <b>falla</b></td><td><code>opciones</code></td><td>5</td></tr>
+  </table>
+
+  <div class="caja c-info"><div class="t"><i class="ti ti-bulb"></i> La regla de oro</div>
+    <p>Todo lo que se elige en la pantalla de TIZADA al armar un pedido a mano, el otro sistema lo manda como un <b>dato del pedido</b>. Si un dato no viene, TIZADA usa lo que tiene configurado ese molde.</p></div>
+
+  <div class="prog"><div class="t"><i class="ti ti-code"></i> El pedido en una mirada</div>
+<pre class="json">{
+  <span class="k">"formato"</span>: <span class="s">"tizadapro.pedido/1"</span>,
+  <span class="k">"referencia"</span>: <span class="s">"OV-2026-00123"</span>,
+  <span class="k">"mesas"</span>:  { <span class="k">"modo"</span>: <span class="s">"normal"</span> },        <span class="c">// cómo se reparten las mesas (secciones 1 y 2)</span>
+  <span class="k">"disenos"</span>: [ { <span class="k">"nombre"</span>: <span class="s">"JUGADOR"</span>, <span class="k">"moldes"</span>: [ { <span class="k">"variable"</span>: <span class="s">"v_bu8p7gy"</span>, <span class="k">"tela"</span>: <span class="s">"232"</span>, <span class="k">"arte"</span>: <span class="s">"artes/jugador.ai"</span> } ] } ],
+  <span class="k">"planilla"</span>: [ { <span class="k">"diseno"</span>: <span class="s">"JUGADOR"</span>, <span class="k">"talle"</span>: <span class="s">"M"</span>, <span class="k">"nombre"</span>: <span class="s">"PÉREZ"</span>, <span class="k">"numero"</span>: <span class="s">"10"</span>, <span class="k">"cantidad"</span>: <span class="s">"1"</span> } ],
+  <span class="k">"opciones"</span>: { <span class="k">"si_falta_tipografia"</span>: <span class="s">"rechazar"</span> }  <span class="c">// qué hacer si algo falla (sección 5)</span>
+}</pre></div>
+</section>
+
+<!-- ═══════════════════════════ 1 · LA CANTIDAD ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num a">1</div><div><div class="kicker">Lo más importante</div><h2>La columna cantidad tiene dos usos</h2></div></div>
+  <p class="lead">El mismo número significa cosas distintas según cómo se pidan las mesas. Hay que elegir uno de los dos <b>en cada pedido</b>.</p>
+
+  <div class="dos">
+    <div class="uso u1">
+      <h4>Uso 1 · cantidad de <b>prendas</b></h4>
+      <div class="modo">"mesas": {"modo": "normal"}</div>
+      <ul>
+        <li><b>3</b> = <b>3 prendas iguales</b>. TIZADA repite la fila.</li>
+        <li>Todas las filas se <b>mezclan</b> en las mesas para gastar <b>la menor tela</b>.</li>
+        <li>Es el uso <b>normal</b>: si no sabés cuál elegir, es éste.</li>
+      </ul>
+    </div>
+    <div class="uso u2">
+      <h4>Uso 2 · <b>copias de la mesa</b></h4>
+      <div class="modo">"mesas": {"modo": "una_por_fila"}</div>
+      <ul>
+        <li><b>3</b> = la fila se arma <b>una vez</b> en <b>su propia mesa</b>, y esa mesa se <b>imprime 3 veces</b>.</li>
+        <li>Si las copias <b>llenan una mesa</b> del <b>largo máximo</b>, esa mesa sale <b>una</b> vez marcada ×N; lo que no llena una mesa va <b>junto</b> con el resto del pedido (talles mezclados), ×1.</li>
+        <li>Necesita que la planilla tenga columna de cantidad.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="figura">
+    <div class="dibujo">
+    <svg viewBox="0 0 720 300" width="720" xmlns="http://www.w3.org/2000/svg" font-family="Inter, sans-serif" font-size="11">
+      <!-- planilla -->
+      <text x="10" y="18" font-weight="800" font-size="11.5" fill="#16202a">La misma planilla</text>
+      <g transform="translate(10,28)">
+        <rect width="150" height="96" rx="8" fill="#fff" stroke="#dde3e9"/>
+        <rect width="150" height="22" rx="8" fill="#16202a"/><rect y="12" width="150" height="10" fill="#16202a"/>
+        <text x="8" y="15" fill="#fff" font-weight="700" font-size="9.5">Fila · Nombre</text><text x="112" y="15" fill="#fff" font-weight="700" font-size="9.5">Cant.</text>
+        <circle cx="14" cy="37" r="5" fill="#00b8d4"/><text x="24" y="41">1 · PÉREZ</text><text x="122" y="41" font-weight="800">1</text>
+        <circle cx="14" cy="60" r="5" fill="#d6007e"/><text x="24" y="64">2 · GÓMEZ</text><text x="122" y="64" font-weight="800">2</text>
+        <circle cx="14" cy="83" r="5" fill="#f5b800"/><text x="24" y="87">3 · (sin nombre)</text><text x="122" y="87" font-weight="800">3</text>
+      </g>
+      <!-- USO 1 -->
+      <text x="200" y="18" font-weight="800" font-size="11.5" fill="#007a8f">Uso 1 · normal → 6 prendas, todas mezcladas</text>
+      <path d="M165 76 L195 76" stroke="#5b6875" stroke-width="2" marker-end="url(#fl)"/>
+      <g transform="translate(200,28)">
+        <rect width="500" height="96" rx="6" fill="#e0f7fb" stroke="#00b8d4" stroke-width="1.5"/>
+        <text x="8" y="14" font-size="9" fill="#007a8f" font-weight="700">MESA 1 · la tela, de un solo tirón</text>
+        <g font-weight="800" font-size="10" fill="#fff" text-anchor="middle">
+          <rect x="14" y="24" width="56" height="60" rx="9" fill="#00b8d4"/><text x="42" y="58">1</text>
+          <rect x="78" y="24" width="56" height="60" rx="9" fill="#f5b800"/><text x="106" y="58">3</text>
+          <rect x="142" y="24" width="56" height="60" rx="9" fill="#d6007e"/><text x="170" y="58">2</text>
+          <rect x="206" y="24" width="56" height="60" rx="9" fill="#f5b800"/><text x="234" y="58">3</text>
+          <rect x="270" y="24" width="56" height="60" rx="9" fill="#d6007e"/><text x="298" y="58">2</text>
+          <rect x="334" y="24" width="56" height="60" rx="9" fill="#f5b800"/><text x="362" y="58">3</text>
+        </g>
+        <text x="400" y="50" font-size="9.5" fill="#16202a">Las piezas de las</text><text x="400" y="63" font-size="9.5" fill="#16202a">6 prendas, juntas:</text><text x="400" y="76" font-size="9.5" font-weight="800" fill="#0a7a50">menos tela</text>
+      </g>
+      <!-- USO 2 -->
+      <text x="200" y="150" font-weight="800" font-size="11.5" fill="#9a6d00">Uso 2 · una_por_fila → 3 mesas, cada una con sus copias</text>
+      <path d="M165 110 C 180 160, 180 200, 195 205" stroke="#5b6875" stroke-width="2" fill="none" marker-end="url(#fl)"/>
+      <g transform="translate(200,160)">
+        <g>
+          <rect width="150" height="104" rx="6" fill="#fff6d6" stroke="#f5b800" stroke-width="1.5"/>
+          <text x="8" y="14" font-size="9" fill="#9a6d00" font-weight="700">MESA 1 · Fila 1</text>
+          <rect x="47" y="24" width="56" height="56" rx="9" fill="#00b8d4"/><text x="75" y="56" fill="#fff" font-weight="800" text-anchor="middle">1</text>
+          <text x="75" y="97" text-anchor="middle" font-weight="800" fill="#16202a">se imprime × 1</text>
+        </g>
+        <g transform="translate(175,0)">
+          <rect width="150" height="104" rx="6" fill="#fff6d6" stroke="#f5b800" stroke-width="1.5"/>
+          <text x="8" y="14" font-size="9" fill="#9a6d00" font-weight="700">MESA 2 · Fila 2</text>
+          <rect x="47" y="24" width="56" height="56" rx="9" fill="#d6007e"/><text x="75" y="56" fill="#fff" font-weight="800" text-anchor="middle">2</text>
+          <text x="75" y="97" text-anchor="middle" font-weight="800" fill="#16202a">se imprime × 2</text>
+        </g>
+        <g transform="translate(350,0)">
+          <rect width="150" height="104" rx="6" fill="#fff6d6" stroke="#f5b800" stroke-width="1.5"/>
+          <text x="8" y="14" font-size="9" fill="#9a6d00" font-weight="700">MESA 3 · Fila 3</text>
+          <rect x="47" y="24" width="56" height="56" rx="9" fill="#f5b800"/><text x="75" y="56" fill="#fff" font-weight="800" text-anchor="middle">3</text>
+          <text x="75" y="97" text-anchor="middle" font-weight="800" fill="#16202a">se imprime × 3</text>
+        </g>
+      </g>
+      <text x="200" y="290" font-size="9.5" fill="#5b6875">Cada mesa trae UNA vez las piezas de su fila; la cantidad viaja como dato («copias») para la impresora.</text>
+      <defs><marker id="fl" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#5b6875"/></marker></defs>
+    </svg>
+    </div>
+  </div>
+
+  <table>
+    <tr><th></th><th>Uso 1 · <code style="background:none;color:#fff">normal</code></th><th>Uso 2 · <code style="background:none;color:#fff">una_por_fila</code></th></tr>
+    <tr><td><b>Cantidad 3 significa</b></td><td>3 prendas iguales</td><td>1 mesa impresa 3 veces</td></tr>
+    <tr><td><b>Cómo se acomoda</b></td><td>Todo mezclado, para ahorrar tela</td><td>Cada fila sola, en el orden de la planilla</td></tr>
+    <tr><td><b>Mesas que salen</b></td><td>Las necesarias por tela (pocas y largas)</td><td>Una por fila (en cada tela)</td></tr>
+    <tr><td><b>Quién repite</b></td><td>TIZADA (el PDF ya trae todo)</td><td>El que imprime, <b>copias</b> veces</td></tr>
+    <tr><td><b>A lo ancho</b></td><td>Todo mezclado</td><td>Si entra más de una copia, el mejor acomodo de varias juntas: 19 con lugar para 5 → un archivo de 5 ×3 + uno de 4 ×1</td></tr>
+    <tr><td><b>Nombre del archivo</b></td><td><code>Mesa 1 - Tela.pdf</code></td><td><code>Mesa 3 - Tela - Fila 3 - x3.pdf</code></td></tr>
+  </table>
+</section>
+
+<section>
+  <div class="seccion-titulo"><div class="num a">1</div><div><div class="kicker">La cantidad · cuándo y cómo</div><h2>Cuál elegir y cómo se manda</h2></div></div>
+
+  <div class="simple"><div class="t"><i class="ti ti-user"></i> En simple</div>
+    <p><b>Usá el 1 (prendas)</b> en los pedidos de equipo y en todo lo que lleve <b>nombre o número</b>: cada persona es una fila y la cantidad es cuántas prendas iguales lleva. TIZADA junta todo para gastar la menor tela.</p>
+    <p><b>Usá el 2 (copias)</b> cuando algo se fabrica <b>muchas veces igual</b> y conviene imprimir la misma mesa repetida: <b>banderas o banderines iguales</b>, prendas <b>sin nombre ni número</b>, muestras, o cuando el taller necesita <b>cada fila separada</b> para cortar o entregar.</p>
+    <p>Para el cliente se puede preguntar así: <i>«¿Cantidad de prendas (se mezclan para ahorrar tela)?»</i> o <i>«¿Copias de esta mesa (cada fila aparte)?»</i>.</p>
+  </div>
+
+  <div class="caja c-ojo"><div class="t"><i class="ti ti-alert-triangle"></i> No usar el 2 con nombres distintos</div>
+    <p>Si cada prenda lleva su nombre, cada fila tiene cantidad 1 y el uso 2 sólo agrega mesas y gasta más tela.</p></div>
+
+  <div class="prog"><div class="t"><i class="ti ti-code"></i> Para el programador · uso 1 (prendas)</div>
+<pre class="json"><span class="k">"mesas"</span>: { <span class="k">"modo"</span>: <span class="s">"normal"</span> },          <span class="c">// o no mandar "mesas"</span>
+<span class="k">"planilla"</span>: [
+  { <span class="k">"diseno"</span>: <span class="s">"JUGADOR"</span>, <span class="k">"talle"</span>: <span class="s">"M"</span>, <span class="k">"nombre"</span>: <span class="s">"PÉREZ"</span>, <span class="k">"numero"</span>: <span class="s">"10"</span>, <span class="k">"cantidad"</span>: <span class="s">"1"</span> },
+  { <span class="k">"diseno"</span>: <span class="s">"JUGADOR"</span>, <span class="k">"talle"</span>: <span class="s">"S"</span>, <span class="k">"nombre"</span>: <span class="s">""</span>,      <span class="k">"numero"</span>: <span class="s">""</span>,   <span class="k">"cantidad"</span>: <span class="s">"15"</span> }
+]                                            <span class="c">// = 16 camisetas, mezcladas</span></pre></div>
+
+  <div class="prog"><div class="t"><i class="ti ti-code"></i> Para el programador · uso 2 (copias de la mesa)</div>
+<pre class="json"><span class="k">"mesas"</span>: { <span class="k">"modo"</span>: <span class="s">"una_por_fila"</span> },
+<span class="k">"planilla"</span>: [
+  { <span class="k">"diseno"</span>: <span class="s">"BANDERA CLUB"</span>,    <span class="k">"cantidad"</span>: <span class="s">"20"</span> },
+  { <span class="k">"diseno"</span>: <span class="s">"BANDERA SPONSOR"</span>, <span class="k">"cantidad"</span>: <span class="s">"5"</span> }
+]
+<span class="c">// en el resultado, cada archivo de tizada trae su fila y sus copias:</span>
+{ <span class="k">"tipo"</span>: <span class="s">"tizada"</span>, <span class="k">"nombre"</span>: <span class="s">"OV-123__Mesa 1 - Bandera (1,60) - Fila 1 - x20.pdf"</span>,
+  <span class="k">"mesa"</span>: <span class="n">1</span>, <span class="k">"fila"</span>: <span class="n">1</span>, <span class="k">"copias"</span>: <span class="n">10</span>, <span class="k">"por_mesa"</span>: <span class="n">2</span>, <span class="k">"ancho_cm"</span>: <span class="n">157.0</span>, <span class="k">"largo_cm"</span>: [<span class="n">312.4</span>] }</pre>
+    <p><b>Qué tiene que hacer su sistema:</b> guardar <code>fila</code>, <code>copias</code> y <code>por_mesa</code> de cada archivo y mandarlo a imprimir <code>copias</code> veces; cada impresión trae <code>por_mesa</code> unidades (unidades = <code>por_mesa × copias</code>).</p>
+    <p><b>Sólo la mesa llena va aparte; lo demás va junto</b>: las filas con la misma pieza (mismo molde y talle) que llenan una mesa salen en mesas que se repiten (JUGADOR 33 + GOLERO 34 → 4+4 ×8); lo que no llena una mesa, de cualquier fila y talle, va junto ×1. Separar talles es <code>mesas.modo = "por_talles"</code>. Esos archivos traen <code>"fila": null</code> y <code>"filas": [{"fila": 1, "por_mesa": 4}, …]</code>. Para cada diseño aparte: <code>mesas.separar_disenos: true</code> (el archivo trae <code>diseno</code>).</p></div>
+
+  <table>
+    <tr><th>Regla</th><th>Qué pasa</th></tr>
+    <tr><td>Cantidad vacía</td><td>Vale <b>1</b>, en los dos usos</td></tr>
+    <tr><td>Cantidad que no es un entero de 1 en adelante</td><td>Se frena: <code>cantidad-invalida</code></td></tr>
+    <tr><td><code>una_por_fila</code> sin columna de cantidad en la planilla</td><td>Se frena: <code>mesas-invalido</code></td></tr>
+    <tr><td><code>una_por_fila</code> y <code>por_talles</code> a la vez</td><td>No se puede: se elige <b>un</b> <code>modo</code></td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════════════════ 2 · TALLES POR MESA ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num">2</div><div><div class="kicker">Cómo se reparten las mesas</div><h2>Talles por mesa</h2></div></div>
+  <div class="simple"><div class="t"><i class="ti ti-user"></i> En simple</div>
+    <p>Para que ciertos talles salgan <b>juntos en una mesa y separados del resto</b>, por ejemplo para cortar o entregar por talle. La cantidad sigue siendo de <b>prendas</b> (como en el uso 1).</p></div>
+  <div class="figura">
+    <div class="dibujo">
+    <svg viewBox="0 0 720 120" width="720" xmlns="http://www.w3.org/2000/svg" font-family="Inter, sans-serif" font-size="11">
+      <g><rect x="10" y="10" width="220" height="100" rx="8" fill="#e0f7fb" stroke="#00b8d4" stroke-width="1.5"/>
+        <text x="20" y="28" font-weight="800" fill="#007a8f">MESA 1 · Talles S · M</text>
+        <rect x="22" y="40" width="40" height="56" rx="7" fill="#00b8d4"/><rect x="70" y="40" width="40" height="56" rx="7" fill="#00b8d4"/><rect x="118" y="40" width="40" height="56" rx="7" fill="#33c6dd"/><rect x="166" y="40" width="40" height="56" rx="7" fill="#33c6dd"/></g>
+      <g><rect x="250" y="10" width="220" height="100" rx="8" fill="#fde6f2" stroke="#d6007e" stroke-width="1.5"/>
+        <text x="260" y="28" font-weight="800" fill="#a3005f">MESA 2 · Talles L · XL</text>
+        <rect x="262" y="40" width="40" height="56" rx="7" fill="#d6007e"/><rect x="310" y="40" width="40" height="56" rx="7" fill="#d6007e"/><rect x="358" y="40" width="40" height="56" rx="7" fill="#e3338f"/></g>
+      <g><rect x="490" y="10" width="220" height="100" rx="8" fill="#eef1f4" stroke="#5b6875" stroke-width="1.5"/>
+        <text x="500" y="28" font-weight="800" fill="#16202a">MESA 3 · el resto (2XL)</text>
+        <rect x="502" y="40" width="40" height="56" rx="7" fill="#52606d"/><rect x="550" y="40" width="40" height="56" rx="7" fill="#52606d"/></g>
+    </svg></div></div>
+  <div class="prog"><div class="t"><i class="ti ti-code"></i> Para el programador</div>
+<pre class="json"><span class="k">"mesas"</span>: { <span class="k">"modo"</span>: <span class="s">"por_talles"</span>, <span class="k">"grupos"</span>: [[<span class="s">"S"</span>, <span class="s">"M"</span>], [<span class="s">"L"</span>, <span class="s">"XL"</span>]] }
+<span class="c">// un talle por mesa: [["S"], ["M"], ["L"]] · los talles que no están en ningún grupo van juntos al final</span>
+<span class="c">// en el resultado: "talles": ["S","M"] y el nombre "OV-123__Mesa 1 - Tela - Talles S-M.pdf"</span>
+<span class="c">// MISMA MESA SIN MEZCLAR: "mesas": { "modo": "talles_separados" } → cada talle aparte, apilados con
+// una línea punteada entre talles; "grupos" opcional (ésos sí van juntos); resultado "separados": true</span>
+<span class="c">// LARGO MÁXIMO DE CADA MESA (botón «Largo»): "mesas": { "modo": "normal", "largo_max_m": 12.5 }
+// sin él rige el del nesting del molde; de 0,10 a 50 m (si no → largo-mesa-invalido)</span>
+<span class="c">// SEPARAR DISEÑOS (botón «Separar»): "mesas": { "separar_disenos": true } → cada diseño en sus mesas
+// (por defecto el MISMO MOLDE se mezcla aunque cambie el diseño); cada archivo trae "diseno"</span></pre>
+    <p>Los talles se escriben como los tiene el molde (<code>GET /variables</code>). Uno que no existe → <code>mesas-invalido</code>.
+    El largo máximo vale con cualquier modo: ninguna mesa lo pasa y lo que no entra sigue en otra.</p></div>
+
+  <!-- 3 · DISEÑOS Y PLANILLA -->
+  <div class="seccion-titulo" style="margin-top:16pt"><div class="num m">3</div><div><div class="kicker">Qué se fabrica</div><h2>Diseños, prendas y planilla</h2></div></div>
+  <div class="simple"><div class="t"><i class="ti ti-user"></i> En simple</div>
+    <p>Un pedido puede tener <b>varios diseños</b> (jugador, golero, visitante…). Cada diseño dice <b>qué prendas</b> lleva y con <b>qué arte</b>. La <b>planilla</b> es la lista de personas: cada fila dice de qué diseño es, el <b>talle</b>, el <b>nombre</b> y el <b>número</b> a estampar y opciones como la <b>manga</b>.</p></div>
+  <table>
+    <tr><th>Dato</th><th>Cómo se manda</th></tr>
+    <tr><td>Los diseños</td><td><code>disenos[].nombre</code>; en cada fila, <code>diseno</code> (con un solo diseño se puede omitir)</td></tr>
+    <tr><td>La prenda</td><td><code>disenos[].moldes[].variable</code>: la clave <code>v_…</code> de <code>GET /variables</code>. Una por prenda en cada diseño</td></tr>
+    <tr><td>El arte</td><td><code>arte</code> (.ai/.pdf) en el molde o una vez en el diseño, hecho sobre la plantilla (<code>POST /plantillas</code>)</td></tr>
+    <tr><td>Talle</td><td>Como lo tiene el molde (<code>M</code>, <code>2XL</code>). Cada molde lee <b>su</b> columna de talle. Planilla sin talles: no va</td></tr>
+    <tr><td>Nombre y número</td><td>Texto; los números con cero adelante entre comillas (<code>"07"</code>). Vacío = sin nombre/número</td></tr>
+    <tr><td>Opciones (manga…)</td><td>Una opción (<code>"Corta"</code>) o varias: <code>"Corta + Larga"</code></td></tr>
+    <tr><td>Otra clave en la fila</td><td>Las claves son las <b>columnas de la planilla del molde</b> (<code>GET /moldes/{codigo}</code>); otra cosa <b>se ignora</b> con el aviso <code>columna-desconocida</code></td></tr>
+    <tr><td>La letra</td><td>Archivo en <code>tipografias</code> sólo si TIZADA no la tiene (<code>GET /tipografias</code>); forzar una: <code>"tipografia_por_campo": {"numero": "Anton Regular"}</code></td></tr>
+    <tr><td>Repo (qué piezas hace la fila)</td><td><code>"piezas": {"v_redondo": ["Cuello"]}</code> en la fila (sin <code>piezas</code>: todas)</td></tr>
+  </table>
+  <h3><i class="ti ti-adjustments"></i> Lo mismo que hace el operario con el arte</h3>
+  <div class="simple"><div class="t"><i class="ti ti-user"></i> En simple</div>
+    <p>Todo lo que el operario puede hacer en el pedido, el otro sistema también lo puede mandar: <b>mover, girar o agrandar</b> un objeto del diseño, <b>cambiarle el color</b>, decir <b>qué parte del arte va en cada pieza</b>, <b>cambiar una tipografía</b> por otra o pedir que un objeto <b>no se imprima</b>.</p></div>
+  <table>
+    <tr><th>En la pantalla</th><th>En el pedido (en el molde)</th></tr>
+    <tr><td>Mover, rotar, escalar o espejar un objeto</td><td><code>"ajustes": {"escudo": {"dx": 0.05, "rot": 15, "scale": 1.2}}</code> (+ <code>talles</code> opcional)</td></tr>
+    <tr><td>Cambiarle el color</td><td><code>"colores": {"escudo": {"fill": [0, 1, 1, 0]}}</code> (CMYK de 0 a 1)</td></tr>
+    <tr><td>Qué mesa del arte va en cada pieza</td><td><code>"mapeo_arte": {"Frente": 1}</code> (número o rótulo de la mesa)</td></tr>
+    <tr><td>Cambiar una tipografía del arte</td><td><code>"reemplazos": {"FuenteDelArte": "Anton Regular"}</code></td></tr>
+    <tr><td>Que un objeto no se imprima (ni la cruz)</td><td><code>"editables": {"sponsor": "no_imprimir"}</code></td></tr>
+    <tr><td>El perfil de color</td><td><code>opciones.perfil_color</code>, uno de <code>GET /perfiles</code></td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════════════════ 4 · TELA, PIEZAS, EDITABLES ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num v">4</div><div><div class="kicker">Con qué y cómo</div><h2>Tela, piezas y lo que no se sublima</h2></div></div>
+
+  <h3><i class="ti ti-shirt"></i> La tela</h3>
+  <div class="simple"><div class="t"><i class="ti ti-user"></i> En simple</div>
+    <p>Cada prenda tiene una <b>tela principal</b>. Si alguna pieza va en otra (por ejemplo el cuello en rib), se dice cuál.</p></div>
+  <div class="prog"><div class="t"><i class="ti ti-code"></i> Para el programador</div>
+<pre class="json"><span class="k">"tela"</span>: <span class="s">"232"</span>,                                  <span class="c">// obligatorio: el id de GET /telas</span>
+<span class="k">"telas_por_pieza"</span>: { <span class="k">"Cuello"</span>: <span class="s">"486"</span> }            <span class="c">// la pieza por su nombre sin número</span></pre></div>
+
+  <h3><i class="ti ti-scissors"></i> Piezas que no se hacen</h3>
+  <div class="simple"><div class="t"><i class="ti ti-user"></i> En simple</div>
+    <p>Para fabricar la prenda <b>sin</b> alguna pieza en todo el pedido (por ejemplo, sin tapa costura).</p></div>
+  <div class="prog"><div class="t"><i class="ti ti-code"></i> Para el programador</div>
+<pre class="json"><span class="k">"piezas_apagadas"</span>: [<span class="s">"Tapa costura"</span>]        <span class="c">// no se pueden apagar todas</span></pre></div>
+
+  <h3><i class="ti ti-shield"></i> Escudo, logo y sponsor: lo que no se sublima</h3>
+  <div class="simple"><div class="t"><i class="ti ti-user"></i> En simple</div>
+    <p>Si el escudo va <b>bordado</b> o el logo en <b>TPU</b> o <b>DTF</b>, no se imprime con el diseño: en su lugar va una <b>cruz</b> que marca dónde aplicarlo, y la ficha técnica dice qué poner y dónde.</p></div>
+  <div class="prog"><div class="t"><i class="ti ti-code"></i> Para el programador</div>
+<pre class="json"><span class="k">"editables"</span>: {
+  <span class="k">"escudo"</span>:  <span class="s">"sublimado"</span>,                       <span class="c">// se imprime (es lo que pasa si no se nombra)</span>
+  <span class="k">"logo"</span>:    <span class="s">"tpu"</span>,                             <span class="c">// "tpu" · "bordado" · "dtf": no se imprime, va la cruz</span>
+  <span class="k">"sponsor"</span>: { <span class="k">"proceso"</span>: <span class="s">"bordado"</span>, <span class="k">"cruz"</span>: <span class="n">false</span> }  <span class="c">// sin la cruz en la tela (sólo en la ficha)</span>
+}</pre>
+    <p>El nombre es el de la capa del arte sin «Editable» (<code>Editable escudo</code> → <code>escudo</code>).</p></div>
+</section>
+
+<!-- ═══════════════════════════ 5 · A MEDIDA Y OPCIONES ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num">5</div><div><div class="kicker">Banderas y por si algo falla</div><h2>Piezas a medida y opciones</h2></div></div>
+
+  <h3><i class="ti ti-flag"></i> Banderas y piezas a medida</h3>
+  <div class="simple"><div class="t"><i class="ti ti-user"></i> En simple</div>
+    <p>Las banderas no tienen talle: se piden con su <b>medida del diseño</b> en metros, su <b>forma</b> (rectángulo, círculo o triángulo), cómo se <b>termina el borde</b> y, si llevan, las <b>tiras</b> para coser. TIZADA le suma el margen y <b>la gira</b> si así entra en la tela.</p></div>
+  <table>
+    <tr><th>Campo</th><th>Qué poner</th></tr>
+    <tr><td><code>medida</code></td><td><code>{"ancho_m": 3, "alto_m": 1.5}</code> — del <b>diseño</b>. Círculo: <code>{"diametro_m": 1.2}</code></td></tr>
+    <tr><td><code>forma</code></td><td><code>rectangulo</code> (si no viene) · <code>circulo</code> · <code>triangulo</code></td></tr>
+    <tr><td><code>orientacion</code></td><td>Sólo triángulo, hacia dónde va la punta: <code>abajo</code> · <code>arriba</code> · <code>izq</code> · <code>der</code></td></tr>
+    <tr><td><code>terminacion</code></td><td><code>dobladillo</code> · <code>overlock</code> · <code>sin</code></td></tr>
+    <tr><td><code>tiras</code></td><td><code>{"lleva": true, "lados": {"arriba": 5, "abajo": 5}}</code> (cada número cuenta las 2 puntas). Triángulo: <code>{"base": 5, "laterales": 4}</code>; círculo: <code>{"alrededor": 12}</code></td></tr>
+  </table>
+  <div class="caja c-bien"><div class="t"><i class="ti ti-check"></i> Antes de confirmar</div>
+    <p><code>POST /a_medida/calcular</code> dice el total, en qué telas entra (girada si hace falta) y cómo salen las tiras. El arte se arma sobre la plantilla de <b>esa medida</b> (<code>POST /plantillas</code>).</p></div>
+
+  <h3><i class="ti ti-adjustments"></i> Qué hacer si algo falla (<code>opciones</code>)</h3>
+  <table>
+    <tr><th>Opción</th><th>Valores</th><th>Por defecto · consejo</th></tr>
+    <tr><td><code>si_falta_tipografia</code></td><td><code>rechazar</code> · <code>predeterminada</code></td><td><code>rechazar</code>: mejor frenar que estampar con otra letra</td></tr>
+    <tr><td><code>si_texto_no_entra</code></td><td><code>achicar</code> · <code>rechazar</code></td><td><code>achicar</code>: avisa y sigue</td></tr>
+    <tr><td><code>si_piezas_en_blanco</code></td><td><code>rechazar</code> · <code>seguir</code></td><td><code>rechazar</code>: suele ser un arte incompleto</td></tr>
+    <tr><td><code>perfil_color</code></td><td>archivo .icc</td><td>el del sistema</td></tr>
+    <tr><td><code>carpeta</code></td><td><code>"2026-10/OV-123"</code></td><td>la referencia: dónde quedan los PDF en Drive</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════════════════ 6 · ANTES DE MANDAR ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num v">✓</div><div><div class="kicker">Lista de control</div><h2>Antes de mandar un pedido</h2></div></div>
+  <div class="pasos">
+    <div class="paso"><div class="b">1</div><div class="x"><b class="tit">Cada fila completa</b>Su <code>diseno</code> (si hay más de uno) y su talle (si la planilla tiene talles).</div></div>
+    <div class="paso"><div class="b a">2</div><div class="x"><b class="tit">La cantidad, bien elegida</b>¿Son prendas (<code>normal</code>) o copias de la mesa (<code>una_por_fila</code>)? Ver la sección 1.</div></div>
+    <div class="paso"><div class="b m">3</div><div class="x"><b class="tit">Tela y medidas</b>Cada prenda con su <code>tela</code>; cada bandera con su <code>medida</code>, y que entre (<code>POST /a_medida/calcular</code>).</div></div>
+    <div class="paso"><div class="b">4</div><div class="x"><b class="tit">El arte correcto</b>Hecho sobre la plantilla de esa prenda (y de esa medida, si es a medida).</div></div>
+    <div class="paso"><div class="b v">5</div><div class="x"><b class="tit">Probar sin mandar</b><code>POST /pedidos/validar</code> dice todas las alarmas sin generar nada.</div></div>
+    <div class="paso"><div class="b a">6</div><div class="x"><b class="tit">Al recibir</b>Guardar <code>fila</code>/<code>copias</code>/<code>por_mesa</code> o <code>talles</code> de cada archivo y bajar los PDF antes de 30 días, comprobando el <code>sha256</code>.</div></div>
+  </div>
+
+  <h3><i class="ti ti-ban"></i> Lo que hoy no se puede por la API</h3>
+  <table>
+    <tr><th>Qué</th><th>Cómo queda</th></tr>
+    <tr><td><b>Reposición por fila</b> («Repo»: que una fila haga sólo algunas piezas)</td><td>Cada fila hace todas las piezas que no estén apagadas</td></tr>
+    <tr><td><b>Mover o agrandar</b> el escudo o el logo en un pedido</td><td>Van donde los puso el diseñador en el arte</td></tr>
+  </table>
+
+  <div class="caja c-info"><div class="t"><i class="ti ti-book"></i> Más detalle</div>
+    <p><b>FORMATO_PEDIDO.md</b>: el pedido campo por campo y todas las alarmas · <b>API.md</b>: todas las rutas · <b>COMO_USAR_CADA_OPCION.md</b>: esta guía en texto · <b>GUIA_PARA_IA.md</b>: para una IA que arme el sistema.</p></div>
+</section>
+</body>
+</html>

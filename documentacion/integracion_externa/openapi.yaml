@@ -240,6 +240,10 @@ paths:
     get:
       summary: Tipografías que TIZADA ya tiene
       responses: { '200': { description: OK } }
+  /perfiles:
+    get:
+      summary: Perfiles de color que tiene el sistema (para `opciones.perfil_color`, MAPA 712)
+      responses: { '200': { description: OK } }
   /a_medida/calcular:
     post:
       summary: 'Molde a medida: total, en qué telas entra (y si no, cuánto se pasa y lo máximo), tiras y filas de la ficha. No guarda nada.'
@@ -260,6 +264,7 @@ paths:
                 terminacion: { type: string, enum: [dobladillo, overlock, sin], description: 'Cómo se termina el borde (sin esto, la del molde)' }
                 tela: { type: string, example: '44' }
                 tiras: { description: 'true · false · {lleva, lados} · los lados sueltos' }
+                largo_max_m: { type: number, description: 'El largo de mesa del pedido (mesas.largo_max_m, MAPA 716): las cuentas con ese largo' }
       responses:
         '200': { description: 'Las cuentas (ver API.md)' }
         '404': { description: Esa variable o molde no existe }

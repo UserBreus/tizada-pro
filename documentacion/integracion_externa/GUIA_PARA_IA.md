@@ -79,7 +79,11 @@
 ### 4.1 Sincronizar el catálogo (al arrancar y cuando cambie `version`)
 1. `GET /variables` → guardar cada variable (y su bloque `a_medida` si lo tiene).
 2. Por cada `molde` distinto: `GET /moldes/{codigo}` → talles, planilla, opciones, telas.
-3. `GET /telas`, `GET /tipografias`, `GET /alarmas` (para mostrar mensajes).
+3. `GET /telas`, `GET /tipografias`, `GET /perfiles`, `GET /alarmas` (para mostrar mensajes).
+   Todo lo que el operario puede hacer en el pedido de TIZADA también va en el JSON (MAPA 712): `moldes[].ajustes`
+   (mover/rotar/escalar/espejar un editable), `moldes[].colores` (CMYK), `moldes[].mapeo_arte` (mesa del arte → pieza),
+   `moldes[].reemplazos` / `moldes[].tipografia_por_campo` (tipografías), `editables: "no_imprimir"` y
+   `planilla[].piezas` (Repo). Ver FORMATO_PEDIDO §3.
 4. Siluetas para la pantalla: `GET /variables/{clave}/foto` (404 con `sin_calcular` → mostrar un ícono).
 
 ### 4.2 Armar un pedido (pantalla del vendedor)
@@ -238,7 +242,9 @@ Límites: 600 MB, 400 archivos. `POST /pedidos` como multipart `paquete` o cuerp
 - `opciones.si_falta_tipografia`: `rechazar` (defecto) | `predeterminada`.
 - `opciones.si_texto_no_entra`: `achicar` (defecto, avisa) | `rechazar`.
 - `opciones.si_piezas_en_blanco`: `rechazar` (defecto) | `seguir`.
-- `mesas.modo`: `normal` | `una_por_fila` | `por_talles` (`grupos`).
+- `mesas.modo`: `normal` | `una_por_fila` | `por_talles` (`grupos`) | `talles_separados` (misma mesa, cada talle aparte con línea punteada; `grupos` opcional). Con `normal` la cantidad son PRENDAS (se repite la fila y se mezcla todo); con `una_por_fila` la fila sale UNA vez en su mesa y la cantidad son COPIAS: las copias se acomodan juntas en una mesa del largo máximo y, si alcanza para llenarla, esa mesa sale UNA vez marcada ×N; todo lo que no llena una mesa (de cualquier fila y talle) va JUNTO como en `normal`, ×1 (19 con lugar para 5 → archivo de 5 ×3 + las 4 que sobran con el resto; MAPA 725); vuelven `fila`, `copias` (veces que se imprime ese archivo) y `por_mesa` (unidades que trae) en cada archivo; unidades = `por_mesa × copias`. Detalle: `COMO_USAR_CADA_OPCION.md` §1.
+- `mesas.separar_disenos` (opcional, booleano): sin él el MISMO MOLDE se mezcla aunque cambie el diseño — también con `una_por_fila`, en mesas mezcladas que se repiten (`fila: null` + `filas: [{fila, por_mesa}]` en el archivo); con `true` cada diseño va en sus propias mesas y el archivo trae `diseno` (MAPA 717).
+- `mesas.largo_max_m` (opcional, metros, 0,10 a 50): el largo máximo de cada mesa del pedido; sin él rige el del nesting del molde. Mal → `largo-mesa-invalido`; un molde a medida más largo que eso → `tela-no-entra` (MAPA 716).
 - `reemplazar: true` para rehacer una referencia ya `listo`.
 - `aviso_url` (mismo sitio que la URL configurada en TIZADA).
 

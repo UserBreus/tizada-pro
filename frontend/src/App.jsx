@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import AyudaGuiada from './tutor';   // motor de tutoriales paso a paso
-import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, sePuedeGrabar,
-         esArrastre } from './localizar';
+import AyudaVideos from './ayudaVideos.jsx';   // la ayuda en video (MAPA 689)
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas, prepararMoldeAMedida, precalentarMoldeAMedida } from './motor/prepararMolde.js';
-import { leerMetros, problemaMedida, metrosTexto, margenPorBorde, margenSobreContorno, RESERVA_DEFECTO_MM, cabeEnTela, talleDeMedida, medidaPieza, segmentosTiras, versionGeo, geoVieja, arteDeOtraMedida,
+import { leerMetros, problemaMedida, metrosTexto, margenPorBorde, margenSobreContorno, RESERVA_DEFECTO_MM, cabeEnTela, amEnTela, rotacionAMedida, talleDeMedida, medidaPieza, segmentosTiras, versionGeo, geoVieja, arteDeOtraMedida,
          TERMINACIONES, NOMBRE_TERMINACION, normTerminacion, margenDeTerminacion, OVERLOCK_DEFECTO_CM } from './motor/molde/aMedida.js';   // MOLDE A MEDIDA (MAPA 623)
 import { FORMAS, NOMBRE_FORMA, normForma, normOrientacion, margenUniforme, guiaForma, contornoForma, pathForma, cajaForma, pathCostura, trianguloCorrido } from './motor/molde/formas.js';   // círculo y triángulo (MAPA 645)
 import { guardarCache, leerCache, claveDe, soltarMoldesEnPc, soltarPaginasEnPc } from './motor/cache.js';   // el molde con diseño en la PC (MAPA 585)
-import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, calidadFoto } from './motor/vista/vista.js';
+import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, calidadFoto, anchoMesaCm } from './motor/vista/vista.js';
 import { previasCaminoB, previasCaminoA, cerrarMotores, validarMapeoEnNavegador, editablesEnNavegador } from './motor/arte/previa.js';
 import { fuentesEstadoLocal, fuenteCharsLocal } from './motor/arte/fuentesEstado.js';
 import { TIRA_CONTORNO_MM } from './motor/pieza/base.js';   // el contorno blanco de la marca de tira (MAPA 682)
@@ -386,6 +384,23 @@ function Icon({ name, className = "", style }) {
         <rect x="13" y="5" width="8.5" height="14" rx="1.6" />
         <path d="M5 9.5h3.5M15.5 9.5h3.5" />
         <path d="M5 13h2M15.5 13h2M15.5 16h2.5" />
+      </svg>
+    ),
+    // SEPARAR DISEÑOS (MAPA 717): dos mesas, cada una con su diseño (un círculo y un triángulo).
+    separarDisenos: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2.5" y="4" width="8.5" height="16" rx="1.6" />
+        <rect x="13" y="4" width="8.5" height="16" rx="1.6" />
+        <circle cx="6.75" cy="12" r="2.2" />
+        <path d="m17.25 9.6 2.3 4.4h-4.6z" />
+      </svg>
+    ),
+    // LARGO DE MESA (MAPA 716): la mesa con la flecha de su largo.
+    largoMesa: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="10" height="18" rx="1.6" />
+        <path d="M18.5 3.5v17" />
+        <path d="m16.3 5.8 2.2-2.3 2.2 2.3M16.3 18.2l2.2 2.3 2.2-2.3" />
       </svg>
     ),
     // COLUMNA CANTIDAD: la prenda repetida (copias apiladas con el «×»).
@@ -887,8 +902,8 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
       <span onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); open ? setOpen(false) : abrir(true); }}
         style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--cmyk-cyan)', fontSize: 10, cursor: 'pointer' }}>▾</span>
       {open && pos && filtradas.length > 0 && createPortal(
-        // `data-col-lista`: la lista vive en el body (portal), no en la tabla. Sin esta marca, el
-        // tutorial iluminaba la columna y dejaba la lista bajo el velo (ver `rectDeColumna`).
+        // `data-col-lista`: la lista vive en el body (portal), no en la tabla; la marca dice de qué
+        // columna es (la usaba la ayuda paso a paso, quitada en MAPA 689).
         <div data-col-lista={colId || undefined}
           style={{ position: 'fixed', left: pos.left, top: pos.top, width: pos.width, zIndex: 3000, background: '#15151a', border: '1px solid var(--border-light)', borderRadius: 6, maxHeight: 130, overflowY: 'auto', boxShadow: '0 10px 24px rgba(0,0,0,0.55)' }}>
           {filtradas.map((o, idx) => {
@@ -3239,7 +3254,7 @@ function InterruptorIcono({ on, onToggle, icono, nombre, rgb = '0,216,245', titl
 function Switch({ on, onChange, disabled, title }) {
   return (
     // `title` NO es decorativo: es el NOMBRE del control. Sin él, un interruptor es un botón mudo
-    // que el tutorial no puede grabar ni volver a encontrar (auditoría 2026-08-31).
+    // (sin nombre para el lector de pantalla ni para el «?» de ayuda).
     <button type="button" disabled={disabled} onClick={() => onChange(!on)}
       title={title || (on ? 'Apagar' : 'Encender')}
       style={{ width: 40, height: 22, borderRadius: 999, flexShrink: 0, position: 'relative',
@@ -4013,17 +4028,27 @@ function useVistaLocal(idTrabajo, pxcm = null) {
     return () => { cerrarVistas(); };
   }, [idTrabajo]);
 
+  // 🔴 SE REINTENTA ACÁ, NUNCA SE CAE AL SERVIDOR (MAPA 733). Con «el servidor no calcula» el servidor contesta
+  // 409 («las mesas las dibuja tu computadora») y, si abrir la hoja fallaba UNA vez (el archivo todavía bajando,
+  // la PC ocupada con otra cosa), la mesa quedaba para siempre en «No se pudo traer la vista previa».
+  const espera = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const abrir = async (archivo) => {
     if (!idTrabajo || abriendo.current.has(archivo)) return;
     abriendo.current.add(archivo);
     try {
       localOn.current = await navegadorDibujaVista(rutaApi);
       if (!localOn.current) return;
-      const v = await abrirVista(`${idTrabajo}|${archivo}`, async () => {
-        const r = await fetch(rutaApi(`/trabajos/${idTrabajo}/${encodeURIComponent(archivo)}`));
-        if (!r.ok) return null;
-        return await r.arrayBuffer();
-      });
+      let v = null;
+      for (let k = 0; k < 4 && !v; k++) {
+        if (k) await espera(1500 * k);
+        try {
+          v = await abrirVista(`${idTrabajo}|${archivo}`, async () => {
+            const r = await fetch(rutaApi(`/trabajos/${idTrabajo}/${encodeURIComponent(archivo)}`));
+            if (!r.ok) return null;
+            return await r.arrayBuffer();
+          });
+        } catch { v = null; }
+      }
       if (!v) setFallidas(x => ({ ...x, [archivo]: true }));
       if (v) {
         setVistas(x => ({ ...x, [archivo]: v }));
@@ -4031,20 +4056,23 @@ function useVistaLocal(idTrabajo, pxcm = null) {
         // apenas se abre; lo que la pantalla pide se adelanta (lo más nuevo primero)
         precalentarTodo(v, /FICHA_TECNICA/i.test(archivo) ? { anchos: [Math.round(595.276 * 2)] } : { pxcm });
       }
-    } catch { setFallidas(x => ({ ...x, [archivo]: true })); /* lo dibuja el servidor */ }
+    } catch { setFallidas(x => ({ ...x, [archivo]: true })); } finally { abriendo.current.delete(archivo); }
   };
 
-  const pedir = (v, clave, pagina, ancho, recorte) => {
+  // el dibujo también se reintenta; si no sale, queda marcado y la pantalla ofrece «Reintentar»
+  const pedir = async (v, clave, pagina, ancho, recorte) => {
     if (pidiendo.current.has(clave)) return;
     pidiendo.current.add(clave);
-    v.dibujo(pagina, ancho, recorte)
-      .then(u => setUrls(x => ({ ...x, [clave]: u })))
-      .catch(() => { /* lo dibuja el servidor */ });
+    for (let k = 0; k < 3; k++) {
+      if (k) await espera(1500 * k);
+      try { const u = await v.dibujo(pagina, ancho, recorte); setUrls(x => ({ ...x, [clave]: u })); return; } catch { /* otra vez */ }
+    }
+    setUrls(x => ({ ...x, [clave]: VISTA_FALLO }));
   };
   // `ancho`: un número de píxeles, o 'foto' = LA FOTO de esa mesa a la calidad del pedido (`pxcm`).
   // UNA SOLA CALIDAD (decisión del usuario 2026-09-18): no hay versión chica de espera ni pedazos
   // en alta; mientras la foto se dibuja se muestra el aviso, y cuando llega es la definitiva.
-  return (archivo, pagina, ancho, recorte, urlServidor) => {
+  const urlDe = (archivo, pagina, ancho, recorte, urlServidor) => {
     const v = vistas[archivo];
     // 🔴 CON LA VISTA EN ESTA COMPUTADORA, AL SERVIDOR NO SE LE PIDE NINGÚN DIBUJO (ni mientras se
     // baja el archivo): con 100 personas mirando, el servidor no dibuja. Se muestra el aviso.
@@ -4053,14 +4081,25 @@ function useVistaLocal(idTrabajo, pxcm = null) {
     // pedía la mesa a 1200 px: el servidor dibujaba imágenes de metros compitiendo con esta PC
     // (visto 2026-09-22: `mesa_img?w=1200` de las 4 mesas, la última a los 80 s). Al servidor sólo si
     // dijo que NO dibuja esta computadora.
-    if (!v) { abrir(archivo); return (localOn.current === false || fallidas[archivo]) ? urlServidor : null; }
+    // al servidor SÓLO si dijo que esta computadora no dibuja (con «no calcula» prendido no dibuja él)
+    if (localOn.current === false) return urlServidor;
+    if (!v) { if (fallidas[archivo]) return VISTA_FALLO; abrir(archivo); return null; }
     const px = ancho === 'foto' ? v.anchoFoto(pagina, pxcm || 16) : ancho;
     const clave = `${archivo}|${pagina}|${px}|${recorte ? recorte.map(x => x.toFixed(4)).join(',') : 'todo'}`;
     if (urls[clave]) return urls[clave];
     pedir(v, clave, pagina, px, recorte);
     return null;
   };
+  // «Reintentar»: se olvida lo que falló de ese archivo y se vuelve a abrir/dibujar
+  urlDe.reintentar = (archivo) => {
+    setFallidas(x => { const n = { ...x }; delete n[archivo]; return n; });
+    setUrls(x => { const n = {}; for (const [k, u] of Object.entries(x)) if (!(k.startsWith(archivo + '|') && u === VISTA_FALLO)) n[k] = u; return n; });
+    for (const k of [...pidiendo.current]) if (k.startsWith(archivo + '|')) pidiendo.current.delete(k);
+  };
+  return urlDe;
 }
+// la «dirección» de una vista que no se pudo dibujar: el <img> da error y la pantalla ofrece reintentar
+const VISTA_FALLO = 'data:,';
 
 /** VISOR de la FICHA TÉCNICA, integrado al diseño del sistema: las páginas se muestran como
  *  imágenes en un contenedor con el SCROLL del sistema (no el del visor de PDF del navegador), y
@@ -4281,7 +4320,7 @@ function MesasInfinito({ mesas, job, avisar }) {
             return pvs.map((_pv, pi) => {
               const gidx = gi++;                        // índice global en orden de aparición
               const altoCm = (hoja.alturas_cm && hoja.alturas_cm[pi] != null) ? hoja.alturas_cm[pi] : hoja.consumo_cm;
-              const anchoCm = hoja.ancho_cm || 180;
+              const anchoCm = anchoMesaCm(hoja, pi);     // el de la tela (o el del PDF de un pedido viejo, MAPA 704)
               const PXM = 240;   // px por metro: ESCALA REAL común a todas las mesas
               const w = (anchoCm / 100) * PXM, h = (altoCm / 100) * PXM;
               const key = hoja.archivo + '::' + pi;     // ESTABLE por trabajo → el nombre persiste a esta mesa
@@ -4333,8 +4372,11 @@ function MesasInfinito({ mesas, job, avisar }) {
                           </div>
                         )}
                         {cargadas[key] === 'error' && (
-                          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#b00', fontSize: 12, fontWeight: 700, background: 'rgba(255,255,255,0.9)' }}>
-                            No se pudo traer la vista previa (la mesa está bien: descargala)
+                          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center', justifyContent: 'center', color: '#b00', fontSize: 12, fontWeight: 700, background: 'rgba(255,255,255,0.9)' }}>
+                            No se pudo dibujar la vista
+                            <button type="button" onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => { e.stopPropagation(); urlVista.reintentar(hoja.archivo); setCargadas(c => { const n = { ...c }; delete n[key]; return n; }); }}
+                              style={{ background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 7, padding: '5px 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Reintentar</button>
                           </div>
                         )}
                       </div>
@@ -4342,19 +4384,29 @@ function MesasInfinito({ mesas, job, avisar }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
                     {(anchoCm / 100).toFixed(2)} × {(altoCm / 100).toFixed(2)} m
                     {_mf && Array.isArray(_mf.talles) && _mf.copias == null && (
-                      <span title={_mf.grupo ? 'Talles por mesa: esta mesa lleva sólo estos talles' : 'Talles por mesa: los talles que no pusiste en ningún grupo, juntos'}
+                      <span title={_mf.separados ? 'Talles separados en la misma mesa, con una línea punteada entre talles' : _mf.grupo ? 'Talles por mesa: esta mesa lleva sólo estos talles' : 'Talles por mesa: los talles que no pusiste en ningún grupo, juntos'}
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 999,
                           background: 'rgba(167,139,250,0.14)', border: '1px solid rgba(167,139,250,0.55)', color: '#ddd6fe' }}>
                         <Icon name="tallesMesa" style={{ width: 12, height: 12 }} />
-                        {_mf.talles.length === 1 ? 'Talle ' : 'Talles '}{_mf.talles.join(' · ')}
+                        {_mf.talles.length === 1 ? 'Talle ' : 'Talles '}{_mf.talles.join(_mf.separados ? ' ┊ ' : ' · ')}
+                      </span>
+                    )}
+                    {_mf && _mf.diseno && (
+                      <span title="Separar diseños: esta mesa es sólo de este diseño"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 999,
+                          background: 'rgba(251,146,60,0.14)', border: '1px solid rgba(251,146,60,0.55)', color: '#fed7aa' }}>
+                        <Icon name="separarDisenos" style={{ width: 12, height: 12 }} />
+                        {_mf.diseno}
                       </span>
                     )}
                     {_mf && _mf.copias != null && (
-                      <span title="Copia: esta mesa es de una sola fila; se imprime esta cantidad de veces"
+                      <span title={Array.isArray(_mf.filas) && _mf.filas.length
+                          ? `Copia mezclada: ${_mf.filas.map(f => `${f.por_mesa} de la fila ${f.fila}`).join(' + ')}; se imprime ×${_mf.copias}`
+                          : _mf.por_mesa > 1 ? `Copia: esta mesa trae ${_mf.por_mesa} copias de la fila a lo ancho; se imprime ×${_mf.copias}` : 'Copia: esta mesa es de una sola fila; se imprime esta cantidad de veces'}
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 999,
                           background: 'rgba(250,204,21,0.14)', border: '1px solid rgba(250,204,21,0.55)', color: '#fde68a' }}>
                         <Icon name="copiaMesa" style={{ width: 12, height: 12 }} />
-                        {_mf.fila ? `Fila ${_mf.fila} · ` : ''}×{_mf.copias} {_mf.copias === 1 ? 'copia' : 'copias'}
+                        {_mf.fila ? `Fila ${_mf.fila} · ` : (Array.isArray(_mf.filas) && _mf.filas.length ? `Filas ${_mf.filas.map(f => `${f.fila} (${f.por_mesa})`).join(' + ')} · ` : '')}{_mf.por_mesa > 1 ? `${_mf.por_mesa} por mesa · ` : ''}×{_mf.copias} {_mf.copias === 1 ? 'copia' : 'copias'}
                       </span>
                     )}
                   </div>
@@ -4908,7 +4960,10 @@ function MapeadorArteVisual({ margenAMedida = null, telaAMedida = null, tirasAMe
                         const anchor = pAlign === 'izquierda' ? 'start' : pAlign === 'derecha' ? 'end' : 'middle';
                         // TEXT-ON-PATH: si la etiqueta tiene posición COLOCADA (`t`), el texto SIGUE la curva
                         // del borde igual que la tizada (con cache para no re-medir); si no, recto centrado.
-                        const ccx = ox + p.pw / 2, ccy = oy + p.ph / 2, _offIn = 0.18 * pxmm;
+                        // 🔴 nunca encima del borde (MAPA 702): con el borde por dentro o centrado, la baseline
+                        // va del lado de adentro del trazo + el despeje de los descendentes (igual que el motor)
+                        const _bcIn = bordeConfig?.activo ? (bordeConfig.alineacion === 'dentro' ? 1 : bordeConfig.alineacion === 'centro' ? 0.5 : 0) * (Number(bordeConfig.ancho_mm) || 2) : 0;
+                        const ccx = ox + p.pw / 2, ccy = oy + p.ph / 2, _offIn = 0.18 * pxmm + (_bcIn > 0 ? _bcIn * pxmm + 0.25 * fs : 0);
                         let seg = null;
                         if (pos.t != null) {
                           const _k = `${p.path_svg}|${pos.t}|${pos.rx}|${pos.ry}|${_offIn}|${ccx}|${ccy}`;
@@ -5099,7 +5154,8 @@ function Modal({ open, onClose, titulo, subtitulo, children, maxWidth = 640, cen
   return createPortal(
     <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
       style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.62)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: centrado ? 'center' : 'flex-start', justifyContent: 'center', padding: centrado ? '24px 20px' : '6vh 20px 24px', overflowY: 'auto' }}>
-      {/* data-modal: el tutorial lo usa para FRENAR y explicar el modal (todos pasan por acá) */}
+      {/* data-modal: marca TODOS los modales (lo usaba la ayuda paso a paso, quitada en MAPA 689; sirve para
+          encontrarlos desde la consola) */}
       <div className="modal-pop" data-modal={titulo || 'aviso'} onMouseDown={(e) => e.stopPropagation()}
         style={{ width: '100%', maxWidth, background: '#141417', border: '1px solid var(--border-light)', borderRadius: 16, boxShadow: '0 24px 70px rgba(0,0,0,0.6)', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '88vh' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, padding: '16px 20px', borderBottom: '1px solid var(--border-light)' }}>
@@ -5296,13 +5352,17 @@ async function esperarMoldeLeido(resp, onProgreso) {
     await new Promise(r => setTimeout(r, espera));
     espera = Math.min(1200, Math.round(espera * 1.6));
     let d;
+    let r;
     try {
-      const r = await fetch(rutaApi(`/api/trabajo/${resp.job}`));
+      r = await fetch(rutaApi(`/api/trabajo/${resp.job}`));
       d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'el trabajo ya no está');
     } catch (e) {
-      throw new Error(`Se perdió el hilo mientras se leía el molde: ${e.message}`, { cause: e });
+      throw new Error(`Se perdió la conexión con el servidor mientras se guardaba el molde: ${e.message}`, { cause: e });
     }
+    // 404 = el trabajo ya no existe: vive en la memoria del servidor y se pierde si el servidor se reinicia
+    // (una publicación, un reinicio): decirlo así y qué hacer, no «404» (visto 2026-10-13)
+    if (r.status === 404) throw new Error('El servidor se reinició mientras se guardaba el molde. Volvé a intentarlo.');
+    if (!r.ok) throw new Error(d.error || 'No se pudo seguir el guardado del molde.');
     if (onProgreso && d.progreso) onProgreso(d.progreso);
     if (d.estado === 'listo') return d.resultado || {};
     if (d.estado === 'error') throw new Error(d.error || 'No se pudo procesar el molde');
@@ -5534,7 +5594,7 @@ function VisorMedida({ anchoM, altoM, margen, tela, r, gira, margenNestingMm = 0
 /** El estado de la medida que se está escribiendo (MAPA 634): lo usan el panel (`TarjetaMedida`) y el
  *  visor del paso Arte, así los dos dicen lo mismo. `am` = lo que publica el servidor del molde a medida;
  *  `telas` = las del molde; `telaId` = la tela elegida; `esCopia` = el molde del pedido ya armado. */
-function estadoMedida({ am, anchoTxt, altoTxt, telas, telaId, esCopia, forma = 'rectangulo', orientacion = 'abajo', terminacion }) {
+function estadoMedida({ am, anchoTxt, altoTxt, telas, telaId, esCopia, forma = 'rectangulo', orientacion = 'abajo', terminacion, largoPedidoCm = null }) {
   // LA TERMINACIÓN de este pedido (MAPA 652) y el margen que rige con ella
   const te = normTerminacion(terminacion ?? (am && am.terminacion));
   const mg = margenDeTerminacion(am, te);
@@ -5543,9 +5603,10 @@ function estadoMedida({ am, anchoTxt, altoTxt, telas, telaId, esCopia, forma = '
   const a = leerMetros(anchoTxt), h = f === 'circulo' ? a : leerMetros(altoTxt);
   const prob = problemaMedida(a, h);
   const n = (am && am.nesting) || {};
-  const gira = n.rotacion === '90' || n.rotacion === 'libre';
+  const _rot = rotacionAMedida(n.rotacion);                 // un molde a medida SIEMPRE puede girar (MAPA 696)
+  const gira = _rot === '90' || _rot === 'libre';
   const cabe = (t) => cabeEnTela({ anchoM: a, altoM: h, margen: mg, bordeMm: am.borde_mm, anchoCm: t.ancho_cm,
-    largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion, resolucionMm: n.resolucion_mm, forma: f, orientacion: o, terminacion: te });
+    largoMaxCm: largoPedidoCm || n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: _rot, resolucionMm: n.resolucion_mm, forma: f, orientacion: o, terminacion: te });
   const conTela = (telas || []).map(t => ({ t, r: prob ? null : cabe(t) }));
   const tela = (telas || []).find(t => String(t.id) === String(telaId)) || null;
   // la medida ya armada (copia del pedido): «Aplicar» sólo si cambió
@@ -7992,6 +8053,17 @@ export default function App() {
   const [tmDraft, setTmDraft] = useState({});
   const [tmSel, setTmSel] = useState([]);          // talles tocados en la ventana (se mueven juntos)
   const [tmSobre, setTmSobre] = useState(null);    // dónde se está por soltar lo arrastrado
+  // MAPA 710: «mesas» = cada grupo en su(s) mesa(s), los sin grupo juntos (lo de antes) · «separados» =
+  // todos en la MISMA mesa, cada talle (o grupo) acomodado solo y apilado con una línea punteada
+  const [tallesMesaModo, setTallesMesaModo] = useState(() => (_wiz.tallesMesaModo === 'separados' ? 'separados' : 'mesas'));
+  const [tmModoDraft, setTmModoDraft] = useState('mesas');
+  const [tmUmbral, setTmUmbral] = useState(3);     // «Sugerir»: los talles con hasta tantas prendas van juntos
+  // LARGO DE MESA DEL PEDIDO (MAPA 716): el largo máximo de cada mesa, en cm. null = el del nesting del molde
+  const [largoMesaCm, setLargoMesaCm] = useState(() => (Number(_wiz.largoMesaCm) > 0 ? Number(_wiz.largoMesaCm) : null));
+  const [lmOpen, setLmOpen] = useState(false);
+  // SEPARAR DISEÑOS (MAPA 717): apagado (por defecto) el mismo molde se mezcla aunque cambie el diseño
+  const [separarDisenos, setSepararDisenos] = useState(() => !!_wiz.separarDisenos);
+  const [lmTxt, setLmTxt] = useState('');
   const [repoPick, setRepoPick] = useState(null);      // índice de la fila abierta en «Piezas»
   const [repoDet, setRepoDet] = useState({});          // `${pid}|${talle}|${variable}` → detección
   const [repoHover, setRepoHover] = useState(null);
@@ -8338,8 +8410,7 @@ export default function App() {
   const [tabAjustesMolde, setTabAjustesMolde] = useState('menu');
   const [margenVivo, setMargenVivo] = useState(null); // margen en vivo mientras se edita en la pestaña Margen
   const [tirasVivo, setTirasVivo] = useState(null);   // marcas de tiras en vivo mientras se editan (MAPA 639)
-  // ── AYUDA GUIADA ── El tutorial pide «llevame a tal pantalla» y esto lo resuelve; así el guion
-  // no sabe nada de los estados internos y se escribe en criollo (ver diccionario.js).
+  // ── AYUDA EN VIDEO (MAPA 689) ── abre la ventana de tutoriales (`ayudaVideos.jsx`).
   const [ayudaAbierta, setAyudaAbierta] = useState(false);
   // molderiaAbierta: id de la moldería en la que entramos a configurar (null = grilla)
   const [molderiaAbierta, setMolderiaAbierta] = useState(null);
@@ -8353,18 +8424,6 @@ export default function App() {
   const [desdePedidoB, setDesdePedidoB] = useState(null);          // pid del molde abierto desde el pedido
   const [pendienteNombrarB, setPendienteNombrarB] = useState(null); // pid: activar «nombrar» cuando Moldería esté lista
 
-  const irPantallaAyuda = React.useCallback((d) => {
-    if (!d) return;
-    if (d.tab) setActivoTab(d.tab);
-    if (d.sub) setAdminSubView(d.sub);
-    if (d.paso) setPedidoPaso(d.paso);
-    if (d.ajuste) setTabAjustesMolde(d.ajuste);
-    // 🔴 SALIR de una moldería sí se puede hacer solo (entrar NO: hay que elegir cuál, y eso lo
-    // decide la persona). Sin esto, quien quedaba adentro de una moldería no tenía forma de que el
-    // tutorial lo llevara a la grilla: el paso pedía una tarjeta que no estaba en pantalla y se
-    // moría en «No encuentro ese lugar» (auditoría de Configuración, 2026-09-01).
-    if (d.molde === 'grilla') { setMolderiaAbierta(null); setTabAjustesMolde('menu'); }
-  }, []);
   // Pestaña de la grilla del paso "Diseños": el catálogo compartido o lo que subió el usuario.
   const [pedidoTabMoldes, setPedidoTabMoldes] = useState('catalogo'); // 'catalogo' | 'mios'
   const [buscarVariable, setBuscarVariable] = useState('');   // buscador del paso Moldes del pedido (variables, o el molde → todas sus variables)
@@ -8430,7 +8489,7 @@ export default function App() {
   const [nuevoGrupoPzNombre, setNuevoGrupoPzNombre] = useState(''); // nombre para crear un grupo nuevo
   const [nuevaVarNombre, setNuevaVarNombre] = useState('');  // nombre para crear una variable A MANO dentro del grupo
   const [asignandoTipo, setAsignandoTipo] = useState(null); // clave del tipo al que se están asignando piezas desde el visor (null = ninguno)
-  const [vinculandoJuntas, setVinculandoJuntas] = useState(null); // clave de la variable en la que se está armando un vínculo "van juntas" (null = ninguno)
+  const [vinculandoJuntas, setVinculandoJuntas] = useState(null); // clave de la VARIABLE en la que se está armando un vínculo "van juntas" (null = ninguno, MAPA 722)
   const [juntasSel, setJuntasSel] = useState(new Set());   // idxs elegidos para el vínculo en curso
   const [juntasNombre, setJuntasNombre] = useState('');    // nombre elegido para el vínculo (el de una de las piezas)
   const [asignandoConjunto, setAsignandoConjunto] = useState(null); // id del conjunto "van juntas" al que se le eligen piezas en el visor
@@ -8863,7 +8922,7 @@ export default function App() {
     // los talles esos índices caen en el bloque del PRIMER talle (el «0»): el usuario elegía
     // creyendo ver la guía y estaba tocando otro talle. Con `asignandoTipo` se vuelve a `etqData`
     // (el talle guía o el que eligió con los chips), que es de donde salen esos índices.
-    const _varAbierta = tabAjustesMolde === 'variables' && varStep === 'grupos' && !!grupoAislado && !asignandoTipo;
+    const _varAbierta = tabAjustesMolde === 'variables' && varStep === 'grupos' && !!grupoAislado && !asignandoTipo && !vinculandoJuntas;
     // CAMINO B en el pedido, mientras se NOMBRA: el lienzo de TODOS los talles (una fila por
     // talle), el mismo gesto que Moldería. Para la etiqueta (`etqPickB`) se vuelve al talle guía.
     const _todasB_on = activoTab === 'pedidos' && pedidoPaso === 'arte' && !etqPickB
@@ -8956,7 +9015,7 @@ export default function App() {
     const dibujo = layout.slice().sort((a, b) => _z(b) - _z(a));
 
     return { layout, dibujo, zTalle, width: W, height: H, vb, vbW, vbH, cmPerUnit, sep, clusters };
-  }, [etqData, empModo, empTodas, empTodasData, tabAjustesMolde, etqPiezaSel, varStep, grupoAislado, asignandoTipo,
+  }, [etqData, empModo, empTodas, empTodasData, tabAjustesMolde, etqPiezaSel, varStep, grupoAislado, asignandoTipo, vinculandoJuntas,
       activoTab, pedidoPaso, etqPickB, todasB, etqPid]);
 
   // Las variantes del MOLDE. `etqData.talles` es de la DETECCIÓN que se está mostrando: en la
@@ -11502,23 +11561,25 @@ export default function App() {
   // Cada valor de un tipo ES una pieza real: {id:'v_<idx>', label:<nombre>, pieza_idx:<idx>}.
   // Una pieza pertenece a un solo tipo → togglear la saca de cualquier otro (reasignar).
   const _nombreDeIdx = (idx) => (etqNombres[idx] || '').trim() || (etqData?.piezas?.[idx]?.nombre || '').trim() || `Pieza ${idx + 1}`;
-  // Crea el valor de una pieza; si está en un vínculo "van juntas" toma el nombre del vínculo.
+  // Crea el valor de una pieza, con SU nombre (MAPA 723: antes tomaba el del vínculo «van juntas», pero el
+  // visor de la variable muestra las piezas POR NOMBRE —se escondían las vinculadas y aparecía otra que se
+  // llamaba como el vínculo— y el servidor igual lo pisa con el nombre real al guardar).
   // ⚠️ `talle_origen` ES OBLIGATORIO. El `pieza_idx` es el índice de la pieza DENTRO del talle que
   // se está mirando, y cambia de talle en talle. Antes se guardaba pelado y el servidor lo
   // traducía **contra el talle GUÍA**: si elegiste las piezas mirando otro talle, se guardaban
   // OTRAS piezas — y quedaba persistido, así que al recargar aparecían piezas que nunca elegiste.
   const _valorDeIdx = (idx, juntas) => {
-    const b = _juntaDeIdx(juntas, idx);
-    return { id: 'v_' + idx, label: (b ? (b.nombre || '').trim() : '') || _nombreDeIdx(idx),
-             pieza_idx: idx, talle_origen: (etqData?.talle_ref) || null };
+    return { id: 'v_' + idx, label: _nombreDeIdx(idx), pieza_idx: idx, talle_origen: (etqData?.talle_ref) || null };
   };
-  // ══════ «VAN JUNTAS» — VIVE EN EL GRUPO, NO EN LA VARIABLE (2026-08-21) ══════════════════
+  // ══════ «VAN JUNTAS» — POR VARIABLE (MAPA 722; del 2026-08-21 al 2026-10-15 vivió en el grupo) ══════
   // Regla del usuario: en una variable NO pueden entrar dos piezas que se llamen igual, SALVO que
-  // estén declaradas como «van juntas» (ej. manga + su vivo). Y eso se declara ANTES, al configurar
-  // el GRUPO: así, al armar una variable, elegir una de las dos trae la otra sola.
-  // 🔴 Compat: los vínculos VIEJOS quedaron guardados dentro de la variante (`v.juntas`). No se
-  // migran a la fuerza — se leen los dos lados y mandan los del grupo. Borrar uno lo saca de donde
-  // esté. Así un molde ya configurado sigue andando sin tocar nada.
+  // estén declaradas como «van juntas» (ej. manga + su vivo); elegir una trae la otra sola.
+  // 🔴 CADA VARIABLE TIENE LOS SUYOS (`v.juntas`): «si creo 2 variantes que tienen piezas llamadas igual
+  // pero en realidad son diferentes me debe dejar asociar sin desasociarla con la otra». En el grupo una
+  // pieza sólo podía estar en UN vínculo: vincularla para una variable la desvinculaba de la otra.
+  // Compat: los vínculos que quedaron en el GRUPO (`g.juntas`) se siguen leyendo para todas sus
+  // variables (mismo resultado que antes) hasta que se toca un vínculo de una de ellas: ahí se copian a
+  // cada variable del grupo y el grupo queda sin vínculos (`_materializarJuntasGrupo`).
   const juntasDelGrupo = (gid) => (((gruposPz || []).find(g => g.id === gid) || {}).juntas) || [];
   const juntasDeVariable = (v) => {
     if (!v) return [];
@@ -11603,35 +11664,56 @@ export default function App() {
       return { ...t, valores: dedupePorPieza([...(t.valores || []), ...nuevos]) };
     }));
   };
-  // ── Vínculos "van juntas" — SE DEFINEN EN EL GRUPO ──
-  // El vínculo es del GRUPO (se declara antes de armar las variables) y de ahí lo toman todas sus
-  // variables: elegir una de las piezas trae la otra sola.
-  const crearVinculoJuntas = (gid, idxs, nombre) => {
+  // ── Vínculos "van juntas" — DE CADA VARIABLE (MAPA 722) ──
+  // Los que todavía están en el GRUPO se COPIAN a cada variable del grupo la primera vez que se toca un
+  // vínculo de una de ellas (así ninguna cambia) y el grupo queda sin vínculos: de ahí en más cada
+  // variable edita los suyos sin tocar a las otras.
+  const _materializarJuntasGrupo = (vars, gid) => {
+    const gj = juntasDelGrupo(gid);
+    if (!gid || !gj.length) return { vars, migro: false };
+    return {
+      migro: true,
+      vars: vars.map(t => {
+        if (t.grupoId !== gid) return t;
+        const propias = t.juntas || [];
+        const suma = gj.filter(b => !propias.some(x => x.id === b.id)).map(b => ({ ...b, piezas: [...(b.piezas || [])] }));
+        return suma.length ? { ...t, juntas: [...propias, ...suma] } : t;
+      }),
+    };
+  };
+  const _sinJuntasEnGrupo = (gid) => aplicarGruposPz(arr => arr.map(g => g.id === gid ? { ...g, juntas: [] } : g));
+  const crearVinculoJuntas = (clave, idxs, nombre) => {
     const piezas = Array.from(new Set(idxs)).sort((a, b) => a - b);
     if (piezas.length < 2) { showError('Elegí al menos 2 piezas para vincularlas'); return; }
+    const t0 = (variantesEdit || []).find(t => t.clave === clave);
+    if (!t0) return;
     const nom = (nombre || '').trim() || _nombreDeIdx(piezas[0]);
     const setP = new Set(piezas);
-    const nuevoB = { id: 'j_' + uidVar(), nombre: nom, piezas };
-    aplicarGruposPz(arr => arr.map(g => {
-      if (g.id !== gid) return g;
-      // una pieza pertenece a UN vínculo: se la saca de los anteriores
-      const prev = (g.juntas || []).map(b => ({ ...b, piezas: (b.piezas || []).filter(i => !setP.has(i)) })).filter(b => (b.piezas || []).length >= 2);
-      return { ...g, juntas: [...prev, nuevoB] };
-    }));
-    // Las variables que YA tienen esas piezas pasan a mostrarlas con el nombre del vínculo (van y
-    // se nombran juntas). No se agregan piezas acá: eso lo decide el usuario al armar la variable.
-    const nueva = (variantesEdit || []).map(t => t.grupoId === gid
-      ? { ...t, valores: (t.valores || []).map(v => setP.has(v.pieza_idx) ? { ...v, label: nom } : v) } : t);
+    const { vars, migro } = _materializarJuntasGrupo(variantesEdit || [], t0.grupoId);
+    const nueva = vars.map(t => {
+      if (t.clave !== clave) return t;
+      // una pieza está en UN vínculo DE ESTA VARIABLE: se la saca de los anteriores de esta variable
+      // (los de las otras variables no se tocan aunque la pieza se llame igual)
+      const previos = (t.juntas || []).map(b => ({ ...b, piezas: (b.piezas || []).filter(i => !setP.has(i)) })).filter(b => (b.piezas || []).length >= 2);
+      const juntas = [...previos, { id: 'j_' + uidVar(), nombre: nom, piezas }];
+      // las vinculadas ENTRAN a la variable (juntas); la que ocupaba su nombre sin vínculo sale (un nombre = un lugar)
+      const fuera = _desplazadasPorNombre(t, piezas, juntas);
+      const base = (t.valores || []).filter(v => !fuera.has(v.pieza_idx));
+      const ya = new Set(base.map(v => v.pieza_idx));
+      const nuevos = piezas.filter(i => !ya.has(i)).map(i => _valorDeIdx(i, juntas));
+      const valores = dedupePorPieza([...base, ...nuevos]);   // cada pieza con SU nombre (MAPA 723)
+      return { ...t, juntas, valores };
+    });
     setVariantesEdit(nueva); guardarGruposCon(nueva, true);
+    if (migro) _sinJuntasEnGrupo(t0.grupoId);
   };
-  const borrarVinculoJuntas = (gid, jid) => {
-    aplicarGruposPz(arr => arr.map(g => g.id === gid ? { ...g, juntas: (g.juntas || []).filter(b => b.id !== jid) } : g));
-    // …y de las variantes VIEJAS, donde vivían antes (compat): si no, el vínculo borrado seguiría
-    // aplicándose por el lado legacy.
-    if ((variantesEdit || []).some(t => (t.juntas || []).some(b => b.id === jid))) {
-      const nueva = (variantesEdit || []).map(t => ({ ...t, juntas: (t.juntas || []).filter(b => b.id !== jid) }));
-      setVariantesEdit(nueva); guardarGruposCon(nueva, true);
-    }
+  const borrarVinculoJuntas = (clave, jid) => {
+    const t0 = (variantesEdit || []).find(t => t.clave === clave);
+    if (!t0) return;
+    const { vars, migro } = _materializarJuntasGrupo(variantesEdit || [], t0.grupoId);
+    const nueva = vars.map(t => t.clave === clave ? { ...t, juntas: (t.juntas || []).filter(b => b.id !== jid) } : t);
+    setVariantesEdit(nueva); guardarGruposCon(nueva, true);
+    if (migro) _sinJuntasEnGrupo(t0.grupoId);
   };
   // ── Paso 1: Nombrar piezas (selección con clic + recuadro) ──
   // Nombre genérico = sin el número final ("Espalda 8" → "Espalda"). Agrupa las piezas por familia.
@@ -12070,7 +12152,11 @@ export default function App() {
     };
     // TALLES POR MESA (MAPA 593): con Copia no viaja (cada fila ya es su mesa)
     const _tallesMesa = (!_copia && tallesMesa && Object.keys(tallesMesa).length) ? tallesMesa : undefined;
-    const _cuerpo = { piezas_fuera, tela_principal, cantidad_copia: _copia, talles_mesa: _tallesMesa, molds: ids, moldes_por_diseno,
+    const _cuerpo = { piezas_fuera, tela_principal, cantidad_copia: _copia, talles_mesa: _tallesMesa,
+      talles_mesa_modo: (!_copia && tallesMesaModo === 'separados') ? 'separados' : undefined,   // MAPA 710
+      largo_mesa_cm: largoMesaCm || undefined,                                                     // MAPA 716
+      separar_disenos: ((disenosPedido || []).length > 1 && separarDisenos) || undefined,             // MAPA 717
+      molds: ids, moldes_por_diseno,
       // Repo apagado: lo elegido no viaja (todas las filas hacen todas sus piezas)
       prendas: repoOn ? prendasFinal : prendasFinal.map(({ __repo, ...f }) => f), default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: _reemplActivo(pidCfg || productosCat.activo), fuentes_reemplazo_por: fuentesReempl };
     return _cuerpo;
@@ -12163,13 +12249,13 @@ export default function App() {
     try {
       localStorage.setItem('tizada_wizard', JSON.stringify({
         pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, fuentesReempl,
-        telaBaseMolde, telaPorPieza, telaPrincipalPed, cantidadOn, repoOn, cantidadCopia, tallesMesa,
+        telaBaseMolde, telaPorPieza, telaPrincipalPed, cantidadOn, repoOn, cantidadCopia, tallesMesa, tallesMesaModo, largoMesaCm, separarDisenos,
         // Los moldes con el diseno adentro de ESTE pedido: si no sobreviven a un F5 nadie sabria
         // cuales borrar al terminar, y quedarian >100 MB por pedido en el servidor.
         moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera,
       }));
     } catch { /* localStorage lleno o no disponible */ }
-  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, telaPrincipalPed, fuentesReempl, cantidadOn, repoOn, cantidadCopia, tallesMesa, moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera]);
+  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, telaPrincipalPed, fuentesReempl, cantidadOn, repoOn, cantidadCopia, tallesMesa, tallesMesaModo, largoMesaCm, separarDisenos, moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera]);
 
   // Cargar el registro de telas al entrar al paso Arte (para el selector de tela por pieza).
   useEffect(() => { if (pedidoPaso === 'arte') fetchTelas(); }, [pedidoPaso]);
@@ -13639,12 +13725,20 @@ export default function App() {
     setCargandoArte('Leyendo el arte…');
     await pintarYa();
     const _etapa = (t) => setCargandoArte(t);
-    const id = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId;   // VARIABLE-FIRST: el molde es el del ítem actual
-    const fd = new FormData(); fd.append('archivo', file); fd.append('diseno', disenoActivo); if (id) fd.append('pid', id);
+    let id = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId;   // VARIABLE-FIRST: el molde es el del ítem actual
     // lo que avisa con ventanas propias (perfil de color, capas que faltan) va DESPUÉS del cartel:
     // antes se abrían en el medio y la carga parecía terminada
     let _alFinal = null;
     try {
+      // MOLDE A MEDIDA (MAPA 695): la copia de este diseño se arma RECIÉN ACÁ, con la medida del panel —
+      // antes se armaba de fondo apenas se elegía el molde (y en cada medida escrita), sin que hiciera falta
+      const _amT = (moldeById(id) || {}).a_medida;
+      if (_amT && !_amT.de) {
+        id = await asegurarCopiaAMedida(_etapa);
+        if (!id) return;
+        _etapa('Leyendo el arte…');
+      }
+      const fd = new FormData(); fd.append('archivo', file); fd.append('diseno', disenoActivo); if (id) fd.append('pid', id);
       // EL ARTE SE ANALIZA EN ESTA COMPUTADORA (camino A, PLAN_NAVEGADOR 1b): el paquete viaja con
       // el archivo y el servidor sólo comprueba y guarda. `null` = el servidor lo analiza como antes.
       const _pa = await prepararArteEnNavegador(file, { pid: id, diseno: disenoActivo, rutaApi, avisar: (t) => _etapa(t) });
@@ -13975,6 +14069,16 @@ export default function App() {
   // en el pedido todavía espera que le escriban la medida.
   const _amDe = (mid) => (productosCat.productos.find(x => x.id === mid) || {}).a_medida || null;
   const _amSinMedida = (mid) => { const a = _amDe(mid); return !!a && !a.de; };
+  // «Poner medida» (MAPA 695): la copia se arma recién al cargar el arte, así que «sin copia» ya NO es «sin medida». Falta
+  // sólo si lo escrito no es una medida (sin escribir vale la predeterminada de la plantilla, que siempre es válida).
+  const _amMedidaInvalida = (mid, did) => {
+    const a = _amDe(mid);
+    if (!a || a.de) return false;
+    const fm = amForm[did + '|' + mid];
+    if (!fm) return false;
+    const an = leerMetros(fm.ancho);
+    return !!problemaMedida(an, normForma(fm.forma ?? a.forma) === 'circulo' ? an : leerMetros(fm.alto));
+  };
   // ── CAMINO B: el molde trae el DISEÑO ADENTRO de cada pieza ────────────────────────────────
   // No lleva arte aparte, así que todo lo que hoy pregunta «¿ya cargó el arte?» tiene que
   // preguntar otra cosa: si sus piezas ya tienen nombre. Es un predicado y no un `arteCargado`
@@ -14286,9 +14390,8 @@ export default function App() {
   const _amTelaNoEntra = (am, telaId) => {
     const t = (telasReg.telas || []).find(x => String(x.id) === String(telaId));
     if (!t || !am || !am.de) return null;
-    const n = am.nesting || {};
-    const r = cabeEnTela({ anchoM: am.ancho_m, altoM: am.alto_m, margen: am.margen, bordeMm: am.borde_mm, anchoCm: t.ancho_cm,
-      largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion, resolucionMm: n.resolucion_mm });
+    // la decide ESTA computadora (MAPA 692: el servidor ya no frena) y mide la MISMA pieza que el visor (MAPA 691)
+    const r = amEnTela(am, t.ancho_cm, largoMesaCm);          // el largo de mesa del pedido manda (MAPA 716)
     return r.cabe ? null : { tela: t.nombre, motivo: r.motivo };
   };
   const telasNoEntranDet = (disenosPedido || []).flatMap(d => (itemsArteDe(d.id) || []).map(it => {
@@ -14304,185 +14407,6 @@ export default function App() {
 
   const moldesDeDiseno = (did) => disenoMoldes[did] || [];
 
-  // ── ESTADO PARA LA AYUDA GUIADA ────────────────────────────────────────────────────────────────
-  // Lo que el tutorial mira para saber si un paso YA SE HIZO DE VERDAD. Todo esto la app ya lo
-  // calcula para sus propios carteles; acá sólo se junta en un objeto plano que lee `tutor.jsx`.
-  // Sirve para que cada paso pueda declarar `hecho(E, E0)` y avanzar por el ESTADO REAL en vez de
-  // por el clic: un POST que falla no hace avanzar el tutorial, y los gestos del visor (elegir la
-  // prenda, asignar telas) se pueden verificar de verdad en lugar de cronometrarse.
-  // Es un objeto nuevo por render a propósito: los predicados se evalúan contra el valor de AHORA.
-  // ⚠️ Hay UNA sola guía (armar una tizada) → acá sólo va lo del PEDIDO. Si algún día se suma otra
-  // guía, se agregan los campos que necesite (el contrato está arriba de `tutor.jsx`).
-  // ══ TUTORIALES GRABADOS ═══════════════════════════════════════════════════════════════════
-  // El usuario aprieta «Grabar», hace el trabajo como lo hace siempre y para. El sistema NO graba
-  // video: anota QUÉ ELEMENTO tocó y EN QUÉ PANTALLA estaba. Los carteles los escribe después el
-  // propio sistema con `diccionario.js` (por eso mejorar una explicación mejora los tutoriales ya
-  // grabados, sin regrabar nada).
-  const [tutoriales, setTutoriales] = useState([]);
-  const [grabando, setGrabando] = useState(false);
-  const [guardandoTut, setGuardandoTut] = useState(null);   // {pasos} → abre el modal del nombre
-  const [descartarTut, setDescartarTut] = useState(false);  // confirmación antes de tirar la grabación
-  const [nombreTut, setNombreTut] = useState('');
-  const pasosGrab = useRef([]);
-  const ultCtrlGrab = useRef(null);   // el último control tocado al grabar (para no colapsar dos opciones distintas)
-  const ignorarClick = useRef(false); // el clic que cierra un ARRASTRE no es un paso aparte
-  const [nPasosGrab, setNPasosGrab] = useState(0);   // sólo para el cartel (un ref no redibuja)
-  const [sinGrabar, setSinGrabar] = useState(0);     // clics sobre algo que no se puede volver a encontrar
-  // Espejo de dónde está parado el usuario: el listener de clics no puede leer el estado de React
-  // (quedaría congelado en el del primer render), así que se lo deja acá al día.
-  const dondeRef = useRef({});
-  React.useEffect(() => {
-    // 🔴 LA MISMA FOTO QUE MIRA EL REPRODUCTOR (ver `donde=` de <AyudaGuiada>): faltaba `molde`, o
-    // sea que un paso grabado DENTRO de una moldería no guardaba que había que abrirla, y al
-    // reproducirlo el tutorial pedía un botón de una pantalla que no estaba (auditoría 2026-08-31).
-    dondeRef.current = { tab: activoTab, sub: adminSubView, paso: pedidoPaso, ajuste: tabAjustesMolde,
-                         molde: (molderiaAbierta || modoMiMolde) ? 'abierto' : 'grilla' };
-  }, [activoTab, adminSubView, pedidoPaso, tabAjustesMolde, molderiaAbierta, modoMiMolde]);
-
-  const cargarTutoriales = React.useCallback(async () => {
-    try {
-      const r = await fetch('/api/tutoriales');
-      if (r.ok) { const d = await r.json(); setTutoriales(d.tutoriales || []); }
-    } catch { /* sin red: la ayuda igual abre */ }
-  }, []);
-  // Se piden al ABRIR la ayuda, no al arrancar: antes del login el endpoint contesta 401 y
-  // ensuciaba la consola con un error que no era tal.
-  React.useEffect(() => { if (ayudaAbierta) cargarTutoriales(); }, [ayudaAbierta, cargarTutoriales]);
-
-  // EL OÍDO. Se engancha en fase de captura y sobre `document`, así ve el clic aunque el botón
-  // pare la propagación. Del elemento tocado sube buscando el `data-tour` más cercano: ése es el
-  // único identificador que el reproductor va a poder volver a encontrar.
-  React.useEffect(() => {
-    if (!grabando) return undefined;
-    const anotar = (e, accion) => {
-      const el = e.target;
-      // 🔴 LA BARRA LATERAL NO ENTRA EN LOS TUTORIALES (pedido del usuario): moverse entre
-      // secciones no es parte del trabajo que se enseña, y ensuciaba cada tutorial con un
-      // «tocá Pedidos» antes de lo importante. El motor igual lleva a la pantalla que hace falta.
-      // 🔴 QUÉ NO SE GRABA (mismo criterio que el «⏺ Agregar pasos» del editor, en localizar.js):
-      // la BARRA LATERAL —moverse entre secciones no es el trabajo que se enseña— y todo lo que
-      // sea del propio sistema de ayuda, como el «Parar y guardar» del grabador.
-      if (!sePuedeGrabar(el)) return;
-      // El identificador sale del localizador: `data-tour` si el control lo tiene y, si no, su
-      // TEXTO VISIBLE. Sin esto sólo se podrían grabar 82 de los 477 controles del sistema.
-      const ancla = identificarControl(el);
-      if (!ancla) { setSinGrabar((n) => n + 1); return; }
-      const prev = pasosGrab.current[pasosGrab.current.length - 1];
-      // 🔴 EN UNA LISTA DE OPCIONES, DOS CLICS SEGUIDOS SON DOS COSAS DISTINTAS. Como esas listas
-      // dan el MISMO identificador para todos sus botones (es la lista, no el botón: ver
-      // `data-opciones`), la regla de «no repetir» se comía el segundo diseño y el tutorial salía
-      // pidiendo uno solo (reporte del usuario 2026-08-31, después de subir la actualización).
-      // Ahí lo que se compara es el BOTÓN tocado, no el identificador: dos botones distintos son
-      // dos pasos; tocar dos veces el MISMO (doble clic) sigue siendo uno.
-      const _ctrl = (el && el.closest && (el.closest('button, [role="button"], a[href], input, select, textarea, label') || el)) || el;
-      const _enOpciones = !!(el && el.closest && el.closest('[data-opciones]'));
-      const _repetido = prev && prev.ancla === ancla && prev.accion === accion
-        && (!_enOpciones || ultCtrlGrab.current === _ctrl);
-      ultCtrlGrab.current = _ctrl;
-      if (_repetido) return;
-      // ¿El clic cayó DENTRO de una ventana emergente? Se guarda cuál: el editor la muestra
-      // como ventanita y la reproducción sabe explicar que este paso vive ahí.
-      const _enVentana = el && el.closest && el.closest('[data-modal]');
-      pasosGrab.current.push({
-        ancla, accion,
-        etiqueta: etiquetaDeControl(el).slice(0, 120),
-        donde: { ...dondeRef.current },
-        ...(_enVentana ? { ventana: (_enVentana.getAttribute('data-modal') || '').slice(0, 80) } : {}),
-      });
-      setNPasosGrab(pasosGrab.current.length);
-    };
-    const onClick = (e) => { if (ignorarClick.current) { ignorarClick.current = false; return; } anotar(e, 'click'); };
-    const onChange = (e) => anotar(e, 'input');
-    // ── UN MOVIMIENTO TAMBIÉN ES UN PASO (2026-09-01) ──────────────────────────────────────
-    // En el visor, elegir varias piezas se hace ARRASTRANDO un recuadro. Eso no era un clic, así
-    // que no se grababa y el tutorial no lo podía enseñar. Se anota como `accion:'arrastre'` con
-    // el punto de inicio y de fin **en porcentajes del elemento** (`puntoRelativo`), para que se
-    // pueda volver a mostrar en otra pantalla, con otro zoom y con otro molde.
-    let ini = null;
-    const onDown = (e) => {
-      if (e.button !== 0) { ini = null; return; }
-      ini = { x: e.clientX, y: e.clientY, el: e.target };
-    };
-    const onUp = (e) => {
-      const d = ini; ini = null;
-      if (!d || !esArrastre(d.x, d.y, e.clientX, e.clientY)) return;
-      if (!sePuedeGrabar(d.el)) return;
-      const ancla = identificarControl(d.el);
-      if (!ancla) { setSinGrabar((n) => n + 1); return; }
-      ignorarClick.current = true;      // el clic que sigue al arrastre NO es un paso aparte
-      // 🔴 SÓLO SE GUARDA QUE FUE UN MOVIMIENTO, no por dónde: el cursor muestra un gesto genérico
-      // (decisión del usuario 2026-09-01; ver `GESTO_GENERICO` en localizar.js).
-      pasosGrab.current.push({ ancla, accion: 'arrastre',
-        etiqueta: etiquetaDeControl(d.el).slice(0, 120), donde: { ...dondeRef.current } });
-      setNPasosGrab(pasosGrab.current.length);
-    };
-    document.addEventListener('click', onClick, true);
-    document.addEventListener('change', onChange, true);
-    document.addEventListener('mousedown', onDown, true);
-    document.addEventListener('mouseup', onUp, true);
-    return () => {
-      document.removeEventListener('click', onClick, true);
-      document.removeEventListener('change', onChange, true);
-      document.removeEventListener('mousedown', onDown, true);
-      document.removeEventListener('mouseup', onUp, true);
-    };
-  }, [grabando]);
-
-  const empezarAGrabar = () => {
-    pasosGrab.current = [];
-    setNPasosGrab(0);
-    setSinGrabar(0);
-    setGrabando(true);
-    showMsg('Grabando. Hacé el trabajo como siempre y, cuando termines, tocá «Parar».');
-  };
-  const pararDeGrabar = () => {
-    setGrabando(false);
-    const pasos = pasosGrab.current.slice();
-    if (!pasos.length) { showError('No se grabó ningún paso: no llegaste a tocar nada.'); return; }
-    setNombreTut('');
-    setDescartarTut(false);
-    setGuardandoTut({ pasos });
-  };
-  const guardarTutorial = async () => {
-    const nombre = (nombreTut || '').trim();
-    if (!nombre) { showError('Ponele un nombre al tutorial.'); return; }
-    try {
-      const r = await fetch('/api/tutoriales', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre, pasos: guardandoTut.pasos }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'no se pudo guardar');
-      setGuardandoTut(null);
-      await cargarTutoriales();
-      showMsg(`Tutorial «${nombre}» guardado: ${guardandoTut.pasos.length} paso(s).`);
-    } catch (e) { showError(String(e.message || e)); }
-  };
-  /** Guarda un tutorial MODIFICADO en el editor (mismo id = reemplaza). */
-  const guardarTutorialEditado = async (t) => {
-    try {
-      const r = await fetch('/api/tutoriales', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: t.id, nombre: t.nombre, desc: t.desc || '', pasos: t.pasos }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'no se pudo guardar');
-      await cargarTutoriales();
-      showMsg(`Tutorial «${t.nombre}» actualizado.`);
-      return true;
-    } catch (e) { showError(String(e.message || e)); return false; }
-  };
-  const borrarTutorial = async (id) => {
-    try {
-      const r = await fetch('/api/tutoriales/borrar', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'no se pudo borrar'); }
-      await cargarTutoriales();
-      showMsg('Tutorial borrado.');
-    } catch (e) { showError(String(e.message || e)); }
-  };
 
 
   // Escribir un diseño nuevo (input del sistema, no ventana del navegador).
@@ -14866,7 +14790,7 @@ export default function App() {
     return true;
   };
   // ¿Está activa la vista de nido (una variable abierta con todos sus talles)?
-  const _nidoActivo = () => tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo && !!nidoData;
+  const _nidoActivo = () => tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo && !vinculandoJuntas && !!nidoData;
   const verTodoVisor = () => {
     // Con una variable abierta, «ver todo» = ver SUS piezas centradas, no el lienzo entero.
     if (_nidoActivo()) {
@@ -15073,7 +14997,7 @@ export default function App() {
     setTelaSelPiezas([]); setTelaElegida(null); setTelaAsignMode(false);
     setTelaBuscarAsig(''); setTelaModoVer(false); setTelaAviso('');
     // 3) arte y visor
-    setArteCargado({}); setArteIdx(0); setCantidadOn(false); setRepoOn(false); setCantidadCopia(false); setTallesMesa({}); setTmOpen(false); setRepoPick(null); setRepoDet({});
+    setArteCargado({}); setArteIdx(0); setCantidadOn(false); setRepoOn(false); setCantidadCopia(false); setTallesMesa({}); setTallesMesaModo('mesas'); setTmOpen(false); setLargoMesaCm(null); setLmOpen(false); setSepararDisenos(false); setRepoPick(null); setRepoDet({});
     setFuentesReempl({}); setFuentesPorArte({});   // la fuente elegida era de ESE pedido: uno nuevo arranca sin ella
     // …y LO QUE NO SE SUBLIMA también era de ESE pedido: el nuevo arranca con todo sublimándose
     // (es la regla que pidió el usuario; ver `marcasPedido`).
@@ -16083,7 +16007,7 @@ export default function App() {
         invalidarNido(); setMoldeReload(v => v + 1);
         await fetchProductos();
         if (arteCargado[did + '|' + mid]) cargarMapeadorOperario(mid); else cargarMoldeOperario(mid);
-        return true;                                 // salió bien (el armado automático se olvida del intento)
+        return mid;                                  // salió bien: el id de la copia (el armado automático se olvida del intento)
       }
       const nombre = `${p.nombre || 'Molde'} ${talleDeMedida(anchoM, altoM)}`;
       const r = await fetch('/api/productos/crear', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -16104,7 +16028,7 @@ export default function App() {
       // la tela que se eligió con la medida (guardada con la plantilla) pasa a la copia
       setTelaPrincipalPed(pp => { const v = pp[_claveTelaDis(did, mid)]; return v ? { ...pp, [_claveTelaDis(did, d.id)]: v } : pp; });
       setAmForm(f => { const n = { ...f }; delete n[did + '|' + mid]; return n; });
-      return true;
+      return d.id;                                   // el id de la copia: quien la pidió (cargar el arte) la usa ya
     } catch (e) {
       showError(e.message);
       return false;
@@ -16113,13 +16037,30 @@ export default function App() {
       if (!silencioso) setProcesando(null);
     }
   };
+  /** LA COPIA A MEDIDA DEL ÍTEM QUE SE VE, RECIÉN CUANDO HACE FALTA (MAPA 695): al cargar el arte (hay que guardarlo
+   *  con su molde), «Crear plantilla» o «Asignar telas». Con la medida, forma, punta y terminación que muestra el
+   *  panel (`amAutoRef`). Devuelve el id del molde a usar (la copia, o el mismo si no es a medida o ya está armada),
+   *  o null si la medida todavía no se puede usar (el panel ya dice por qué). `avisar(t)` = el cartel de quien llama. */
+  const asegurarCopiaAMedida = async (avisar = () => {}) => {
+    const it = itemsArteDe(disenoActivo)[arteIdx];
+    if (!it) return null;
+    const am = (moldeById(it.moldeId) || {}).a_medida;
+    if (!am || am.de) return it.moldeId;
+    const st = amAutoRef.current;
+    if (!st || st.clave !== disenoActivo + '|' + it.moldeId || !st.lista) {
+      showError('Revisá la medida de la bandera: todavía no se puede usar (el panel de la izquierda dice por qué).');
+      return null;
+    }
+    avisar('Preparando el molde a la medida…');
+    const id = await armarAMedida(st.did, st.it, st.a, st.h, { forma: st.f, orientacion: st.o, terminacion: st.te, silencioso: true });
+    return id || null;
+  };
 
   // MOLDE A MEDIDA SIN BOTÓN (pedido del usuario 2026-10-07, MAPA 636: «no lo separes en 2, ya debería
   // estar todo junto»): la medida escrita se arma sola cuando se deja de escribir, si es válida y entra
   // (`estadoMedida().listaParaArmar`, que el paso Arte deja en `amAutoRef`). `amIntentoRef` evita
   // reintentar en bucle la misma medida si el armado falla (el error ya se mostró).
   const amIntentoRef = useRef('');
-  const amFondoRef = useRef(new Set());      // «diseño|molde» ya armados (o intentados) de fondo (MAPA 662)
   const amTimerRef = useRef(null);
   // Corre en CADA render (sin dependencias): `amAutoRef` lo llena el paso Arte cuando ya tiene los datos
   // (catálogo, telas), y eso puede ser varios renders después de entrar al paso; con dependencias fijas el
@@ -16131,7 +16072,11 @@ export default function App() {
     // la PLANTILLA (molde recién elegido) se arma enseguida con la medida predeterminada: el paso Arte se ve
     // completo de entrada (visor, «Cargar arte», «Asignar telas») — pedido del usuario 2026-10-07, MAPA 637.
     // La copia ya armada sólo se re-arma cuando se escribe otra medida.
-    const ok = pedidoPaso === 'arte' && !procesando && !amArmando && !!st && st.lista && !(st.esCopia && !amForm[st.clave] && !st.vieja);
+    // 🔴 (MAPA 695, el usuario: «dibujar esa mierda simple no necesita del servidor»): mientras se elige la medida
+    // NO se arma nada en el servidor — el visor la dibuja acá. La copia se crea recién al CARGAR EL ARTE (o al usar
+    // «Crear plantilla» / «Asignar telas»: `asegurarCopiaAMedida`); lo único automático es re-armar una copia que YA
+    // existe cuando se escribe otra medida (o su geometría quedó vieja).
+    const ok = pedidoPaso === 'arte' && !procesando && !amArmando && !!st && st.lista && st.esCopia && (!!amForm[st.clave] || st.vieja);
     const firma = ok ? `${st.clave}|${st.a}|${st.h}|${st.f}|${st.o}|${st.te}` : '';
     if (amTimerRef.current && amTimerRef.current.firma !== firma) { clearTimeout(amTimerRef.current.t); amTimerRef.current = null; }
     // ⚡ LOS OTROS DISEÑOS, DE FONDO (MAPA 662, «¿por qué carga cuando paso de un diseño a otro? tiene que ser
@@ -16142,20 +16087,8 @@ export default function App() {
     // 🔴 Y DESDE QUE EL MOLDE ENTRA AL PEDIDO, NO DESDE EL PASO ARTE (MAPA 663, «no quiero más ese cargador
     // cuando elegís un molde a medida»): la copia de cada diseño se arma de fondo mientras se eligen los demás
     // moldes o se pasa de paso, así que al llegar al Arte ya está — sin cartel y sin la pantalla a medias.
-    if (!ok && pedidoPaso && pedidoPaso !== 'diseno' && !procesando && !amArmando && !amTimerRef.current) {
-      for (const did of Object.keys(disenoMoldes || {})) {
-        for (const it of itemsArteDe(did)) {
-          const am = (moldeById(it.moldeId) || {}).a_medida;
-          const k = did + '|' + it.moldeId;
-          if (!am || am.de || amFondoRef.current.has(k) || (st && st.clave === k)) continue;
-          amFondoRef.current.add(k);              // una vez por diseño y molde (si falla, se arma al entrar)
-          const fo = normForma(am.forma), a = leerMetros(metrosTexto(am.ancho_m || 1));
-          armarAMedida(did, it, a, fo === 'circulo' ? a : leerMetros(metrosTexto(am.alto_m || 1)),
-            { forma: fo, orientacion: normOrientacion(am.orientacion), terminacion: normTerminacion(am.terminacion), silencioso: true });
-          return;
-        }
-      }
-    }
+    // (MAPA 695) ya NO se arman de fondo las copias de todos los diseños (MAPA 662/663): eran 5-7 pedidos al servidor
+    // por diseño apenas se elegía el molde — la cola de 43 pedidos medida en el publicado
     if (!ok || amIntentoRef.current === firma || amTimerRef.current) return;
     // 🔴 el «ya lo intenté» vale SÓLO si falló (MAPA 660): si salió bien se olvida. Antes quedaba anotado
     // también al salir bien, y tras «Nuevo pedido» la misma bandera con la misma medida tenía la MISMA firma
@@ -16171,7 +16104,7 @@ export default function App() {
     amTimerRef.current = { firma, t };
   });
   // y al salir del paso Arte (otro paso, «Nuevo pedido»), un intento fallido tampoco queda: al volver, se reintenta
-  useEffect(() => { if (pedidoPaso !== 'arte') { amIntentoRef.current = ''; amFondoRef.current = new Set(); } }, [pedidoPaso]);
+  useEffect(() => { if (pedidoPaso !== 'arte') amIntentoRef.current = ''; }, [pedidoPaso]);
   // ⚡ PRECALENTAR (MAPA 661, «que sea instantáneo»): apenas un molde a medida entra al pedido se prepara en
   // esta computadora el molde de su medida predeterminada (lo mismo que va a pedir `armarAMedida` al entrar
   // al paso Arte, con los mismos datos). No sube nada: queda en memoria (`prepararMoldeAMedida`), y al
@@ -17143,30 +17076,6 @@ export default function App() {
   // calcula recién unas líneas antes. Un `const` leído antes de su declaración deja la
   // pantalla EN BLANCO («Cannot access … before initialization»): ya pasó.
 
-  const ayudaEstado = {
-    // ¿ya llegaron los datos? Sin esto, abrir la ayuda mientras carga (o sin sesión) haría que los
-    // predicados vean ceros y saquen conclusiones falsas.
-    cargado: !!estado,
-    // dónde está parado (lo mismo que `donde`, repetido acá para que el guion tenga todo junto)
-    tab: activoTab, sub: adminSubView, paso: pedidoPaso, ajuste: tabAjustesMolde,
-    nMoldes: (productosCat.productos || []).length,
-    // el PEDIDO en curso
-    pedido: {
-      nDisenos: disenosPedido.length,
-      sinVariable: disenosPedido.filter(d => !(disenoMoldes[d.id] || []).length).length,
-      artesTotal: tareasArte.length,
-      artesCargadas: tareasArte.filter(t => arteCargado[t.did + '|' + t.mid]).length,
-      telasFaltan: telasFaltantesTotal,
-      nFilas: filas.length,
-      hayResultados: trabajosMulti.some(t => t.estado === 'listo'),
-      editorAbierto: !!editorEditOpen,
-      nEditables: (editableData?.objetos || []).length,
-      // ¿le falta al arte alguna tipografía? Es el Único requisito que NO traba el pedido, y lo
-      // que permite que un tutorial grabado cargando una fuente se saltee ese paso a quien ya
-      // la tiene (regla `listo` de `arte-fuente` en diccionario.js).
-      fuentesFaltan: fuentesFaltantesItems.length,
-    },
-  };
   /** Ir al arte de ESA VARIABLE — para que «Resolver» lleve exactamente donde está el problema. */
   const irAlArte = (did, it) => {
     setDisenoActivo(did);
@@ -17250,7 +17159,7 @@ export default function App() {
                          ...telasNoEntranDet.map(x => `${_arteLbl(x.did, x.it)}: no entra en «${x.tela}» — ${x.motivo}`)],
                 ok: (telasIncompletas || telasNoEntranDet.length) ? [] : ['Todas las piezas tienen su tela'] });
       // MOLDE A MEDIDA (MAPA 623): una prenda a medida sin medida todavía
-      const _sinMedida = itemsPedido.filter(x => _amSinMedida(x.moldeId));
+      const _sinMedida = itemsPedido.filter(x => _amMedidaInvalida(x.moldeId, x.did));
       if (_sinMedida.length) {
         it.push({ id: 'medida', label: 'la medida de la pieza', corto: 'Poner medida', hecho: false,
                   faltan: _sinMedida.map(x => `${_arteLbl(x.did, x)}: escribí el ancho y el alto en metros.`), ok: [] });
@@ -17463,7 +17372,7 @@ export default function App() {
               <span className="sb-texto">Configuración</span>
             </button>
             )}
-            {/* AYUDA GUIADA: abre el menú de tutoriales grabados (ver tutor.jsx / diccionario.js) */}
+            {/* AYUDA: abre los tutoriales en video (ayudaVideos.jsx, MAPA 689) */}
             <button className="nav-item" data-tour="nav-ayuda" onClick={() => setAyudaAbierta(true)}
               title="Te guío paso a paso, marcándote qué tocar">
               <Icon name="alert" />
@@ -19226,9 +19135,10 @@ export default function App() {
                         icono="copiaMesa" nombre="Copia" rgb="250,204,21"
                         title={cantidadCopia ? 'Apagar Copia: la cantidad vuelve a repetir la prenda en la tizada'
                                              : 'Copia: una mesa por fila; la cantidad es cuántas copias se imprimen'}
-                        ayuda={<Ayuda ancho={330}>Con <b>Copia</b>, cada fila sale en <b>su propia mesa</b> y la <b>cantidad</b> no repite la
-                          prenda: queda anotada en esa mesa como <b>cuántas copias imprimir</b> (se ve en el resultado y en el nombre del
-                          archivo). Sin Copia, la cantidad repite la prenda y todo se acomoda junto, como siempre.</Ayuda>} />
+                        ayuda={<Ayuda ancho={330}>Con <b>Copia</b>, la <b>cantidad</b> son <b>copias</b>: si una prenda (o varias del mismo talle)
+                          alcanza para <b>llenar una mesa</b> del largo máximo, sale <b>una</b> mesa marcada ×N en vez de repetirla. Todo lo que
+                          no llena una mesa se acomoda <b>junto</b>, con los talles mezclados, como sin Copia. Separar talles es el botón
+                          <b> Mesas</b>; separar diseños, <b>Separar</b>.</Ayuda>} />
                     )}
 
                     {/* — REPO (reposición): elegir tocando qué piezas hace cada fila (MAPA 578). El botón
@@ -19246,14 +19156,33 @@ export default function App() {
                     {/* — TALLES POR MESA (MAPA 593): qué talles comparten mesa; apagado = como siempre.
                         Sin talles en la planilla no hay nada que repartir (MAPA 622). — */}
                     {!planillaSinTalles && (
-                    <InterruptorIcono ancla="planilla-talles-mesa" on={Object.keys(tallesMesa).length > 0}
-                      onToggle={() => { setTmDraft({ ...tallesMesa }); setTmSel([]); setTmSobre(null); setTmOpen(true); }}
+                    <InterruptorIcono ancla="planilla-talles-mesa" on={Object.keys(tallesMesa).length > 0 || tallesMesaModo === 'separados'}
+                      onToggle={() => { setTmDraft({ ...tallesMesa }); setTmModoDraft(tallesMesaModo); setTmSel([]); setTmSobre(null); setTmOpen(true); }}
                       icono="tallesMesa" nombre="Mesas" rgb="167,139,250"
                       title={Object.keys(tallesMesa).length ? 'Talles por mesa: cambiar qué talles van juntos' : 'Talles por mesa: elegir qué talles van en cada mesa'}
                       ayuda={<Ayuda ancho={330}>Elegí <b>qué talles van en la misma mesa</b>: un talle por mesa, o varios juntos
                         (por ejemplo S y M en una, L y XL en otra). Los talles que no pongas en ningún grupo van juntos. Sin usarlo,
                         todos los talles se acomodan juntos, como siempre.</Ayuda>} />
                     )}
+
+                    {/* — SEPARAR DISEÑOS (MAPA 717): apagado, el mismo molde se mezcla aunque cambie el diseño — */}
+                    {(disenosPedido || []).length > 1 && (
+                    <InterruptorIcono ancla="planilla-separar-disenos" on={separarDisenos} onToggle={() => setSepararDisenos(v => !v)}
+                      icono="separarDisenos" nombre="Separar" rgb="251,146,60"
+                      title={separarDisenos ? 'Volver a mezclar los diseños del mismo molde' : 'Cada diseño en sus propias mesas'}
+                      ayuda={<Ayuda ancho={320}>Apagado (lo normal), las piezas del <b>mismo molde se mezclan</b> en las mesas aunque sean de
+                        diseños distintos: se gasta menos tela. Con <b>Copia</b>, se arman mesas mezcladas que se repiten (por ejemplo 4 JUGADOR +
+                        4 GOLERO ×8). Prendido, <b>cada diseño va en sus propias mesas</b>, en cualquier modo.</Ayuda>} />
+                    )}
+
+                    {/* — LARGO DE MESA (MAPA 716): el largo máximo de cada mesa de ESTE pedido; apagado = el del nesting — */}
+                    <InterruptorIcono ancla="planilla-largo-mesa" on={!!largoMesaCm}
+                      onToggle={() => { setLmTxt(largoMesaCm ? String(largoMesaCm / 100).replace('.', ',') : ''); setLmOpen(true); }}
+                      icono="largoMesa" nombre={largoMesaCm ? `Largo ${String(largoMesaCm / 100).replace('.', ',')} m` : 'Largo'} rgb="52,211,153"
+                      title={largoMesaCm ? 'Largo máximo de cada mesa: cambiarlo o volver al del nesting' : 'Elegir el largo máximo de cada mesa de este pedido'}
+                      ayuda={<Ayuda ancho={320}>El <b>largo máximo de cada mesa</b> de este pedido. Si no elegís nada, rige el del <b>nesting</b> del
+                        molde. Si elegís uno, las mesas no pasan de ese largo: lo que no entra sigue en otra mesa. Vale también con <b>Copia</b> y
+                        <b> Mesas</b>. Una pieza más larga que el largo elegido no se puede armar.</Ayuda>} />
 
                     {/* — cuánto hay — */}
                     <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
@@ -19944,7 +19873,7 @@ export default function App() {
                 // izquierda (en lugar de los talles) y el dibujo EN EL VISOR. Mientras la medida escrita no está
                 // armada (o se está cambiando) el visor la muestra en vivo (`VisorMedida`); armada, el visor real
                 // dibuja la misma tela alrededor del arte (`telaAMedida` → `telaAlrededor`).
-                const _amEst = _amIt ? estadoMedida({ am: _amIt, anchoTxt: _amF.ancho, altoTxt: _amF.alto, telas: _telasMol,
+                const _amEst = _amIt ? estadoMedida({ am: _amIt, anchoTxt: _amF.ancho, altoTxt: _amF.alto, telas: _telasMol, largoPedidoCm: largoMesaCm,
                   telaId: _principalDe(disenoActivo, _id), esCopia: !!_amIt.de, forma: _amFo, orientacion: _amOr, terminacion: _amTe }) : null;
                 const _amRes = _amIt ? reservaAM(_amIt, _amFo) : 0;      // la reserva del borde PARA ESTA FORMA (mm)
                 const _amVivo = !!_amIt && (!_amIt.de || !_amEst.igualArmada);
@@ -20559,7 +20488,7 @@ export default function App() {
                         onGuardar={guardarMapeo}
                         onCerrar={null}
                         vf={_todasBOn ? _vfTodasB : vfArte}
-                        onCargarDiseno={_amSinArmar ? null : () => fileInputArteRef.current.click()}
+                        onCargarDiseno={() => fileInputArteRef.current.click()}
                         titulo={(
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                             <span style={{ width: 9, height: 9, borderRadius: '50%', background: colAct, flexShrink: 0 }} />
@@ -20590,17 +20519,24 @@ export default function App() {
                           {/* OPCIONAL: la plantilla para el diseñador, por si no la tienen (MAPA 617).
                               Sin el «?» aparte: el modal explica todo adentro. */}
                           {!_esB && (
-                          <button className="btn ghost" data-tour="arte-crear-plantilla"style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} disabled={_amSinArmar}
+                          <button className="btn ghost" data-tour="arte-crear-plantilla"style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} disabled={!!amArmando}
                             title="Crear la plantilla del arte (guía .ai, Illustrator o CorelDRAW) de las variables de todos los diseños del pedido"
-                            onClick={() => setPlantillaPedido(true)}>
+                            onClick={async () => {
+                              // MOLDE A MEDIDA (MAPA 695): la copia se arma recién ahora, si hace falta
+                              if (_amSinArmar) {
+                                setProcesando('Preparando el molde a la medida…'); await pintarYa();
+                                try { if (!(await asegurarCopiaAMedida((x) => setProcesando(x)))) return; } finally { setProcesando(null); }
+                              }
+                              setPlantillaPedido(true);
+                            }}>
                             <Icon name="download" style={{ width: 13, height: 13 }} /> Crear plantilla
                           </button>
                           )}
                           {!_esB && (
-                          <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} disabled={!!amArmando || _amSinArmar} title={(amArmando || _amSinArmar) ? 'Se está armando el molde a esta medida' : undefined} onClick={() => fileInputArteRef.current.click()}>
+                          <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} disabled={!!amArmando} title={amArmando ? 'Se está armando el molde a esta medida' : undefined} onClick={() => fileInputArteRef.current.click()}>
                             {/* MIENTRAS SE ARMA LA MEDIDA (MAPA 678, reclamo del usuario 2026-10-12: «queda apagado un rato y no
                                 me dice por qué»): el botón dice QUÉ está pasando, con el giro, en vez de quedar mudo y apagado */}
-                            {(amArmando || _amSinArmar) ? (<>
+                            {amArmando ? (<>
                               <span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.25)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
                               Armando la medida…
                             </>) : (<>
@@ -20612,7 +20548,11 @@ export default function App() {
                               lista ya filtrada por la selección: con telas asignadas sólo por pieza
                               (o al seleccionar piezas sin telas en común) desaparecía en pleno uso. */}
                           {(telasReg.telas || []).length > 0 && (
-                            <button className="btn ghost" data-tour="arte-telas" disabled={_amSinArmar} style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); setTelaAviso(''); }} title="Asignar la tela de cada pieza (por defecto, una para todas)">
+                            <button className="btn ghost" data-tour="arte-telas" disabled={!!amArmando} style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => {
+                              // MOLDE A MEDIDA (MAPA 695): elegir la tela NO necesita la copia (es un dato del pedido, se guarda
+                              // con la plantilla y pasa a la copia cuando se arma): nada que pedirle al servidor
+                              setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); setTelaAviso('');
+                            }} title="Asignar la tela de cada pieza (por defecto, una para todas)">
                               <Icon name="telaRollo" style={{ width: 13, height: 13 }} /> Asignar telas
                             </button>
                           )}
@@ -24457,14 +24397,14 @@ export default function App() {
                                 })();
                                 return (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                    <button type="button" className="btn ghost" onClick={() => { setAsignandoTipo(null); setModoAcomodar(false); setGrupoAislado(null); }} style={{ alignSelf: 'flex-start', fontSize: 12, padding: '6px 10px' }}>⬅ Volver a las variables</button>
+                                    <button type="button" className="btn ghost" onClick={() => { setAsignandoTipo(null); setModoAcomodar(false); setVinculandoJuntas(null); setJuntasSel(new Set()); setGrupoAislado(null); }} style={{ alignSelf: 'flex-start', fontSize: 12, padding: '6px 10px' }}>⬅ Volver a las variables</button>
                                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                       <input value={g.label} placeholder="Nombre de la variable" onChange={(e) => renameTipo(gi, e.target.value)} style={{ ...inp, fontWeight: 600, fontSize: 14 }} />
                                       <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>{nPz} pza{nPz === 1 ? '' : 's'}</span>
                                     </div>
                                     <div style={{ display: 'flex', gap: 6 }}>
                                         <button type="button" className="btn primary" style={{ flex: 1, fontSize: 12 }} onClick={() => guardarGrupos()}>Guardar cambios</button>
-                                        <button type="button" className="btn" style={{ flex: 1, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderColor: asignando ? 'var(--accent)' : undefined, color: asignando ? 'var(--accent)' : undefined }} onClick={() => { setModoAcomodar(false); setAsignandoTipo(asignando ? null : g.clave); }}>
+                                        <button type="button" className="btn" style={{ flex: 1, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderColor: asignando ? 'var(--accent)' : undefined, color: asignando ? 'var(--accent)' : undefined }} onClick={() => { setModoAcomodar(false); setVinculandoJuntas(null); setJuntasSel(new Set()); setAsignandoTipo(asignando ? null : g.clave); }}>
                                           <Icon name={asignando ? 'check' : 'plus'} style={{ width: 12, height: 12 }} /> {asignando ? 'Listo' : 'Cargar piezas'}
                                         </button>
                                     </div>
@@ -24491,24 +24431,71 @@ export default function App() {
                                         {choquesVar.map(c => (
                                           <div key={c.gen} style={{ color: 'var(--text-secondary)' }}>· {c.nombres.join(' + ')}</div>
                                         ))}
-                                        <div style={{ color: 'var(--text-muted)' }}>Salida: vinculalas en el <b>grupo</b> (⛓ Piezas que van juntas) o saca una con «Cargar piezas».</div>
+                                        <div style={{ color: 'var(--text-muted)' }}>Salida: vinculalas acá abajo (⛓ Vincular piezas) o sacá una con «Cargar piezas».</div>
                                       </div>
                                     )}
-                                    {/* ── Piezas que van juntas: SE DEFINEN EN EL GRUPO (2026-08-21) ──
-                                        Acá sólo se muestran, para entender por qué al tocar una pieza
-                                        entra también su compañera. El botón vive en el grupo. */}
-                                    {!asignando && bundles.length > 0 && (
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--border-light)', borderRadius: 11, padding: 11 }}>
-                                        <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>⛓ Piezas que van juntas <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· se definen en el grupo</span></div>
-                                        {bundles.map(b => (
-                                          <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, padding: '5px 8px', borderRadius: 8, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.3)' }}>
-                                            <span style={{ color: '#c4b5fd', fontWeight: 700 }}>{b.nombre}</span>
-                                            <span style={{ color: 'var(--text-muted)' }}>· {(b.piezas || []).map(i => _nombreDeIdx(i)).join(' + ')}</span>
+                                    {/* ── PIEZAS QUE VAN JUNTAS: DE ESTA VARIABLE (MAPA 722) ──
+                                        Cada variable arma los suyos: vincular acá no toca a las otras
+                                        variables aunque tengan piezas que se llaman igual. */}
+                                    {!asignando && (() => {
+                                      const vinc = vinculandoJuntas === g.clave;
+                                      const nombresSel = Array.from(new Set(Array.from(juntasSel).map(i => nombreGenerico(_nombreDeIdx(i))).filter(Boolean)));
+                                      const cerrar = () => { setVinculandoJuntas(null); setJuntasSel(new Set()); setJuntasNombre(''); };
+                                      return vinc ? (
+                                        <div data-tour="var-vincular" style={{ display: 'flex', flexDirection: 'column', gap: 10, border: '1px solid #f59e0b', borderRadius: 12, padding: 12, background: 'rgba(245,158,11,0.06)' }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <span style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>⛓ Vincular piezas</span>
+                                            <Ayuda ancho={330}>Tocá en el visor <b>2 o más</b> piezas que en <b>esta variable</b> van <b>siempre juntas</b> (ej.: manga corta + su vivo). Entran juntas a la variable y, al elegir una, entra la otra. Es lo único que deja dos piezas con el mismo nombre en una variable. <b>Las otras variables no cambian</b>, aunque tengan piezas que se llaman igual.</Ayuda>
                                           </div>
-                                        ))}
-                                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Al elegir una, entra la otra sola.</div>
-                                      </div>
-                                    )}
+                                          <div style={{ fontSize: 12 }}><b style={{ color: '#f59e0b', fontSize: 15 }}>{juntasSel.size}</b> pieza{juntasSel.size === 1 ? '' : 's'} elegida{juntasSel.size === 1 ? '' : 's'}</div>
+                                          {nombresSel.length > 0 && (
+                                            <div>
+                                              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 5 }}>Nombre del vínculo</div>
+                                              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                                {nombresSel.map(nm => (
+                                                  <button key={nm} type="button" onClick={() => setJuntasNombre(nm)} style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (juntasNombre === nm ? '#f59e0b' : 'var(--border-light)'), background: juntasNombre === nm ? 'rgba(245,158,11,0.14)' : 'transparent', color: juntasNombre === nm ? '#f59e0b' : 'var(--text-muted)' }}>{nm}</button>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+                                          <div style={{ display: 'flex', gap: 6 }}>
+                                            {/* 🔴 se QUEDA en el modo vincular (pedido del usuario 2026-10-15): «cuando ya vinculo una
+                                                pieza no se debe salir del espacio de vinculación; si quiero seguir vinculando no quiero
+                                                estar entrando constantemente». Se limpia la selección y se sigue; «Listo» sale. */}
+                                            <button type="button" className="btn primary" data-tour="var-vincular-ok" style={{ flex: 1, fontSize: 12 }} disabled={juntasSel.size < 2} onClick={() => { crearVinculoJuntas(g.clave, Array.from(juntasSel), juntasNombre || (nombresSel[0] || '')); setJuntasSel(new Set()); setJuntasNombre(''); }}>Crear vínculo</button>
+                                            <button type="button" className="btn ghost" data-tour="var-vincular-listo" style={{ flex: 1, fontSize: 12 }} onClick={cerrar}>Listo</button>
+                                          </div>
+                                          {/* los vínculos de esta variable, a la vista mientras se sigue vinculando */}
+                                          {bundles.length > 0 && (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                              {bundles.map(b => (
+                                                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, padding: '5px 8px', borderRadius: 8, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.3)' }}>
+                                                  <span style={{ color: '#c4b5fd', fontWeight: 700 }}>{b.nombre}</span>
+                                                  <span style={{ color: 'var(--text-muted)' }}>· {(b.piezas || []).map(i => _nombreDeIdx(i)).join(' + ')}</span>
+                                                  <button title="Quitar vínculo" onClick={() => borrarVinculoJuntas(g.clave, b.id)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>✕</button>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, border: '1px solid var(--border-light)', borderRadius: 11, padding: 11 }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>⛓ Piezas que van juntas</span>
+                                            <Ayuda ancho={320}>Piezas que en <b>esta variable</b> van y se nombran juntas (ej. manga + su vivo): al elegir una, entra la otra. Cada variable tiene los suyos.</Ayuda>
+                                          </div>
+                                          {bundles.map(b => (
+                                            <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, padding: '5px 8px', borderRadius: 8, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.3)' }}>
+                                              <span style={{ color: '#c4b5fd', fontWeight: 700 }}>{b.nombre}</span>
+                                              <span style={{ color: 'var(--text-muted)' }}>· {(b.piezas || []).map(i => _nombreDeIdx(i)).join(' + ')}</span>
+                                              <button title="Quitar vínculo" onClick={() => borrarVinculoJuntas(g.clave, b.id)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>✕</button>
+                                            </div>
+                                          ))}
+                                          <button type="button" className="btn" data-tour="var-vincular-abrir" style={{ fontSize: 11.5, alignSelf: 'flex-start', padding: '5px 12px' }}
+                                            onClick={() => { setAsignandoTipo(null); setModoAcomodar(false); setJuntasSel(new Set()); setJuntasNombre(''); setVinculandoJuntas(g.clave); }}>＋ Vincular piezas</button>
+                                        </div>
+                                      );
+                                    })()}
                                     {(estado?.talles || []).length > 1 && (
                                       <div>
                                         <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 5 }}>Resaltar {term.variante.toLowerCase()} (celeste en el visor):</div>
@@ -24553,54 +24540,6 @@ export default function App() {
                                     {eligiendo && (
                                       <Ayuda ancho={330}>Tocá las piezas (o arrastrá un recuadro). Una pieza <b>puede estar en varios grupos</b>. Después <b>Listo</b>.</Ayuda>
                                     )}
-                                    {/* PIEZAS QUE VAN JUNTAS - se declaran ACA, en el grupo (2026-08-21),
-                                        ANTES de armar las variables: asi, al elegir una de las dos para
-                                        una variable, la companera entra sola. Y es lo unico que habilita
-                                        que dos piezas con el mismo nombre convivan en una variable. */}
-                                    {!eligiendo && !asignandoTipo && (() => {
-                                      const vincG = vinculandoJuntas === gp.id;
-                                      const bundlesG = gp.juntas || [];
-                                      const nombresSel = Array.from(new Set(Array.from(juntasSel).map(i => nombreGenerico(_nombreDeIdx(i))).filter(Boolean)));
-                                      const nPzG = (gp.piezas || []).length;
-                                      return vincG ? (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, border: '1px solid #f59e0b', borderRadius: 12, padding: 12, background: 'rgba(245,158,11,0.06)' }}>
-                                          <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>⛓ Piezas que van juntas</div>
-                                          <Ayuda ancho={330}>Toca en el visor <b>2 o mas</b> piezas del grupo que van <b>siempre juntas</b> (ej.: manga corta + su vivo). Despues, al armar una variable, elegir una <b>trae la otra sola</b> — y es la unica forma de que dos piezas con el mismo nombre entren en la misma variable.</Ayuda>
-                                          <div style={{ fontSize: 12 }}><b style={{ color: '#f59e0b', fontSize: 15 }}>{juntasSel.size}</b> pieza{juntasSel.size === 1 ? '' : 's'} elegida{juntasSel.size === 1 ? '' : 's'}</div>
-                                          {nombresSel.length > 0 && (
-                                            <div>
-                                              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 5 }}>¿Que nombre usan las dos? (toca uno)</div>
-                                              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                                                {nombresSel.map(nm => (
-                                                  <button key={nm} type="button" onClick={() => setJuntasNombre(nm)} style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (juntasNombre === nm ? '#f59e0b' : 'var(--border-light)'), background: juntasNombre === nm ? 'rgba(245,158,11,0.14)' : 'transparent', color: juntasNombre === nm ? '#f59e0b' : 'var(--text-muted)' }}>{nm}</button>
-                                                ))}
-                                              </div>
-                                            </div>
-                                          )}
-                                          <div style={{ display: 'flex', gap: 6 }}>
-                                            <button type="button" className="btn primary" style={{ flex: 1, fontSize: 12 }} disabled={juntasSel.size < 2} onClick={() => { crearVinculoJuntas(gp.id, Array.from(juntasSel), juntasNombre || (nombresSel[0] || '')); setVinculandoJuntas(null); setJuntasSel(new Set()); setJuntasNombre(''); }}>Crear vinculo</button>
-                                            <button type="button" className="btn ghost" style={{ flex: 1, fontSize: 12 }} onClick={() => { setVinculandoJuntas(null); setJuntasSel(new Set()); setJuntasNombre(''); }}>Cancelar</button>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, border: '1px solid var(--border-light)', borderRadius: 11, padding: 11 }}>
-                                          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>⛓ Piezas que van juntas <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· van y se nombran juntas (ej. manga + su vivo)</span></div>
-                                          {bundlesG.length > 0 && (
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                                              {bundlesG.map(b => (
-                                                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, padding: '5px 8px', borderRadius: 8, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.3)' }}>
-                                                  <span style={{ color: '#c4b5fd', fontWeight: 700 }}>{b.nombre}</span>
-                                                  <span style={{ color: 'var(--text-muted)' }}>· {(b.piezas || []).length} piezas: {(b.piezas || []).map(i => _nombreDeIdx(i)).join(', ')}</span>
-                                                  <button title="Quitar vinculo" onClick={() => borrarVinculoJuntas(gp.id, b.id)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>✕</button>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          )}
-                                          <button type="button" className="btn" disabled={nPzG < 2} style={{ fontSize: 11.5, alignSelf: 'flex-start', padding: '5px 12px', opacity: nPzG < 2 ? 0.5 : 1 }} onClick={() => { setAsignandoTipo(null); setAsignandoGrupoPz(null); setModoAcomodar(false); setJuntasSel(new Set()); setJuntasNombre(''); setVinculandoJuntas(gp.id); }}>＋ Vincular piezas</button>
-                                          {nPzG < 2 && <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Elegi al menos 2 piezas del grupo para poder vincularlas.</div>}
-                                        </div>
-                                      );
-                                    })()}
                                     {!eligiendo && (<>
                                       {/* eligiendo piezas de una VARIABLE */}
                                       {varAsignando ? (
@@ -24698,7 +24637,7 @@ export default function App() {
                                 hacía creer que el molde había perdido sus variantes. */}
                             {varPzModo
                               ? `Mesa: ${etqData.mesa} · todas las piezas, sin separar`
-                              : ((empModo && empTodas) || (tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo)) && empTodasData?.piezas?.length
+                              : ((empModo && empTodas) || (tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo && !vinculandoJuntas)) && empTodasData?.piezas?.length
                                 ? `Mesa: ${etqData.mesa} · todas las ${term.variante.toLowerCase()}s juntas`
                                 : `Mesa: ${etqData.mesa} · ${term.variante}: ${etqData.talle_ref}`}
                           </div>
@@ -25517,10 +25456,10 @@ export default function App() {
                             /* Canvas Etiquetador base */
                             (() => {
                             const _vbBase = (() => {
-                              if (tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo && nidoData) { const L = nidoLayoutVar(); if (L) return L.vb; }
+                              if (tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo && !vinculandoJuntas && nidoData) { const L = nidoLayoutVar(); if (L) return L.vb; }
                               // VARIABLE ABIERTA sobre el lienzo de todos los talles: encuadrar SUS piezas
                               // (sin moverlas — sólo el encuadre).
-                              if (tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo && empTodasData?.piezas?.length) {
+                              if (tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo && !vinculandoJuntas && empTodasData?.piezas?.length) {
                                 const g = (variantesEdit || []).find(t => t.clave === grupoAislado);
                                 const noms = new Set(((g || {}).valores || []).map(v => (v.label || etqNombres[v.pieza_idx] || '').trim()).filter(Boolean));
                                 const ne = etqData?.nombres_existentes || {};
@@ -25659,7 +25598,7 @@ export default function App() {
                                 const spx = (n) => n * sc / k;
                                 // ── DETALLE DE VARIABLE: nido (todos los talles nesteados por pieza, arrastrables)
                                 //    en una GRILLA COMPACTA propia de la variable (no la global). ──
-                                const nidoOn = tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo && nidoData;
+                                const nidoOn = tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo && !vinculandoJuntas && nidoData;
                                 const layoutN = nidoOn ? nidoLayoutVar() : null;
                                 if (nidoOn && layoutN) {
                                   const scN = 1;   // escala REAL (svg = px del nido); constante en pantalla = n/k
@@ -25731,6 +25670,8 @@ export default function App() {
                                   if (comboVisor && comboVisor.length && tabAjustesMolde === 'variables') return new Set(comboVisor);
                                   // GRUPO de piezas abierto: solo las suyas (también al elegir piezas de una
                                   // VARIABLE — se elige únicamente entre las piezas del grupo).
+                                  // 🔴 Al VINCULAR NO: se ven sólo las piezas de la VARIABLE abierta (pedido del usuario
+                                  // 2026-10-15; la 723 había puesto las del grupo sin que se pidiera — revertido, MAPA 724)
                                   if (tabAjustesMolde === 'variables' && grupoPzAbierto && !asignandoGrupoPz && (asignandoTipo || (!grupoAislado && !aislarClave))) {
                                     const gp = (gruposPz || []).find(x => x.id === grupoPzAbierto);
                                     if (gp && (gp.piezas || []).length) return new Set(gp.piezas);
@@ -25857,7 +25798,7 @@ export default function App() {
                                   else { fillCol = 'rgba(16,185,129,0.10)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
                                 } else if (enVar) {
                                   if (vinculandoJuntas) { // armando "van juntas": elegidas en ÁMBAR, ya vinculadas en violeta, resto neutro
-                                    const yaVinc = (() => { const g = (gruposPz || []).find(x => x.id === vinculandoJuntas); return g && _juntaDeIdx(g.juntas, p.idx); })();
+                                    const yaVinc = (() => { const tv = (variantesEdit || []).find(x => x.clave === vinculandoJuntas); return tv && _juntaDeIdx(juntasDeVariable(tv), p.idx); })();
                                     if (juntasSel.has(p.idx)) { fillCol = 'rgba(245,158,11,0.36)'; badgeFill = '#f59e0b'; textFill = '#18181b'; }
                                     else if (yaVinc) { fillCol = 'rgba(167,139,250,0.24)'; badgeFill = '#a78bfa'; textFill = '#18181b'; }
                                     else { fillCol = 'rgba(255,255,255,0.03)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
@@ -27828,9 +27769,29 @@ export default function App() {
           de los talles: «Mesa 1» es siempre la del primer talle. */}
       <Modal open={tmOpen} onClose={() => setTmOpen(false)} maxWidth={860}
         titulo="Talles por mesa"
-        subtitulo="Tocá los talles y después la mesa donde van. Los que queden sin mesa salen juntos, como siempre.">
+        subtitulo={tmModoDraft === 'separados' ? 'Tocá los talles que van juntos y después el grupo. Los demás salen cada uno aparte.'
+          : 'Tocá los talles y después la mesa donde van. Los que queden sin mesa salen juntos, como siempre.'}>
         {(() => {
           const talles = tallesEnPlanilla;
+          const sep = tmModoDraft === 'separados';
+          // cuántas prendas lleva cada talle (con Cantidad a la vista, cada fila vale su cantidad)
+          const _idsT = colsTalle.length ? colsTalle.map(c => c.id) : ['talle'];
+          const prendasDe = {};
+          (filas || []).forEach(f => {
+            const vs = new Set(_idsT.map(cid => String((f || {})[cid] ?? '').trim()).filter(Boolean));
+            vs.forEach(v => { prendasDe[v] = (prendasDe[v] || 0) + cantidadDeFila(f); });
+          });
+          // SUGERIR (MAPA 710): los talles con pocas prendas (hasta `tmUmbral`) van JUNTOS; los demás,
+          // cada uno en lo suyo. Un solo talle chico no tiene con quién juntarse: queda aparte.
+          const sugerir = () => {
+            const chicos = talles.filter(t => (prendasDe[t] || 0) <= tmUmbral);
+            const n = {}; let g = 0;
+            talles.forEach(t => { if (!(chicos.length >= 2 && chicos.includes(t))) n[t] = ++g; });
+            if (chicos.length >= 2) { g += 1; chicos.forEach(t => { n[t] = g; }); }
+            // en «separados» un talle sin grupo ya sale solo: sólo hace falta marcar el grupo de los chicos
+            if (sep) { const s2 = {}; if (chicos.length >= 2) chicos.forEach(t => { s2[t] = 1; }); setTmDraft(s2); } else setTmDraft(n);
+            setTmSel([]);
+          };
           const orden = (a) => talles.filter(t => a.includes(t));
           const nums = [...new Set(Object.values(tmDraft).map(Number).filter(g => g >= 1))].sort((a, b) => a - b);
           const nuevaG = (nums.length ? nums[nums.length - 1] : 0) + 1;
@@ -27848,7 +27809,7 @@ export default function App() {
             const ord = [], out = {};
             talles.forEach(t => { const g = tmDraft[t]; if (g && !ord.includes(g)) ord.push(g); });
             talles.forEach(t => { if (tmDraft[t]) out[t] = ord.indexOf(tmDraft[t]) + 1; });
-            setTallesMesa(out); setTmOpen(false); setTmSel([]);
+            setTallesMesa(out); setTallesMesaModo(tmModoDraft); setTmOpen(false); setTmSel([]);
           };
           // arrastrar: si el talle arrastrado está marcado, viajan TODOS los marcados
           const alArrastrar = (e, t) => {
@@ -27873,7 +27834,7 @@ export default function App() {
                   border: '1.5px solid ' + (on ? '#a78bfa' : 'var(--border-light)'),
                   background: on ? 'linear-gradient(135deg, rgba(167,139,250,0.45), rgba(167,139,250,0.18))' : 'rgba(255,255,255,0.05)',
                   color: on ? '#fff' : 'var(--text-secondary)', boxShadow: on ? '0 0 12px rgba(167,139,250,0.45)' : 'none',
-                  transform: on ? 'translateY(-1px)' : 'none' }}>{t}</button>
+                  transform: on ? 'translateY(-1px)' : 'none' }}>{t}<span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, opacity: 0.7 }}>{prendasDe[t] || 0}</span></button>
             );
           };
           const tarjeta = (activo, sobre) => ({
@@ -27892,6 +27853,29 @@ export default function App() {
               {!talles.length ? (
                 <div style={{ fontSize: 12.5, color: 'var(--warning, #f5b942)' }}>Todavía no hay talles en el pedido.</div>
               ) : (<>
+                {/* EL MODO (MAPA 710) y SUGERIR */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div data-tour="talles-mesa-modo" style={{ display: 'flex', padding: 3, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)' }}>
+                    {[{ v: 'mesas', t: 'Una mesa por grupo' }, { v: 'separados', t: 'Misma mesa, separados' }].map(o => (
+                      <button key={o.v} type="button" onClick={() => setTmModoDraft(o.v)}
+                        style={{ height: 30, padding: '0 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 800,
+                          background: tmModoDraft === o.v ? '#a78bfa' : 'transparent', color: tmModoDraft === o.v ? '#140b2e' : 'var(--text-secondary)' }}>{o.t}</button>
+                    ))}
+                  </div>
+                  <Ayuda ancho={320}><b>Una mesa por grupo</b>: cada grupo de talles sale en su propia mesa; los talles sin grupo salen juntos y mezclados, como siempre.
+                    <br /><br /><b>Misma mesa, separados</b>: todos en la misma mesa pero sin mezclarse — cada talle (o cada grupo que armes) se acomoda solo, con el mejor acomodo, y abajo sigue el próximo, con una línea punteada entre talles. Salen menos mesas; si no entra en el largo máximo, sigue en otra.
+                    <br /><br /><b>Sugerir</b>: junta los talles que tienen pocas prendas (hasta el número que pongas) y deja aparte los demás.</Ayuda>
+                  <button type="button" className="btn ghost" data-tour="talles-mesa-sugerir" onClick={sugerir}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px', fontSize: 12.5, fontWeight: 800, borderRadius: 9, marginLeft: 'auto', borderColor: 'rgba(167,139,250,0.55)', color: '#ddd6fe' }}>
+                    Sugerir
+                  </button>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    hasta
+                    <input type="number" min={1} max={99} value={tmUmbral} onChange={(e) => setTmUmbral(Math.max(1, Math.min(99, parseInt(e.target.value, 10) || 1)))}
+                      style={{ width: 46, padding: '4px 6px', borderRadius: 7, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5 }} />
+                    prendas
+                  </label>
+                </div>
                 {/* atajos */}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <button type="button" className="btn ghost" data-tour="talles-mesa-uno"
@@ -27915,7 +27899,7 @@ export default function App() {
                     borderStyle: tmSobre === 'sin' ? 'solid' : (hayMarcados && tmSel.some(t => tmDraft[t]) ? 'dashed' : 'solid') }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                      Sin mesa · salen juntos
+                      {sep ? 'Sin grupo · cada uno aparte' : 'Sin mesa · salen juntos'}
                     </span>
                     {sinMesa.length > 1 && (
                       <button type="button" onClick={(e) => { e.stopPropagation(); setTmSel(sel => sel.length === sinMesa.length && sinMesa.every(t => sel.includes(t)) ? [] : [...sinMesa]); }}
@@ -27941,7 +27925,7 @@ export default function App() {
                         style={tarjeta(true, tmSobre === clave)}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                           <Icon name="tallesMesa" style={{ width: 15, height: 15, color: '#a78bfa' }} />
-                          <span style={{ fontSize: 13, fontWeight: 800, color: '#ddd6fe' }}>Mesa {i + 1}</span>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: '#ddd6fe' }}>{sep ? 'Juntos' : 'Mesa'} {i + 1}</span>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ts.length} talle{ts.length === 1 ? '' : 's'}</span>
                           <button type="button" title={`Quitar la mesa ${i + 1} (sus talles vuelven a «Sin mesa»)`}
                             onClick={(e) => { e.stopPropagation(); quitarMesa(g); }}
@@ -27959,7 +27943,7 @@ export default function App() {
                     style={{ ...tarjeta(false, tmSobre === 'nueva'), alignItems: 'center', justifyContent: 'center', borderStyle: tmSobre === 'nueva' ? 'solid' : 'dashed',
                       opacity: hayMarcados || tmSobre === 'nueva' ? 1 : 0.6 }}>
                     <span style={{ fontSize: 24, lineHeight: 1, color: '#a78bfa' }}>+</span>
-                    <span style={{ fontSize: 12.5, fontWeight: 800, color: hayMarcados ? '#ddd6fe' : 'var(--text-secondary)' }}>Nueva mesa</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 800, color: hayMarcados ? '#ddd6fe' : 'var(--text-secondary)' }}>{sep ? 'Nuevo grupo' : 'Nueva mesa'}</span>
                     <span style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
                       {hayMarcados ? `Con ${orden(tmSel).join(' · ')}` : 'Marcá talles y tocá acá'}
                     </span>
@@ -27972,6 +27956,44 @@ export default function App() {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <button type="button" className="btn ghost" onClick={() => setTmOpen(false)} style={{ padding: '8px 14px', fontSize: 12.5 }}>Cancelar</button>
                 <button type="button" className="btn primary" data-tour="talles-mesa-listo" onClick={guardar} style={{ padding: '8px 16px', fontSize: 12.5 }}>Listo</button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* LARGO DE MESA DEL PEDIDO (MAPA 716) */}
+      <Modal open={lmOpen} onClose={() => setLmOpen(false)} maxWidth={420} titulo="Largo de mesa">
+        {(() => {
+          // el del nesting del molde (el primero del pedido: el plan toma su configuración)
+          const _pid = (moldesSeleccionados || [])[0] || productosCat.activo;
+          const _prod = (productosCat.productos || []).find(x => x.id === _pid);
+          const _pre = (nestingPresets || []).find(n => n.id === ((_prod && _prod.nesting_preset_id) || 'nesting_default'));
+          const nestingCm = _pre ? Math.min(5000, Number(_pre.alto_max_cm ?? 500)) : null;
+          const txt = String(lmTxt || '').trim();
+          const v = txt ? parseFloat(txt.replace(',', '.')) : null;
+          const err = txt && !(v >= 0.1 && v <= 50) ? 'Va de 0,10 a 50 m' : null;
+          const aplicar = () => { if (err) return; setLargoMesaCm(txt ? Math.round(v * 10000) / 100 : null); setLmOpen(false); };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <input data-tour="largo-mesa-valor" autoFocus type="text" inputMode="decimal" value={lmTxt}
+                  placeholder={nestingCm ? String(nestingCm / 100).replace('.', ',') : ''}
+                  onChange={(e) => setLmTxt(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') aplicar(); }}
+                  style={{ width: 110, padding: '9px 12px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', fontSize: 15, fontWeight: 800, color: '#fff',
+                    border: '1px solid ' + (err ? 'rgba(248,113,113,0.8)' : 'var(--border-light)') }} />
+                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>m</span>
+                <Ayuda ancho={300}>Vacío = rige el largo del <b>nesting</b> del molde{nestingCm ? <> (<b>{String(nestingCm / 100).replace('.', ',')} m</b>)</> : null}.
+                  Con un largo, ninguna mesa lo pasa: lo que no entra sigue en otra mesa.</Ayuda>
+              </div>
+              <span style={{ fontSize: 12, color: err ? '#fca5a5' : 'var(--text-muted)' }}>
+                {err || (txt ? `Cada mesa hasta ${txt.replace('.', ',')} m` : `Nesting: ${nestingCm ? String(nestingCm / 100).replace('.', ',') + ' m' : 'el del molde'}`)}
+              </span>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                {largoMesaCm && <button type="button" className="btn ghost" data-tour="largo-mesa-quitar" onClick={() => { setLargoMesaCm(null); setLmOpen(false); }}
+                  style={{ padding: '8px 14px', fontSize: 12.5, marginRight: 'auto' }}>Usar el del nesting</button>}
+                <button type="button" className="btn ghost" onClick={() => setLmOpen(false)} style={{ padding: '8px 14px', fontSize: 12.5 }}>Cancelar</button>
+                <button type="button" className="btn primary" data-tour="largo-mesa-listo" disabled={!!err} onClick={aplicar} style={{ padding: '8px 16px', fontSize: 12.5 }}>Listo</button>
               </div>
             </div>
           );
@@ -28439,85 +28461,9 @@ export default function App() {
         </div>
       )}
 
-      {/* AYUDA GUIADA — se monta una sola vez y se dibuja por encima de todo */}
-      <AyudaGuiada abierto={ayudaAbierta} setAbierto={setAyudaAbierta} ir={irPantallaAyuda}
-        donde={{ tab: activoTab, sub: adminSubView, paso: pedidoPaso, ajuste: tabAjustesMolde,
-                 /* Para llegar a un «ajuste» primero hay que ABRIR una moldería: la ayuda tiene que
-                    saber si ya estamos adentro de una o si seguimos en la grilla. */
-                 molde: (molderiaAbierta || modoMiMolde) ? 'abierto' : 'grilla' }}
-        estado={ayudaEstado}
-        tutoriales={tutoriales} grabando={grabando}
-        /* Grabar/editar/borrar es del admin. Sin sistema de usuarios (taller sin base) puede
-           cualquiera, que es como funcionó siempre. El servidor lo valida igual. */
-        puedeGrabar={!authOn || (yo?.permisos || []).includes('ayuda.grabar')}
-        onGrabar={empezarAGrabar} onParar={pararDeGrabar} onBorrar={borrarTutorial}
-        onGuardarEdicion={guardarTutorialEditado} />
-
-      {/* GRABANDO: un aviso fijo, para que nadie se olvide de que está grabando. Se puede parar
-          desde acá sin tener que volver a abrir el menú de ayuda. */}
-      {grabando && (
-        /* `data-no-grabar`: este cartel es del GRABADOR. Sin esto, «Parar y guardar» quedaba
-           grabado como un paso del tutorial (reporte del usuario 2026-08-31). */
-        <div data-no-grabar="1"
-          style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: 18,
-          zIndex: 100000, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-          borderRadius: 12, background: '#14181d', border: '1px solid var(--error, #e0503a)',
-          boxShadow: '0 10px 30px -12px rgba(0,0,0,0.8)' }}>
-          <span className="grabando-punto" style={{ width: 11, height: 11, borderRadius: '50%',
-            background: 'var(--error, #e0503a)', flexShrink: 0 }} />
-          <span style={{ fontSize: 13.5, fontWeight: 600 }}>Grabando el tutorial</span>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            {nPasosGrab} paso{nPasosGrab === 1 ? '' : 's'}
-            {sinGrabar > 0 && (
-              <span title={'Hubo ' + sinGrabar + ' clic(s) sobre algo sin texto ni nombre: no se puede volver a encontrar, así que no se grabó.'}
-                style={{ color: 'var(--warning, #e0a020)', marginLeft: 6 }}>
-                · {sinGrabar} sin grabar
-              </span>
-            )}
-          </span>
-          <button className="btn" style={{ padding: '5px 12px', fontSize: 12.5 }}
-            onClick={pararDeGrabar}>Parar y guardar</button>
-        </div>
-      )}
-
-      {/* EL NOMBRE. Lo pone el usuario; las explicaciones de cada paso las escribe el sistema. */}
-      {guardandoTut && (
-        /* 🔴 NO SE PIERDE UNA GRABACIÓN POR UN CLIC: cerrar acá tiraba a la basura todos los pasos
-           sin preguntar nada, y no hay forma de recuperarlos (auditoría 2026-08-31). */
-        <Modal open titulo="Guardar el tutorial" maxWidth={520}
-          onClose={() => setDescartarTut(true)}>
-          <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', margin: '0 0 14px', lineHeight: 1.55 }}>
-            Se grabaron <b>{guardandoTut.pasos.length} paso(s)</b>. Ponele un nombre con el que lo
-            vayas a reconocer; las explicaciones de cada paso las escribe el sistema.
-          </p>
-          <input autoFocus value={nombreTut} onChange={(e) => setNombreTut(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') guardarTutorial(); }}
-            placeholder="Ej.: Cargar un pedido de camisetas"
-            style={{ width: '100%', padding: '10px 12px', borderRadius: 9, fontSize: 14,
-              border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: '#fff' }} />
-          {descartarTut && (
-            <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 9, lineHeight: 1.5,
-              background: 'rgba(224,80,58,0.10)', border: '1px solid rgba(224,80,58,0.35)' }}>
-              <div style={{ fontSize: 12.5, color: 'var(--error, #e0503a)', fontWeight: 700 }}>
-                {guardandoTut.pasos.length === 1 ? '¿Descartar el paso grabado?'
-                  : `¿Descartar los ${guardandoTut.pasos.length} pasos grabados?`}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
-                No se pueden recuperar: habría que volver a hacer el trabajo grabando.
-              </div>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
-                <button className="btn ghost" onClick={() => setDescartarTut(false)}>Volver</button>
-                <button className="btn" style={{ color: 'var(--error, #e0503a)' }}
-                  onClick={() => { setDescartarTut(false); setGuardandoTut(null); }}>Sí, descartar</button>
-              </div>
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-            <button className="btn ghost" onClick={() => setDescartarTut(true)}>Descartar</button>
-            <button className="btn primary" onClick={guardarTutorial}>Guardar tutorial</button>
-          </div>
-        </Modal>
-      )}
+      {/* AYUDA EN VIDEO (MAPA 689): los tutoriales de la carpeta de Drive en el reproductor propio. Reemplaza
+          a la ayuda paso a paso (pedido del usuario 2026-10-12). */}
+      <AyudaVideos abierto={ayudaAbierta} setAbierto={setAyudaAbierta} />
     </div>
   );
 }

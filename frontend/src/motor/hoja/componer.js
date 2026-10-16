@@ -108,6 +108,46 @@ export function remapear(stream, ren) {
   return stream.replace(RX_NOM, (_todo, nombre) => ren['/' + nombre] ?? '/' + nombre)
 }
 
+// LA SEPARACIÓN ENTRE TALLES (MAPA 710 → 711): negro, 1,2 mm, trazo 6 / hueco 4 mm, de margen a margen; arriba
+// y abajo de la línea, centrados, el talle de cada lado (letra de 7 mm en CURVAS, a 3 mm). Gemelo: `ops_cortes`.
+const CORTE_ANCHO_PT = 1.2 * 72 / 25.4, CORTE_TRAZO_PT = 6 * 72 / 25.4, CORTE_HUECO_PT = 4 * 72 / 25.4
+const CORTE_TEXTO_PT = 7 * 72 / 25.4, CORTE_AIRE_PT = 3 * 72 / 25.4
+
+function rotuloTalles(talles) {
+  const t = (talles || []).map(String).filter((x) => x.trim())
+  if (!t.length) return ''
+  return (t.length === 1 ? 'Talle ' : 'Talles ') + t.join(' · ')
+}
+
+/** `hoja_pike.ops_cortes`: la línea de cada corte y sus dos rótulos (`fuente` = el abridor; sin él, sólo
+ * la línea). Devuelve un string latin-1 (un carácter por byte). */
+export function opsCortes(cortes, m, anchoPag, altoPag, s, fuente = null) {
+  if (!cortes || !cortes.length) return ''
+  const x0 = m.izq * CM * s, x1 = (anchoPag - m.der * CM) * s
+  let lineas = `q\n0 0 0 1 K\n${num(CORTE_ANCHO_PT * s)} w\n[${num(CORTE_TRAZO_PT * s)} ${num(CORTE_HUECO_PT * s)}] 0 d\n`
+  let textos = ''
+  let f = null
+  if (fuente) { try { f = fuente('Arial-BoldMT') } catch { f = null } }
+  for (const c of cortes) {
+    const yc = (c && typeof c === 'object') ? c.y : c
+    const y = (altoPag - (m.sup * CM + yc)) * s
+    lineas += `${num(x0)} ${num(y)} m\n${num(x1)} ${num(y)} l\nS\n`
+    if (!f || !c || typeof c !== 'object') continue
+    const size = f.sizeParaAlto(CORTE_TEXTO_PT)
+    for (const [texto, yb] of [[rotuloTalles(c.arriba), yc - CORTE_ANCHO_PT / 2 - CORTE_AIRE_PT],
+                                [rotuloTalles(c.abajo), yc + CORTE_ANCHO_PT / 2 + CORTE_AIRE_PT + CORTE_TEXTO_PT]]) {
+      if (!texto) continue
+      let ops
+      try {
+        const w = f.anchoTexto(texto, size)
+        ops = f.opsTexto(texto, size * s, (anchoPag / 2 - w / 2) * s, (altoPag - (m.sup * CM + yb)) * s)
+      } catch { continue }
+      if (ops) textos += `q\n0 0 0 1 k\n${ops}\nf\nQ\n`
+    }
+  }
+  return lineas + 'Q\n' + textos
+}
+
 /** `hoja_pike.altos_de_hojas`: el alto (pt) de cada página, con la misma cuenta que la hoja. */
 export function altosDeHojas(hojas, cfg) {
   const m = cfg.margenes_cm
@@ -252,8 +292,9 @@ export function embeberPerfil(out, perfil) {
  * Devuelve `{ pdf, consumoCm, alturasCm }`.
  */
 export function componerHoja(mupdf, entrada) {
-  const { hojas, cfg, origenes = {}, signoRotacion = 1, progreso = null, perfil = null } = entrada
+  const { hojas, cfg, origenes = {}, signoRotacion = 1, progreso = null, perfil = null, cortes = null, fuente = null } = entrada
   const m = cfg.margenes_cm
+  // 🔴 la mesa SIEMPRE del ancho imprimible de la tela, también con Copia (MAPA 704)
   const anchoPag = cfg.ancho_cm * CM
   const out = new mupdf.PDFDocument()
   const abiertos = []                    // documentos de origen abiertos acá (se cierran al final)
@@ -333,6 +374,10 @@ export function componerHoja(mupdf, entrada) {
       if (est) partes.push(bytesLatin1(est))
       partes.push(bytesLatin1('Q\n'))
     }
+    // las líneas punteadas entre talles (MAPA 710): `cortes[i]` es de la i-ésima mesa NO vacía
+    const cs = cortes && alturasCm.length < cortes.length ? cortes[alturasCm.length] : null
+    const lineas = opsCortes(cs, m, anchoPag, altoPag, s, fuente)
+    if (lineas) partes.push(bytesLatin1(lineas))
     const pg = out.newDictionary()
     pg.put('Type', out.newName('Page'))
     const mb = out.newArray()

@@ -242,8 +242,19 @@ function aplanar(cont, S, x0, y0, B) {
   return { pts, cum, total, at, dir }
 }
 
+/**
+ * `_adentro_del_borde` — 🔴 LA ETIQUETA NUNCA ENCIMA DEL BORDE (MAPA 702): cuánto más hacia adentro
+ * va la baseline cuando el borde cae adentro de la pieza (por dentro: todo; centrado: la mitad) +
+ * el despeje de los descendentes. Borde por fuera o apagado: 0 (lo de siempre).
+ */
+export function adentroDelBorde(bcActivo, bcAlin, B, size) {
+  if (!bcActivo) return 0.0
+  const dentro = bcAlin === 'dentro' ? B : (bcAlin === 'centro' ? B / 2 : 0.0)
+  return dentro > 0 ? dentro + 0.25 * size : 0.0
+}
+
 /** El tramo [a, b] con la baseline apoyada hacia adentro; devuelve `{lat, ldir, lt}` o null. */
-function tramo(at, dir, a, b, cx, cy, size) {
+function tramo(at, dir, a, b, cx, cy, size, adentro = 0.0) {
   const segLen = b - a
   if (segLen <= 1) return null
   const nf = Math.max(8, Math.min(400, Math.trunc(segLen)))
@@ -252,7 +263,7 @@ function tramo(at, dir, a, b, cx, cy, size) {
   const md = at(a + segLen / 2), an = dir(a + segLen / 2)
   const up = [-Math.sin(an), Math.cos(an)]
   if ((up[0] * (cx - md[0]) + up[1] * (cy - md[1])) < 0) segp.reverse()
-  const offIn = 0.18 * MM
+  const offIn = 0.18 * MM + adentro       // + el borde que cae adentro de la pieza (MAPA 702)
   const n = segp.length, base = segp.slice()
   segp = []
   for (let i = 0; i < n; i++) {
@@ -301,7 +312,7 @@ function glifoAGlifo(tr, texto, size, align, fetq) {
 }
 
 /** `_eops_borde`: el texto siguiendo el segmento del contorno que contiene la posición. */
-export function eopsBorde(cont, S, x0, y0, B, rx, ry, t, texto, size, align, fetq) {
+export function eopsBorde(cont, S, x0, y0, B, rx, ry, t, texto, size, align, fetq, adentro = 0.0) {
   const A = aplanar(cont, S, x0, y0, B)
   if (!A) return null
   const { pts, total, at, dir } = A
@@ -337,13 +348,13 @@ export function eopsBorde(cont, S, x0, y0, B, rx, ry, t, texto, size, align, fet
   let cx = 0, cy = 0
   for (const p of pts) { cx += p[0]; cy += p[1] }
   cx /= pts.length; cy /= pts.length
-  const tr = tramo(at, dir, a, b, cx, cy, size)
+  const tr = tramo(at, dir, a, b, cx, cy, size, adentro)
   if (!tr) return null
   return glifoAGlifo(tr, texto, size, align, fetq)
 }
 
 /** `_eops_zonas`: un texto por zona entre las esquinas elegidas. */
-export function eopsZonas(cont, S, x0, y0, B, puntos, conts, size, alignDef, fetq, talle, pieza, nro, sep) {
+export function eopsZonas(cont, S, x0, y0, B, puntos, conts, size, alignDef, fetq, talle, pieza, nro, sep, adentro = 0.0) {
   const A = aplanar(cont, S, x0, y0, B)
   if (!A) return null
   const { pts, total, at, dir } = A
@@ -408,7 +419,7 @@ export function eopsZonas(cont, S, x0, y0, B, puntos, conts, size, alignDef, fet
     const txt = partes.join(sep)
     if (!txt) continue
     const alg = c.align || alignDef || 'centro'
-    const tr = tramo(at, dir, a, b, cx, cy, size)
+    const tr = tramo(at, dir, a, b, cx, cy, size, adentro)
     if (!tr) continue
     const ops = glifoAGlifo(tr, txt, size, alg, fetq)
     if (ops) out.push(ops)
@@ -446,7 +457,7 @@ const colorCmyk = (vals, op) => vals.slice(0, 4).map((v) => pyG(Number(v))).join
 export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante = null, grupo = null,
                                 etiqueta = null, fuente, alias = {}, info = {}, avisos = null,
                                 separado = false, arteRect = null, reporte = null }) {
-  const { clip, cont, x0, y0, x0m, y0m, Hp, S, B, bcActivo, W, H } = base
+  const { clip, cont, x0, y0, x0m, y0m, Hp, S, B, bcActivo, bcAlin, W, H } = base
   const bloques = []
   const personaN = {}
   for (const [k, v] of Object.entries(persona || {})) personaN[normNombre(k)] = v
@@ -593,7 +604,8 @@ export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante =
       const fetq = fuente('Arial-BoldMT')
       const esize = fetq.sizeParaAlto(Number(et.size_mm || 3.0) * MM)
       zeops = eopsZonas(cont, S, x0, y0, B, zna.puntos, zna.cont || [], esize, et.align || 'centro', fetq,
-                        talle, piezaTxt, nro, et.separador === undefined ? '-' : (et.separador || '-'))
+                        talle, piezaTxt, nro, et.separador === undefined ? '-' : (et.separador || '-'),
+                        adentroDelBorde(bcActivo, bcAlin, B, esize))
     } catch { zeops = null }
     if (zeops) {
       if (et.borde_activo ?? true) {
@@ -637,7 +649,8 @@ export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante =
         const alg = posi.align || et.align || 'centro'
         try {
           const fetq = fuente('Arial-BoldMT')
-          eops = eopsBorde(cont, S, x0, y0, B, posi.rx ?? null, posi.ry ?? null, Number(posi.t), etTxt, esize, alg, fetq, bcActivo)
+          eops = eopsBorde(cont, S, x0, y0, B, posi.rx ?? null, posi.ry ?? null, Number(posi.t), etTxt, esize, alg, fetq,
+            adentroDelBorde(bcActivo, bcAlin, B, esize))
         } catch { eops = null }
       }
       if (eops == null) {

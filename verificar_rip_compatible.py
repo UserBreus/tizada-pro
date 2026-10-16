@@ -180,7 +180,11 @@ def _cs_ok(cs, icc_hashes):
                 icc_hashes.setdefault(h, set()).add(st.objgen)
                 return True
             if fam in ("/Separation", "/DeviceN"):
-                return _cs_ok(cs[2], icc_hashes)
+                # 🔴 UNA TINTA PLANA CON NOMBRE (un Pantone) VALE CON CUALQUIER RESPALDO (MAPA 713): Illustrator
+                # guarda el respaldo de un Pantone en Lab/ICC de 3 canales, y exigir que fuera CMYK marcaba
+                # «espacios de color fuera de CMYK» en artes perfectamente imprimibles (el RIP resuelve la tinta
+                # por su nombre o por ese respaldo). El color del archivo no se toca. Gemelo: `csOk` (verificar.js).
+                return True
             if fam == "/Indexed":
                 return _cs_ok(cs[1], icc_hashes)
             if fam == "/Pattern":

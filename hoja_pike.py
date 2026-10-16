@@ -134,10 +134,64 @@ def matriz_colocacion(c, m, s, alto_pag, W, H, signo=1):
     return f"{a:.6f} {b_:.6f} {c_:.6f} {d:.6f} {e:.6f} {f:.6f} cm"
 
 
-def componer_hoja_pike(colocaciones, cfg, path_salida, signo_rotacion=1):
+# LA SEPARACIÓN ENTRE TALLES (MAPA 710 → 711): negro, 1,2 mm, trazo 6 mm / hueco 4 mm, de margen a margen;
+# arriba de la línea, centrado, el talle (o talles) del bloque de arriba, y abajo el de abajo: letra de 7 mm
+# (Arial Bold en CURVAS: la hoja no lleva tipografías), a 3 mm de la línea. Gemelo: `opsCortes` (componer.js).
+_CORTE_ANCHO_PT, _CORTE_TRAZO_PT, _CORTE_HUECO_PT = 1.2 * 72 / 25.4, 6 * 72 / 25.4, 4 * 72 / 25.4
+_CORTE_TEXTO_PT, _CORTE_AIRE_PT = 7 * 72 / 25.4, 3 * 72 / 25.4
+
+
+def _rotulo_talles(talles):
+    talles = [str(t) for t in (talles or []) if str(t).strip()]
+    if not talles:
+        return ""
+    return ("Talle " if len(talles) == 1 else "Talles ") + " · ".join(talles)
+
+
+def ops_cortes(cortes, m, ancho_pag, alto_pag, s, fuente=None):
+    """La línea de cada corte y sus dos rótulos (`cortes` = `[{y, arriba, abajo}]`, `y` en pt como las `cy`
+    del acomodo; un número suelto = sólo la línea). `fuente` = la que abre tipografías por nombre (sin
+    ella, o si falla, va sólo la línea)."""
+    if not cortes:
+        return b""
+    x0 = m["izq"] * CM * s
+    x1 = (ancho_pag - m["der"] * CM) * s
+    lineas = [f"q\n0 0 0 1 K\n{_num(_CORTE_ANCHO_PT * s)} w\n[{_num(_CORTE_TRAZO_PT * s)} {_num(_CORTE_HUECO_PT * s)}] 0 d\n"]
+    textos = []
+    f = None
+    if fuente is not None:
+        try:
+            f = fuente("Arial-BoldMT")
+        except Exception:
+            f = None
+    for c in cortes:
+        yc = c["y"] if isinstance(c, dict) else c
+        y = (alto_pag - (m["sup"] * CM + yc)) * s
+        lineas.append(f"{_num(x0)} {_num(y)} m\n{_num(x1)} {_num(y)} l\nS\n")
+        if f is None or not isinstance(c, dict):
+            continue
+        size = f.size_para_alto(_CORTE_TEXTO_PT)
+        for texto, yb in ((_rotulo_talles(c.get("arriba")), yc - _CORTE_ANCHO_PT / 2 - _CORTE_AIRE_PT),
+                          (_rotulo_talles(c.get("abajo")), yc + _CORTE_ANCHO_PT / 2 + _CORTE_AIRE_PT + _CORTE_TEXTO_PT)):
+            if not texto:
+                continue
+            try:
+                w = f.ancho_texto(texto, size)
+                ops = f.ops_texto(texto, size * s, (ancho_pag / 2 - w / 2) * s, (alto_pag - (m["sup"] * CM + yb)) * s)
+            except Exception:
+                continue
+            if ops:
+                textos.append(f"q\n0 0 0 1 k\n{ops}\nf\nQ\n")
+    lineas.append("Q\n")
+    return ("".join(lineas) + "".join(textos)).encode("latin-1")
+
+
+def componer_hoja_pike(colocaciones, cfg, path_salida, signo_rotacion=1, cortes=None, fuente=None):
     """Escribe la hoja (una página por mesa física) y devuelve `(consumo_cm, alturas_cm)`, igual
     que `nesting_contorno.componer_pdf_contorno`. Cada `c["pieza"]` trae `base` y `estampado`."""
     m = cfg["margenes_cm"]
+    # 🔴 LA MESA SIEMPRE DEL ANCHO IMPRIMIBLE DE LA TELA, también con Copia (regla del usuario
+    # 2026-10-14, MAPA 704: el recorte de la 699 se sacó)
     ancho_pag = cfg["ancho_cm"] * CM
     pdf = pikepdf.new()
     memo = {}
@@ -172,6 +226,8 @@ def componer_hoja_pike(colocaciones, cfg, path_salida, signo_rotacion=1):
             est = pz.get("estampado") or ""
             if est:
                 partes.append(f"q\n{cm}\n".encode("ascii") + est.encode("latin-1") + b"Q\n")
+        _cs = (cortes or [])[len(alturas_cm)] if cortes and len(alturas_cm) < len(cortes) else None
+        partes.append(ops_cortes(_cs, m, ancho_pag, alto_pag, s, fuente))
         page.obj["/Contents"] = pdf.make_stream(b"".join(partes))
         page.obj["/Resources"] = pikepdf.Dictionary({"/XObject": xobjs})
         alturas_cm.append(round(alto_pag / CM, 1))
@@ -525,14 +581,14 @@ def _remapear(stream, ren):
     return _RX_NOM.sub(lambda m: ren.get("/" + m.group(1), "/" + m.group(1)), stream)
 
 
-def componer_hoja_sello(colocaciones, cfg, path_salida, signo_rotacion=1, progreso=None):
+def componer_hoja_sello(colocaciones, cfg, path_salida, signo_rotacion=1, progreso=None, cortes=None, fuente=None):
     """Escribe la hoja con el dibujo de cada mesa UNA sola vez. Devuelve `(consumo_cm, alturas_cm)`,
     igual que `nesting_contorno.componer_pdf_contorno`.
 
     Cada `c["pieza"]` trae `base` (con `base_stream` y `fuentes_xo`) y `estampado`.
     """
     m = cfg["margenes_cm"]
-    ancho_pag = cfg["ancho_cm"] * CM
+    ancho_pag = cfg["ancho_cm"] * CM      # siempre el ancho imprimible de la tela (MAPA 704)
     pdf = pikepdf.new()
     consumo_cm, alturas_cm = 0.0, []
     xobjs = pikepdf.Dictionary()
@@ -627,6 +683,9 @@ def componer_hoja_sello(colocaciones, cfg, path_salida, signo_rotacion=1, progre
             if est:
                 partes.append(est.encode("latin-1"))
             partes.append(b"Q\n")
+        # las líneas punteadas entre talles (MAPA 710): `cortes[i]` es de la i-ésima mesa NO vacía
+        _cs = cortes[len(alturas_cm)] if cortes and len(alturas_cm) < len(cortes) else None
+        partes.append(ops_cortes(_cs, m, ancho_pag, alto_pag, s, fuente))
         page.obj["/Contents"] = pdf.make_stream(b"".join(partes))
         por_pagina.append((page, usados))
         alturas_cm.append(round(alto_pag / CM, 1))

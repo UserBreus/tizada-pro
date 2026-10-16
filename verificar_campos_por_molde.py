@@ -94,8 +94,6 @@ def main():
     ok('data-tour="arte-fuente-campo"' in app and "_campoFuenteSel" in app
        and "const _objetivo = _cs ? _cs.clave" in app,
        "el modal de Fuentes se elige por CAMPO (y sin campos, por fuente como siempre)")
-    ok("'arte-fuente-campo'" in io.open(os.path.join("frontend", "src", "diccionario.js"), encoding="utf-8").read(),
-       "…y la ayuda lo explica")
 
     print("\n2 · 🔴 VARIAS COLUMNAS DE NOMBRE Y DE NÚMERO, Y LA ELEGIDA MANDA")
     tpl = {"id": "tpl_x", "columnas": [

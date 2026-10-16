@@ -534,8 +534,9 @@ flowchart LR
       <table>
         <tr><th><code>modo</code></th><th>Qué hace</th></tr>
         <tr><td><code>"normal"</code></td><td>Lo de siempre (por defecto)</td></tr>
-        <tr><td><code>"una_por_fila"</code></td><td>Una mesa por fila; la cantidad pasa a ser copias. Necesita columna de cantidad</td></tr>
+        <tr><td><code>"una_por_fila"</code></td><td>Una mesa por fila; la cantidad pasa a ser copias (las que entran en una mesa se acomodan juntas, encastradas: cada archivo trae <code>por_mesa</code> y se imprime <code>copias</code> veces). Necesita columna de cantidad</td></tr>
         <tr><td><code>"por_talles"</code></td><td>Los talles de cada grupo comparten mesa: <code>"grupos": [["S","M"],["L","XL"]]</code></td></tr>
+        <tr><td><code>"talles_separados"</code></td><td>Todos en la misma mesa sin mezclar talles (línea punteada entre talles); <code>grupos</code> opcional</td></tr>
       </table>
       <h3><i class="ti ti-table"></i> <code>planilla[]</code></h3>
       <p class="chico">Claves = ids de columna del molde. Todo como texto (<code>"07"</code> con su cero). Talle tal cual el molde; opciones de la lista (<code>"Corta + Larga"</code> para varias); <code>cantidad</code> entero ≥ 1 (vacía = 1); <code>diseno</code> obligatoria si hay más de un diseño.</p>

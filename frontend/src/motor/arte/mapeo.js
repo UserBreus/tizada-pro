@@ -120,6 +120,9 @@ export function mapeoPorNombre(mupdf, bytes, registro) {
       }
       if (cands.length === 1) for (const nom of porgen.get(cands[0])) if (!mapeo.has(nom)) mapeo.set(nom, mesa)
     }
+    // UNA PIEZA Y UN DISEÑO (MAPA 700): nada que adivinar (la bandera, el banderín). Gemelo de
+    // `mapeo_por_nombre`: sin esto el arte sin rótulo quedaba sin asignar y salía como «clásico».
+    if (!mapeo.size && piezas.length === 1 && n === 1) mapeo.set(piezas[0], 1)
   } finally { doc.destroy() }
   return Object.fromEntries(mapeo)
 }

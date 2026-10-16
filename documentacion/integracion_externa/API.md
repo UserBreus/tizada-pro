@@ -162,6 +162,20 @@ Las telas van **por `id`**. `usable: false` = no se puede elegir (de baja o sin 
 Las que TIZADA ya tiene (`{"tipografias": ["Anton Regular", …]}`). Sólo hace falta mandar el archivo
 de una tipografía que **no** esté acá.
 
+### `GET /perfiles`
+
+Los perfiles de color que tiene el sistema (`{"perfiles": [{"archivo", "nombre", "espacio"}]}`), para
+`opciones.perfil_color` (vale el archivo o el nombre). Ejemplo: [`respuestas/GET_perfiles.json`](respuestas/GET_perfiles.json).
+
+### Lo que la pantalla deja hacer en el pedido, también por la API (MAPA 712)
+
+En `disenos[].moldes[]`: `ajustes` (mover/rotar/escalar/espejar un objeto editable), `colores` (su CMYK),
+`mapeo_arte` (qué mesa del arte va en cada pieza, a mano), `reemplazos` (una tipografía del arte por otra
+del catálogo), `tipografia_por_campo` (la del molde pisa la del diseño) y `editables: {"x": "no_imprimir"}`.
+En cada fila de `planilla`: `piezas` (Repo: qué piezas hace la fila). Detalle en `FORMATO_PEDIDO.md` §3.
+En `mesas`: `largo_max_m` (el largo máximo de cada mesa del pedido; sin él, el del nesting del molde — MAPA 716) y
+`separar_disenos` (`true`: cada diseño en sus propias mesas; sin él el mismo molde se mezcla aunque cambie el diseño — MAPA 717).
+
 ### `GET /alarmas` (sin llave) y `GET /formato` (sin llave)
 
 - `/alarmas`: el catálogo completo de alarmas — `codigo`, `etapa`, `frena`, `que_significa`, `que_hacer`.
@@ -195,6 +209,7 @@ contesta lo mismo que su pantalla. No guarda nada.
 ```json
 POST { "variable": "v_cb7fd79", "ancho_m": 3, "alto_m": 1.5, "tela": "44",
        "tiras": { "arriba": 5, "abajo": 5, "izq": 1 } }
+       (opcional "largo_max_m": 12 → las cuentas con ese largo de mesa, el que irá en `mesas.largo_max_m`)
        (círculo: "forma": "circulo", "diametro_m": 1.2 · triángulo: "forma": "triangulo", "orientacion": "abajo")
 200 { "forma": "rectangulo", "orientacion": null,
       "medida_diseno_cm": { "ancho": 300, "alto": 150 }, "total_cm": { "ancho": 306, "alto": 156 },
@@ -278,8 +293,8 @@ esquema: [`esquemas/resultado.schema.json`](esquemas/resultado.schema.json)):
 - `archivos[]`: cada PDF — `tipo` (`tizada` o `ficha`), `nombre`, `bytes`, `sha256`, **`descarga`**
   (la ruta para bajarlo de TIZADA), y si se subió a Drive `drive_id`, `enlace`, `carpeta_id`. Cada
   tizada es UNA MESA y trae `tela`, `mesa` (su número dentro de la tela), `mesas_de_la_tela`, `mesas`
-  (= 1), `ancho_cm`, `largo_cm` (`[su largo]`), `consumo_cm` (su largo), `aprovechamiento` (el de la
-  tela entera), `moldes` y, si corresponde, `fila` y `copias` (una mesa por fila) o `talles` (talles por mesa).
+  (= 1), `ancho_cm` (el ancho imprimible de la tela), `largo_cm` (`[su largo]`), `consumo_cm` (su largo), `aprovechamiento` (el de la
+  tela entera), `moldes` y, si corresponde, `fila`, `copias` (veces que se imprime ese archivo) y `por_mesa` (unidades que trae: con `una_por_fila` TIZADA pone a lo ancho todas las copias que entran; unidades = `por_mesa × copias`) (una mesa por fila) o `talles` (talles por mesa). Si la mesa mezcla filas del mismo molde (MAPA 717): `fila: null` y `filas: [{fila, por_mesa}]`; con `separar_disenos`, `diseno`.
 - `destino`: `tipo` = `drive` (con `carpeta_id`, `carpeta_enlace`, `carpeta_fichas_id`…) o `local`
   (Drive no conectado o caído: los PDF quedaron en TIZADA y se bajan con `descarga`).
 - `disenos[]`: por diseño y variable — `variable`, `variable_nombre`, la prenda, la tela y

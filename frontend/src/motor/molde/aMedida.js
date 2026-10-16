@@ -284,3 +284,26 @@ export function cabeEnTela({ anchoM, altoM, margen = null, bordeMm = 0, anchoCm,
   return { cabe: false, girada: false, motivo, excesoCm: Math.round(exceso * 10) / 10, maximoM, maximoLado: lado }
 }
 
+/**
+ * EL GIRO DE UN MOLDE A MEDIDA (MAPA 696): una bandera es una pieza plana, sin sentido de tela que la obligue a ir
+ * derecha → SIEMPRE puede girar 90°, sea cual sea la regla de acomodo del molde («libre» queda libre). Antes salía
+ * de esa regla: en el servidor publicado la Bandera tenía «Estándar» (no gira) y una de 3 × 1,50 «no entraba» en la
+ * tela de 1,60 mientras en el taller (regla «Productos simples», giro libre) sí. Gemelo: `_rotacion_a_medida`.
+ */
+export const rotacionAMedida = (rot) => (rot === 'libre' || rot === '90' ? rot : '90')
+
+/**
+ * ¿La COPIA a medida del pedido entra en una tela de `anchoCm`? La decide ESTA computadora (MAPA 692: el
+ * servidor sólo guarda; ya no frena el plan). `am` = lo que publica el servidor del molde (`_a_medida_publico`:
+ * medida, forma, punta, terminación, margen, borde y el acomodo). Mide la MISMA pieza que el visor
+ * (`estadoMedida`): forma, punta, terminación y el margen que RIGE con ella (MAPA 691).
+ */
+export function amEnTela(am, anchoCm, largoPedidoCm = null) {
+  const n = (am && am.nesting) || {}
+  const te = normTerminacion(am && am.terminacion)
+  return cabeEnTela({ anchoM: am.ancho_m, altoM: am.alto_m, margen: margenDeTerminacion(am, te), bordeMm: am.borde_mm, anchoCm,
+    // el largo de mesa del PEDIDO manda sobre el del nesting (MAPA 716)
+    largoMaxCm: largoPedidoCm || n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: rotacionAMedida(n.rotacion), resolucionMm: n.resolucion_mm,
+    forma: normForma(am.forma), orientacion: normOrientacion(am.orientacion), terminacion: te })
+}
+

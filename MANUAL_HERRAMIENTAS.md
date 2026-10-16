@@ -9,9 +9,8 @@
 > Regla: si cambia una herramienta, se actualiza **su entrada acá** + la sección del MAPA + el
 > changelog del MAPA, en la misma tanda.
 >
-> Las explicaciones de la **ayuda guiada in-app** viven en `frontend/src/diccionario.js` y cuentan la versión
-> corta de varias de estas herramientas: si acá se cambian los pasos, hay que revisar si el guion
-> de esa guía quedó mintiendo.
+> La **ayuda in-app** son videos (carpeta de Drive «TUTORIALES TIZADA PRO», §6.3): si acá cambian los
+> pasos de una herramienta, revisar si el video que la muestra quedó viejo.
 
 ---
 
@@ -1149,67 +1148,21 @@ molde, con el mismo lenguaje que el panel de capas de Illustrator:
   lista **«Ver piezas»** del panel de nombrar (funciona igual, con tik, pero por **nombre**); para
   **toda una capa**, su propio tik.
 
-### 6.3 **Ayuda guiada** (botón `nav-ayuda`, «Te guío paso a paso»)
+### 6.3 **Ayuda en video** (botón `nav-ayuda`, «Ayuda»)
 
-- **Hay dos cosas distintas y el menú las separa:**
-  - **«Hacerlo paso a paso» → «Armar una tizada»** (22 pasos): el único tutorial de verdad, calcado
-    del video `Como cargar un pedido.mp4` que grabó el usuario. Pide acciones y las verifica.
-  - **«Para qué sirve cada cosa» → 21 recorridos** en 3 áreas (el molde y sus ajustes ·
-    configuración del sistema · dentro del pedido): **sólo explican**, no piden hacer nada. Todos
-    sus pasos son informativos (`accion: 'ver'`) y el chequeo del build lo exige.
-- El menú ofrece además **retomar** lo que quedó a medias.
-- Oscurece la pantalla, **ilumina el control exacto** y muestra un globo con la consigna. El paso
-  avanza cuando la persona **hace la acción de verdad**; **Escape** sale.
-- Si el usuario no está en la pantalla que el paso necesita, **no lo teletransporta**: le va marcando
-  los botones hasta llegar (tabla `RUTAS` en `tutor.jsx`, se encadena sola).
-- ⚠️ **El pedido es un wizard y el botón de VOLVER es de la pantalla, no del destino**: desde la
-  Planilla se vuelve con **«← Arte»**, desde Resultados con **«← Atrás»**. Por eso las rutas del
-  pedido son **función de dónde estás**. A **Resultados no se llega con ningún botón** (se llega
-  generando): las guías que lo necesitan lo declaran con **`requiere(E)`** y **no arrancan** si no
-  hay tizada — muestran un candado y el motivo. Sin eso, la ayuda sacaba a la persona de su pedido.
-- 🔴 **Los tutoriales ya NO se escriben: los GRABA el usuario** (2026-08-27). Botón «Grabar un tutorial» en Ayuda → hace el trabajo → «Parar» → le pone un nombre. El sistema no graba video: anota **qué elemento tocó y en qué pantalla**, y los carteles los escribe él con `frontend/src/diccionario.js`. Se guardan en el catálogo (`tutoriales`) y son compartidos. Endpoints: `GET/POST /api/tutoriales` y `POST /api/tutoriales/borrar`.
-- **NO toca datos del usuario**: la acción la hace siempre la persona.
-
-**Cómo avanza un paso** — hay dos mecanismos y el orden importa:
-
-| | Cuándo | Qué mira |
-|---|---|---|
-| **`hecho(E, E0)`** | si el paso lo declara, **es la única forma de avanzar** | el **estado real** de la app: `E` ahora, `E0` = foto al empezar el paso |
-| DOM | el resto de los pasos | clic dentro del ancla, o el campo que **se vacía** al confirmar |
-
-`hecho` arregla dos agujeros de fondo:
-- **tocar un botón ≠ que la acción salga bien**: si el POST falla (ej. nombre repetido → **409**) el
-  estado no cambia y el tutorial **no** avanza;
-- los **gestos del visor** (elegir piezas, arrastrar) no se detectan por clic → antes esos pasos
-  avanzaban **solos por tiempo**. Ahora son `accion: 'gesto'` y **no avanzan por tiempo**.
-
-Si `hecho` ya da true al empezar el paso, **el paso se saltea** (no se pide lo ya hecho). Dos redes
-de seguridad: «Seguir igual» si el ancla no aparece en 5 s, y «Ya está, seguir» si `hecho` no se
-cumple en 15 s.
-
-🔴 **Un control nuevo ⇒ su ancla Y su explicación.** El ancla es `data-tour="id"` en el JSX;
-la explicación, una entrada con ese mismo id en `frontend/src/diccionario.js` (`nombre` · `que` =
-para qué es · `como` = qué hay que hacer). Sin ancla el paso **no se puede grabar**; sin
-explicación el cartel sale pobre.
-**Lo verifica `frontend/verificar_diccionario.mjs`, que corre en cada `npm run build`**
-(`npm run diccionario` para correrlo suelto) y **corta el build** si:
-- algún `data-tour` de `App.jsx` no tiene entrada en el diccionario;
-- sobra una entrada cuyo ancla ya no existe (texto muerto);
-- una entrada está incompleta, o `explicar()` perdió su fallback.
-
-**Cómo se dibuja el resaltado** (regla dura): el hueco deja ver el control **tal cual**; el resalte
-(aro + resplandor) va **siempre por afuera**. Nada de sombras `inset`: se dibujan adentro del hueco y
-**tapan el botón**. Y el globo **nunca** se pone encima del control: se mide y se ubica debajo →
-arriba → al costado → o se achica al hueco (`frontend/src/tutor_pos.js`, verificado en el build con
-8556 combinaciones de pantalla y posición).
-
-**Trampas históricas (no reintroducir):**
-- React limpia el `value` **por asignación directa, sin emitir evento** → detectar «campo
-  confirmado» escuchando `input` **no funciona jamás**. Se resuelve con `valorDe(ancla)` +
-  `vigilarVaciado()` que **mira el valor cada 150 ms**. Una prueba que fabrica el evento que la app
-  no emite **no prueba nada**.
-- El Enter **es del campo, no del tutorial**: con la ayuda abierta tiene que hacer exactamente lo
-  mismo que sin ella. El tutorial se entera por el **efecto** (el campo se vacía).
+- **Qué hace:** abre la ventana de tutoriales: lista de videos (con buscador y secciones) y el
+  reproductor propio (velocidades 0,5×–2×, ±10 s, siguiente automático, imagen en imagen, pantalla
+  completa, atajos de teclado, retoma donde se dejó).
+- **Agregar un tutorial:** subir el .mp4 a la carpeta de Drive «TUTORIALES TIZADA PRO»
+  (`1BD21AeE2iRhZoLAc9QxP218VaJMFvxTc`, compartida «cualquiera con el enlace»). Aparece solo en
+  menos de 5 min. Una subcarpeta = una sección; el número del principio del nombre ordena y no se
+  muestra. Conviene comprimirlo antes (`videos\PARA_DRIVE\comprimir.sh`). Su miniatura: un .jpg con el
+  MISMO nombre en la subcarpeta «miniaturas» (si no, la del video, que suele ser negra).
+- **Qué guarda:** el servidor baja cada video una vez a `datos/cache_ayuda/` (borrar esa carpeta
+  sólo obliga a volver a bajarlos). Endpoints: `GET /api/ayuda/videos`, `/api/ayuda/video/<id>/estado`,
+  `/api/ayuda/video/<id>`, `/api/ayuda/miniatura/<id>`.
+- **Trampas:** si la carpeta deja de estar compartida, Drive devuelve una página en vez del video y
+  la ayuda lo dice. Reemplaza a la ayuda paso a paso (quitada en MAPA 689).
 
 ### 6.4 Modales y avisos
 - Nada de `alert`/`confirm` del navegador: la UI usa su componente **`Modal`** y sus propios avisos.

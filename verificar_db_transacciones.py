@@ -226,6 +226,12 @@ ok(transacciones_que_escriben() == 1,
    f"y el documento va en la MISMA (fueron {transacciones_que_escriben()})")
 ok(bool(sentencias("config")) and bool(sentencias("INSERT INTO producto") or sentencias("UPDATE producto")),
    "el documento y las tablas se escriben en la misma transacción")
+# MAPA 694: cada guardado re-proyectaba TODOS los moldes (1,7–2,2 s en el publicado); con `solo`, sólo los que cambiaron
+_n_todos = len(sentencias("FROM talle WHERE producto_id"))
+limpiar(**{"FROM producto WITH (UPDLOCK": [(11,)]})
+db.guardar_catalogo(cat, solo={"prod_1"})
+ok(_n_todos == 3 and len(sentencias("FROM talle WHERE producto_id")) == 1 and transacciones_que_escriben() == 1,
+   f"con `solo` se re-proyecta sólo el molde que cambió ({len(sentencias('FROM talle WHERE producto_id'))} de {_n_todos}), en la misma transacción")
 
 print("\n6) Borrar lo de un molde limpia PRIMERO lo que lo referencia")
 limpiar(**{"FROM producto WITH (UPDLOCK": [(11,)]})

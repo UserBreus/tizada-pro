@@ -44,6 +44,7 @@ export function prepararArte(mupdf, bytes, contexto) {
   if (contexto.plantilla) modo = arteEsSeparado(mupdf, bytes, contexto.plantilla) ? 'separado' : 'clasico'
   const det = detectarArte(mupdf, bytes, registro, contexto.ancho_thumb || 240)
   let auto = {}, pers = {}, mapeo = {}, pv = {}, validacion
+  const errManual = {}
   if (modo === 'separado') {
     auto = mapeoPorNombre(mupdf, bytes, registro)
     pers = extraerPersonalizacion(mupdf, bytes)
@@ -55,6 +56,23 @@ export function prepararArte(mupdf, bytes, contexto) {
       const m = Math.trunc(Number(mesa))
       if (!m || !(pieza in registro)) continue
       if (!(pieza in mapeo) && !usadas.has(m)) { mapeo[pieza] = m; usadas.add(m) }
+    }
+    // MAPEO A MANO (MAPA 712, el sistema externo): {pieza exacta: número de mesa | rótulo escrito en la
+    // mesa} — manda sobre lo automático, como arrastrar la mesa a la pieza en la pantalla
+    if (contexto.manual && typeof contexto.manual === 'object') {
+      const mesasDet = (det && det.mesas) || []
+      const norm = (t) => String(t || '').trim().toLowerCase().replace(/\s+/g, ' ')
+      for (const [pieza, v] of Object.entries(contexto.manual)) {
+        if (!(pieza in registro)) continue
+        let m = null
+        if (typeof v === 'number') m = mesasDet.some((x) => x.mesa === v) ? v : null
+        else {
+          const hit = mesasDet.find((x) => norm(x.rotulo) === norm(v) || norm(x.nombre_detectado) === norm(v))
+          m = hit ? hit.mesa : null
+        }
+        if (m === null) { errManual[pieza] = typeof v === 'number' ? `la mesa ${v} no existe en el arte` : `ninguna mesa dice «${v}»`; continue }
+        mapeo[pieza] = m
+      }
     }
     for (const [clave, piezas] of Object.entries(variantes)) {
       if (!clave || !piezas || !piezas.length) continue
@@ -85,5 +103,5 @@ export function prepararArte(mupdf, bytes, contexto) {
     'pv.json': [texto(pv), { level: 6 }],
     'validacion.json': [texto(validacion), { level: 6 }],
   }
-  return { zip: zipSync(entradas), sha1, modo, det, auto, pers, mapeo, pv, validacion }
+  return { zip: zipSync(entradas), sha1, modo, det, auto, pers, mapeo, pv, validacion, mapeoManualErrores: errManual }
 }

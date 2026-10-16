@@ -4,13 +4,13 @@
 🔴 EL BUG QUE ESTE CONTRATO CIERRA (auditoría 2026-09-15). La guarda general, cuando un POST no
 trae `pid`, resuelve el molde ACTIVO y exige `molde.editar`. Está bien para las ~30 rutas que
 escriben un molde sin declararlo, y MAL para las 31 que no tocan ninguno: un Operario no podía
-grabar un tutorial, tomar una reserva, guardar una plantilla de planilla, cambiar el ancho de una
+tomar una reserva, guardar una plantilla de planilla, cambiar el ancho de una
 tela **ni cancelar su propia tizada**. De yapa, varias de esas rutas quedaban «protegidas» por
 accidente: el único candado era un permiso que no tiene nada que ver con lo que hacen — y cuando
 se las exime, quedan abiertas si nadie les pone el suyo.
 
 `servidor._API_SIN_MOLDE` declara, ruta por ruta, qué le corresponde:
-  · un permiso del catálogo (`config.editar`, `ayuda.grabar`, …),
+  · un permiso del catálogo (`config.editar`, `fuente.gestionar`, …),
   · `"dueño"` — no hay permiso que pedir: el endpoint mira por su cuenta de quién es cada cosa,
   · `"libre"` — no hay nada que proteger porque no escribe nada.
 

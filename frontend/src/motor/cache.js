@@ -21,6 +21,9 @@ export const claveDe = {
   mesaJson: (pid, mesa, sello) => `${pid}|m${mesa}.json|${_s(sello)}`,
   /** el arte (vigente) de un diseño; `diseno` = 'principal' o el id del diseño */
   arte: (pid, diseno, sello) => `arte|${pid}|${diseno || 'principal'}|${_s(sello)}`,
+  /** el perfil ICC de la hoja (OutputIntent): se bajaba ENTERO (0,5–2 MB) en cada tizada (MAPA 694). El nombre,
+   *  el archivo elegido y el tamaño lo identifican: un .icc no cambia de contenido sin cambiar de tamaño. */
+  perfil: (archivo, nombre, bytes) => `perfil|${archivo || ''}|${nombre || ''}|${bytes || 0}`,
 }
 /** De dónde se baja cada uno (sin el prefijo de la app: pasarlo por `rutaApi`). */
 export const urlDe = {
@@ -28,6 +31,7 @@ export const urlDe = {
   mesa: (pid, mesa, ext) => `/api/productos/${encodeURIComponent(pid)}/desplegado/m${mesa}.${ext}`,
   arte: (pid, diseno) => `/api/productos/${encodeURIComponent(pid)}/arte_archivo` +
     (diseno && diseno !== 'principal' ? `?diseno=${encodeURIComponent(diseno)}` : ''),
+  perfil: (archivo) => '/api/pedido/perfil_salida' + (archivo ? '?forzado=' + encodeURIComponent(archivo) : ''),
 }
 
 // Una sola conexión: antes cada lectura abría una nueva y ninguna se cerraba.

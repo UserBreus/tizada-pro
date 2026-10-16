@@ -42,8 +42,13 @@ export function paginaComoPdf(mupdf, bytes, pi = 0) {
  */
 export function nombreMesaDef(gi, tela, mf) {
   let suf = ''
-  if (mf && mf.copias != null) suf = (mf.fila ? ' - Fila ' + mf.fila : '') + ' - x' + mf.copias
+  // COPIA QUE LLENA EL ANCHO (MAPA 701): cuántas trae la mesa (`por_mesa`) y cuántas veces se imprime
+  // COPIA MEZCLADA (MAPA 717): la mesa trae varias filas del mismo molde → «Filas 1+2»
+  const filas = mf && Array.isArray(mf.filas) && mf.filas.length ? ' - Filas ' + mf.filas.map((f) => f.fila).join('+') : ''
+  if (mf && mf.copias != null) suf = (mf.fila ? ' - Fila ' + mf.fila : filas) + (mf.por_mesa > 1 ? ' - ' + mf.por_mesa + ' por mesa' : '') + ' - x' + mf.copias
   else if (mf && Array.isArray(mf.talles) && mf.talles.length) suf = ' - Talles ' + mf.talles.join('-')
+  // SEPARAR DISEÑOS (MAPA 717): el diseño de la mesa
+  if (mf && mf.diseno) suf = ' - ' + mf.diseno + suf
   return 'Mesa ' + (gi + 1) + (tela ? ' - ' + tela : '') + suf
 }
 

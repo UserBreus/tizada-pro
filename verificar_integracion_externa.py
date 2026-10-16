@@ -215,7 +215,40 @@ def _servir(clase):
     return srv
 
 
+def _un_solo_robot():
+    """MAPA 698: en el publicado cada actualización dejaba vivo al robot del servidor viejo (con su código) y ése
+    tomaba pedidos: el de la 1.0.49 no arma la copia a medida → «la pieza de 103,6 × 103,6 cm» pida lo que pida."""
+    print("\n0 · UN SOLO ROBOT: EL QUE LANZÓ ESTE SERVIDOR (MAPA 698)")
+    antes = IE._ROBOT.get("proc")
+    try:
+        IE._ROBOT["proc"] = object()          # «este servidor lanzó su robot»
+        with S.app.test_request_context("/api/externo/robot/tomar", method="POST"):
+            r = IE.robot_tomar()
+            ok((r.get_json() or {}).get("salir") is True and (r.get_json() or {}).get("tarea") is None,
+               "un robot SIN el turno (uno viejo, de otro arranque) no recibe trabajo y se le dice que se cierre")
+        with S.app.test_request_context("/api/externo/robot/tomar", method="POST", headers={"X-Robot-Turno": "otro-turno"}):
+            ok(not IE._robot_de_este_turno(), "con el turno de OTRO arranque, tampoco")
+        with S.app.test_request_context("/api/externo/robot/tomar", method="POST", headers={"X-Robot-Turno": IE._TURNO_ROBOT}):
+            ok(IE._robot_de_este_turno(), "el robot de ESTE arranque, sí")
+        IE._ROBOT["proc"] = None              # sin robot propio (las pruebas lo corren a mano): vale cualquiera
+        with S.app.test_request_context("/api/externo/robot/tomar", method="POST"):
+            ok(IE._robot_de_este_turno(), "sin robot propio del servidor, cualquiera con la llave (así corre esta prueba)")
+    finally:
+        IE._ROBOT["proc"] = antes
+    src = open(os.path.join(AQUI, "integracion_externa.py"), encoding="utf-8").read()
+    rob = open(ROBOT, encoding="utf-8").read()
+    _arr = src[src.index("def arrancar_robot("):src.index("RUTAS_DE_PANTALLA = {")]
+    ok("_cerrar_robots_viejos(guion)" in _arr and _arr.index("_cerrar_robots_viejos(guion)") < _arr.index("subprocess.Popen(")
+       and "TIZADA_ROBOT_TURNO=_TURNO_ROBOT" in _arr,
+       "al arrancar se cierran los robots que quedaron (de a uno, por su comando exacto) y el nuevo lleva el turno")
+    ok("h.set('X-Robot-Turno', process.env.TIZADA_ROBOT_TURNO)" in rob and "if (t.salir) {" in rob and "process.exit(0)" in rob,
+       "el robot manda su turno y se cierra si el servidor le dice «salir»")
+    ok(IE._cerrar_robots_viejos(ROBOT) == [] if os.name == "nt" else True,
+       "en Windows no se busca nada (el Job del servidor se lleva a sus hijos)")
+
+
 def main():
+    _un_solo_robot()
     print("\n1 · EL MOLDE DE PRUEBA (copia), SU CATÁLOGO Y EL SERVIDOR")
     carpeta = os.path.join(_TMP, "entrada", PID)
     os.makedirs(carpeta)
@@ -322,10 +355,56 @@ def main():
         ("fila-diseno-desconocido", pedido(planilla=[{"talle": "M", "diseno": "ARQUERO"}])),
         ("planilla-vacia", pedido(planilla=[])),
         ("mesas-invalido", pedido(mesas={"modo": "por_talles", "grupos": [["M", "ZZ"]]})),
+        # MAPA 712: lo que la pantalla deja hacer en el pedido, también por la API
+        ("ajuste-invalido", pedido(disenos=[{"nombre": "J", "arte": "a.ai", "moldes": [{"molde": PID, "tela": "44", "ajustes": {"escudo": {"dx": "mucho"}}}]}])),
+        ("color-invalido", pedido(disenos=[{"nombre": "J", "arte": "a.ai", "moldes": [{"molde": PID, "tela": "44", "colores": {"escudo": {"fill": [2, 0, 0, 0]}}}]}])),
+        ("mapeo-arte-invalido", pedido(disenos=[{"nombre": "J", "arte": "a.ai", "moldes": [{"molde": PID, "tela": "44", "mapeo_arte": {"Capucha": 1}}]}])),
+        ("tipografia-desconocida", pedido(disenos=[{"nombre": "J", "arte": "a.ai", "moldes": [{"molde": PID, "tela": "44", "reemplazos": {"Vieja": "NoExisteEstaFuente123"}}]}])),
+        ("perfil-desconocido", pedido(opciones={"perfil_color": "NoExiste.icc"})),
+        ("repo-invalido", pedido(planilla=[{"talle": "M", "piezas": {PID: ["Capucha"]}}])),
+        # MAPA 716: el largo de mesa del pedido (el botón «Largo» de la planilla)
+        ("largo-mesa-invalido", pedido(mesas={"modo": "normal", "largo_max_m": 80})),
+        ("largo-mesa-invalido", pedido(mesas={"modo": "normal", "largo_max_m": "mucho"})),
+        # MAPA 717: «Separar diseños» es true o false
+        ("mesas-invalido", pedido(mesas={"modo": "normal", "separar_disenos": "si"})),
     ]
     for cod, p in casos:
         c, cods, _ = codigos(p)
         ok(c == 422 and cod in cods, f"{cod} ({c}: {', '.join(cods) or 'sin alarmas'})")
+    # MAPA 712: un pedido con TODO lo nuevo bien armado pasa (ajustes, colores, mapeo a mano, «no imprimir», Repo)
+    c, cods, d = codigos(pedido(disenos=[{"nombre": "JUGADOR", "arte": "artes/jugador.ai", "moldes": [{
+        "molde": PID, "tela": "44", "editables": {"escudo": "no_imprimir"},
+        "ajustes": {"escudo": {"dx": 0.1, "dy": -0.05, "rot": 15, "scale": 1.2, "talles": ["M"]}},
+        "colores": {"escudo": {"fill": [0, 0.5, 1, 0]}}, "mapeo_arte": {"Cuello": 1}}]}],
+        planilla=[{"talle": "M", "nombre": "A", "numero": "1", "piezas": {PID: ["Cuello"]}}]))
+    ok(c == 200 and not cods and d.get("aceptaria"), f"un pedido con ajustes, colores, mapeo a mano, «no imprimir» y Repo pasa ({c}, {cods})")
+    # …y se traduce a lo MISMO que manda la pantalla (Repo con la copia a medida, ajustes, colores, tipografías)
+    _cu = IE.cuerpo_de({"disenos": [{"slug": "x-j", "nombre": "J", "tipografia_por_campo": {"nombre": "Fuente A"},
+                                     "moldes": [{"pid": "COPIA", "plantilla": "ORIG", "variable": "v1",
+                                                 "ajustes_ident": {"Escudo": {"M": {"dx": 0.1}}},
+                                                 "colores_ident": {"Escudo": {"fill": [0, 0, 0, 1], "stroke": None}},
+                                                 "tipografia_por_campo": {"nombre": "Fuente B"}, "reemplazos": {"Vieja": "Nueva"}}]}],
+                        "filas": [{"talle": "M", "__repo_ext": {"ORIG": ["Cuello"]}, "__diseno": "J"}],
+                        "mesas": {"modo": "normal"}, "opciones": {}, "columnas": []})
+    _rr = (_cu.get("fuentes_reemplazo_por") or {}).get("x-j|COPIA") or {}
+    ok(_cu["prendas"][0].get("__repo") == {"COPIA": ["Cuello"]} and "__repo_ext" not in _cu["prendas"][0]
+       and _cu.get("editables") == {"x-j": {"*": {"Escudo": {"M": {"dx": 0.1}}}, "v1": {"Escudo": {"M": {"dx": 0.1}}}}}
+       and (_cu.get("editables_color") or {}).get("x-j", {}).get("*", {}).get("Escudo", {}).get("fill") == [0, 0, 0, 1]
+       and _rr.get("Vieja") == "Nueva" and "Fuente B" in _rr.values() and "Fuente A" not in _rr.values(),
+       "se traduce como la pantalla: Repo al molde que se usa (la copia a medida), ajustes y colores por diseño y variable, "
+       "la tipografía del MOLDE pisa la del diseño y los reemplazos llegan")
+    # MAPA 716: el largo de mesa pasa la revisión y llega al cuerpo como lo manda la pantalla
+    c, cods, d = codigos(pedido(mesas={"modo": "normal", "largo_max_m": 12.5}))
+    _cu2 = IE.cuerpo_de({"disenos": [{"slug": "x-j", "nombre": "J", "moldes": [{"pid": "P", "plantilla": "P", "variable": "v1"}]}],
+                         "filas": [{"talle": "M", "__diseno": "J"}], "mesas": {"modo": "normal", "largo_cm": 1250.0},
+                         "opciones": {}, "columnas": []})
+    _cu3 = IE.cuerpo_de({"disenos": [{"slug": "x-j", "nombre": "J", "moldes": [{"pid": "P", "plantilla": "P", "variable": "v1"}]}],
+                         "filas": [{"talle": "M", "__diseno": "J"}], "mesas": {"modo": "una_por_fila", "separar_disenos": True},
+                         "opciones": {}, "columnas": []})
+    ok(_cu3.get("separar_disenos") is True and "separar_disenos" not in _cu2,
+       "`mesas.separar_disenos` llega al cuerpo como el botón «Separar» (y sin él no viaja: el mismo molde se mezcla)")
+    ok(c == 200 and not cods and _cu2.get("largo_mesa_cm") == 1250.0,
+       f"`mesas.largo_max_m` 12,5 pasa y llega como `largo_mesa_cm` 1250 ({c}, {cods}, {_cu2.get('largo_mesa_cm')})")
     c, d = _http("POST", api + "/pedidos", llave=llave, cuerpo=b"esto no es un zip", tipo="application/zip")
     ok(c == 422 and d["alarmas"][0]["codigo"] == "paquete-ilegible", "un paquete que no es .zip: paquete-ilegible")
     c, d = _http("POST", api + "/pedidos", llave=llave, cuerpo=_zip(pedido(), {}), tipo="application/zip")
@@ -347,11 +426,18 @@ def main():
                              "tipografia_por_campo": {"nombre": _PS_FUENTE, "numero": _PS_FUENTE},
                              "moldes": [{"molde": PID, "tela": "44", "telas_por_pieza": {"Cuello": "77"}, "arte": "artes/jugador.ai"}]},
                             {"nombre": "GOLERO", "arte": "artes/golero.ai",
-                             "moldes": [{"molde": PID, "tela": "44", "telas_por_pieza": {"Cuello": "77"}, "editables": {"escudo": "tpu"}}]}],
+                             "moldes": [{"molde": PID, "tela": "44", "telas_por_pieza": {"Cuello": "77"}, "editables": {"escudo": "tpu"},
+                                         # MAPA 712: el ajuste y el color del escudo, como «Editar diseño» de la pantalla
+                                         "ajustes": {"escudo": {"dx": 0.05, "rot": 10, "scale": 0.9}},
+                                         "colores": {"escudo": {"fill": [0, 0, 0, 1]}}}]}],
                    planilla=[{"diseno": "JUGADOR", "talle": "M", "nombre": "PÉREZ", "numero": "10", "manga": "Corta", "cantidad": 1},
+                             # MAPA 712: REPO — esta fila sólo hace el cuello
+                             {"diseno": "JUGADOR", "talle": "M", "nombre": "REPO", "numero": "5", "manga": "Corta", "piezas": {PID: ["Cuello"]}},
                              {"diseno": "JUGADOR", "talle": talles[-1], "nombre": "GÓMEZ", "numero": "7", "manga": "Larga", "cantidad": 2},
                              {"diseno": "GOLERO", "talle": "M", "nombre": "RAMOS", "numero": "1", "manga": "Larga"}],
-                   opciones={"si_falta_tipografia": "predeterminada", "si_piezas_en_blanco": "seguir"})
+                   opciones={"si_falta_tipografia": "predeterminada", "si_piezas_en_blanco": "seguir"},
+                   # MAPA 716: mesas de 1,5 m como máximo (el botón «Largo» de la planilla)
+                   mesas={"modo": "normal", "largo_max_m": 1.5, "separar_disenos": True})
     paquete = _zip(bueno, {"artes/jugador.ai": arte1, "artes/golero.ai": arte2, "tipografias/" + os.path.basename(FUENTE): FUENTE})
     c, d = _http("POST", api + "/pedidos", llave=llave, cuerpo=paquete, tipo="application/zip")
     ok(c == 202 and d.get("aceptado") and d.get("estado") == "en_cola", f"el paquete se acepta y queda en cola ({c}: {[a['codigo'] for a in d.get('alarmas') or []]})")
@@ -360,6 +446,15 @@ def main():
     t = time.time()
     r = _correr_robot(base)
     seg = time.time() - t
+    # MAPA 712: el robot resolvió el ajuste y el color con el nombre REAL del objeto del arte, en todos los talles
+    _nj = json.load(open(os.path.join(IE._dir_pedido("OV-2026-00123"), "normal.json"), encoding="utf-8"))
+    _gol = next(m for dd in _nj["disenos"] if dd["nombre"] == "GOLERO" for m in dd["moldes"])
+    _cu712 = IE.cuerpo_de(_nj)
+    _rep = [pr.get("__repo") for pr in _cu712["prendas"] if pr.get("__repo")]
+    ok(bool(_gol.get("ajustes_ident")) and all(len(v) == len(talles) for v in _gol["ajustes_ident"].values())
+       and bool(_gol.get("colores_ident")) and (_cu712.get("editables") or {}) and (_cu712.get("editables_color") or {})
+       and _rep == [{PID: sorted(p for p in registro if p.split()[0] == "Cuello") or ["Cuello"]}] or _rep and list(_rep[0].values())[0],
+       f"el robot resolvió ajuste y color del escudo ({list((_gol.get('ajustes_ident') or {}).keys())}) y el Repo de la fila viaja ({_rep})")
     c, est = _http("GET", api + "/pedidos/OV-2026-00123", llave=llave)
     if est.get("estado") != "listo":
         print("    --- salida del robot ---\n" + (r.stdout or "")[-3000:] + "\n" + (r.stderr or "")[-3000:])
@@ -376,6 +471,12 @@ def main():
     ok(len(tiz) >= 2 and any(a.get("tipo") == "ficha" for a in arch),
        f"{len(tiz)} tizada(s) + la ficha técnica: " + ", ".join(f"{a['nombre']} ({a.get('tela')}, {a.get('mesas')} mesa/s)" for a in tiz))
     ok({a.get("tela") for a in tiz} == {"Bandera (1,60)", "Rib (1,00)"}, "una tizada por tela: la principal y la del cuello")
+    _largos = [float(x) for a in tiz for x in (a.get("largo_cm") or [])]
+    ok(_largos and max(_largos) <= 150.5 and len(tiz) > 2,
+       f"`largo_max_m` 1,5: ninguna mesa pasa de 150 cm y lo que no entra sigue en otra ({len(tiz)} mesas: {_largos})")
+    _dis = {a.get("diseno") for a in tiz}
+    ok(_dis == {"JUGADOR", "GOLERO"},
+       f"`separar_disenos`: cada mesa es de UN diseño y lo dice (MAPA 717): {sorted(str(x) for x in _dis)}")
     # el otro sistema no ve rutas del disco del servidor; cada archivo trae su `descarga`
     txt_res = json.dumps(res, ensure_ascii=False)
     ok("ruta" not in {k for a in arch for k in a} and "copia_local" not in txt_res and "carpeta" not in (res.get("destino") or {})

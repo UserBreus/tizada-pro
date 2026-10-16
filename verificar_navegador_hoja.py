@@ -84,7 +84,7 @@ def _registro(pl):
     return alta["registro"], alta["talles"], prod
 
 
-def _volcar(colocaciones, cfg, signo, carpeta, nombre, perfil=None):
+def _volcar(colocaciones, cfg, signo, carpeta, nombre, perfil=None, cortes=None, fuente_archivo=None):
     """Lo que recibe `componer_hoja_sello`, como datos simples, en `<carpeta>/<nombre>.json`."""
     bases, ids, origenes = {}, {}, {}
     hojas = []
@@ -115,6 +115,10 @@ def _volcar(colocaciones, cfg, signo, carpeta, nombre, perfil=None):
     d = {"cfg": cfg, "hojas": hojas, "bases": bases, "origenes": origenes, "signo_rotacion": signo}
     if perfil:
         d["perfil"] = perfil
+    if cortes:
+        d["cortes"] = cortes
+    if fuente_archivo:
+        d["fuente_archivo"] = fuente_archivo
     ruta = os.path.join(carpeta, nombre + ".json")
     with open(ruta, "w", encoding="utf-8") as fh:
         json.dump(d, fh, ensure_ascii=False)
@@ -329,8 +333,8 @@ def main():
         capturas = []
         original = hoja_pike.componer_hoja_sello
 
-        def _espia(colocaciones, cfg, path_salida, signo_rotacion=1, progreso=None):
-            r = original(colocaciones, cfg, path_salida, signo_rotacion, progreso)
+        def _espia(colocaciones, cfg, path_salida, signo_rotacion=1, progreso=None, cortes=None, fuente=None):
+            r = original(colocaciones, cfg, path_salida, signo_rotacion, progreso, cortes=cortes, fuente=fuente)
             capturas.append((colocaciones, cfg, path_salida, signo_rotacion, r))
             return r
         hoja_pike.componer_hoja_sello = _espia
@@ -391,6 +395,51 @@ def main():
                 ok2, txt2 = comparar(path_py2, js2, "larga")
                 print(txt2)
                 ok_todo = ok_todo and ok2
+
+                # 6. TALLES SEPARADOS (MAPA 710-711): las líneas punteadas entre talles con sus rótulos
+                #    («Talle M» arriba, «Talles L · XL» abajo, en curvas), iguales en los dos
+                cortes = [[{"y": 20 * CM, "arriba": ["M"], "abajo": ["L", "XL"]}, {"y": 40 * CM, "arriba": ["L", "XL"], "abajo": ["2XL"]}]]
+                _arial = os.path.join(AQUI, "catalogo_fuentes", "Arial-Bold.ttf")
+                from texto_curvas import FuenteCurvas as _FC
+                _fa = _FC(open(_arial, "rb").read())
+                path_py4 = os.path.join(tmp, "cortes_py.pdf")
+                original([coloc[0]], cfg, path_py4, signo, None, cortes=cortes, fuente=lambda _n: _fa)
+                ent4 = _volcar([coloc[0]], cfg, signo, tmp, "cortes", cortes=cortes, fuente_archivo=_arial)
+                js4 = os.path.join(tmp, "cortes_js.pdf")
+                _node(ent4, js4)
+                with pikepdf.open(path_py4) as p4:
+                    _c4 = p4.pages[0].Contents.read_bytes() if not isinstance(p4.pages[0].Contents, pikepdf.Array) else b""
+                _hay = b" d" in _c4 and _c4.count(b" l\n") >= 2 and _c4.count(b"\nf\n") >= 4
+                print(f"· TALLES SEPARADOS: líneas punteadas con sus 4 rótulos en la hoja: {'sí' if _hay else 'NO'}")
+                if not _hay:
+                    print("  ✗ la hoja del servidor no trae las líneas punteadas con sus rótulos")
+                    ok_todo = False
+                if os.environ.get("TIZADA_RENDER_CORTES"):      # para MIRAR cómo queda (no cambia la prueba)
+                    import pymupdf as _fz
+                    with _fz.open(path_py4) as _d:
+                        _d[0].get_pixmap(dpi=30).save(os.environ["TIZADA_RENDER_CORTES"])
+                ok4, txt4 = comparar(path_py4, js4, "cortes")
+                print(txt4)
+                ok_todo = ok_todo and ok4
+
+                # 5. COPIA (MAPA 704): con `por_fila` la mesa SIGUE del ancho de la tela (regla del
+                #    usuario: el ancho imprimible real de cada tela, nunca recortado)
+                pocas = [list(coloc[0][:2])]
+                cfg_c = dict(cfg, por_fila=True)
+                path_py3 = os.path.join(tmp, "copia_py.pdf")
+                original(pocas, cfg_c, path_py3, signo, None)
+                ent3 = _volcar(pocas, cfg_c, signo, tmp, "copia")
+                js3 = os.path.join(tmp, "copia_js.pdf")
+                _node(ent3, js3)
+                with pikepdf.open(path_py3) as p3:
+                    an_py = round(float(p3.pages[0].mediabox[2]) / CM, 2)
+                print(f"· COPIA (2 piezas): página de {an_py} cm (tela {cfg['ancho_cm']} cm)")
+                if abs(an_py - float(cfg["ancho_cm"])) > 0.01:
+                    print("  ✗ con Copia la mesa no mide el ancho de la tela")
+                    ok_todo = False
+                ok3, txt3 = comparar(path_py3, js3, "copia")
+                print(txt3)
+                ok_todo = ok_todo and ok3
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

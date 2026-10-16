@@ -38,9 +38,9 @@ def _prod(juntas_grupo=None, juntas_var=None):
         }],
     }
 
-def _correr(prod):
-    """Devuelve las `juntas_piezas` que le llegarian al motor para la prenda de la variable v_1."""
-    prendas = [{"cantidad": 1, "talle": "M", "__variante": "v_1"}]
+def _correr(prod, clave="v_1"):
+    """Devuelve las `juntas_piezas` que le llegarian al motor para la prenda de la variable `clave`."""
+    prendas = [{"cantidad": 1, "talle": "M", "__variante": clave}]
     # el indice pieza_id→clave sale de piezas.json; se inyecta el que necesita la traduccion
     _orig = S._cargar
     def _fake(nombre, pid=None):
@@ -70,6 +70,17 @@ for nombre, prod, esperado in casos:
     bien = (got == esperado)
     ok &= bien
     print(("  OK  " if bien else " FALLA") + f" · {nombre}: {got}")
+
+# -- (1b) POR VARIABLE (MAPA 722): la MISMA pieza (el vivo) vinculada con una compañera en v_1 y con
+#    otra en v_2, en el mismo grupo: cada variable lleva SU vínculo y uno no rompe al otro ----------
+_p2 = _prod(juntas_var=[{"id": "j_1", "nombre": "Manga corta derecha", "piezas": [0, 1]}])
+_v2 = dict(_p2["variantes"][0], clave="v_2", label="V2", juntas=[{"id": "j_2", "nombre": "Espalda", "piezas": [1, 2]}])
+_p2["variantes"].append(_v2)
+for _cl, _esp in (("v_1", [["Manga corta derecha 1", "Vivo manga 1"]]), ("v_2", [["Vivo manga 1", "Espalda 1"]])):
+    got = _correr(_p2, _cl)
+    bien = (got == _esp)
+    ok &= bien
+    print(("  OK  " if bien else " FALLA") + f" · por variable ({_cl}): {got}")
 
 # -- (2) el endpoint que guarda los grupos NO se come el campo `juntas` ---------------------
 _cat = {"productos": [{"id": "ZZ_test", "nombre": "TEST"}]}

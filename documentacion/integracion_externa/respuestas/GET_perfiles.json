@@ -1,0 +1,28 @@
+{
+ "http": 200,
+ "cuerpo": {
+  "perfiles": [
+   {
+    "archivo": "AdobeRGB1998.icc",
+    "nombre": "Adobe RGB (1998)",
+    "espacio": "RGB"
+   },
+   {
+    "archivo": "AppleRGB.icc",
+    "nombre": "Apple RGB",
+    "espacio": "RGB"
+   },
+   {
+    "archivo": "CoatedFOGRA27.icc",
+    "nombre": "Coated FOGRA27 (ISO 12647-2:2004)",
+    "espacio": "CMYK"
+   },
+   {
+    "archivo": "CoatedFOGRA39.icc",
+    "nombre": "Coated FOGRA39 (ISO 12647-2:2004)",
+    "espacio": "CMYK"
+   }
+  ],
+  "nota": "mandar en `opciones.perfil_color` el archivo o el nombre"
+ }
+}

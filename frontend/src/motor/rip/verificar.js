@@ -54,7 +54,8 @@ function csOk(cs, iccHashes) {
         iccHashes.get(h).add(idDe(st))
         return true
       }
-      if (fam === 'Separation' || fam === 'DeviceN') return csOk(cs.get(2), iccHashes)
+      // una tinta plana con nombre (un Pantone) vale con cualquier respaldo (MAPA 713, ver verificar_rip_compatible.py)
+      if (fam === 'Separation' || fam === 'DeviceN') return true
       if (fam === 'Indexed') return csOk(cs.get(1), iccHashes)
       if (fam === 'Pattern') return true
       return fam === 'DeviceCMYK' || fam === 'DeviceGray'

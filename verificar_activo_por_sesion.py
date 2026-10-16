@@ -37,7 +37,7 @@ _falso.__getattr__ = lambda n: (lambda *a, **k: None)
 _falso.get_doc = lambda c, default=None: _DOCS.get(c, default)
 _falso.get_doc_ver = lambda c, default=None: (_DOCS.get(c, default), 0)
 _falso.set_doc = lambda c, o, version_esperada=None: (_DOCS.__setitem__(c, o), 1)[-1]
-_falso.guardar_catalogo = lambda cat, version_esperada=None: (_DOCS.__setitem__("catalogo", cat), 1)[-1]
+_falso.guardar_catalogo = lambda cat, version_esperada=None, solo=None: (_DOCS.__setitem__("catalogo", cat), 1)[-1]
 _falso.leer_registro = lambda pid: None
 sys.modules["db"] = _falso
 sys.modules["api_usuarios"] = types.ModuleType("api_usuarios")

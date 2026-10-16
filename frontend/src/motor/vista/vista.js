@@ -246,6 +246,14 @@ const TOPE_LADO_PX = 15000                 // un lado más largo que esto el nav
 const CM_PT = 28.3465
 const _progreso = new Map()          // `${huella}|${página}` → {total, hechos}: el precalentado POR MESA
 
+/** El ancho (cm) de la mesa `pi` de una hoja del resultado: el de la tela. `anchos_cm` sólo lo traen
+ * los pedidos generados el 2026-10-13 con el recorte de la 699 (ya sacado, MAPA 704): se respeta para
+ * que esas mesas se sigan viendo con el tamaño de su PDF. */
+export function anchoMesaCm(h, pi) {
+  const a = h && Array.isArray(h.anchos_cm) ? Number(h.anchos_cm[pi]) : NaN
+  return a > 0 ? a : (Number(h && h.ancho_cm) || 180)
+}
+
 /**
  * La calidad de la foto para ESTE pedido, en px por cm (la misma para todas sus mesas).
  * `hojas` = `resultado.hojas` (`ancho_cm`, `alturas_cm`). Baja de `FOTO_PXCM` sólo si el pedido es
@@ -255,9 +263,11 @@ const _progreso = new Map()          // `${huella}|${página}` → {total, hecho
 export function calidadFoto(hojas) {
   let area = 0, ladoMax = 0
   for (const h of (hojas || [])) {
-    const ancho = Number(h.ancho_cm) || 180
     const altos = (h.alturas_cm && h.alturas_cm.length) ? h.alturas_cm : [Number(h.consumo_cm) || 0]
-    for (const alto of altos) { area += ancho * (Number(alto) || 0); ladoMax = Math.max(ladoMax, ancho, Number(alto) || 0) }
+    altos.forEach((alto, i) => {
+      const ancho = anchoMesaCm(h, i)
+      area += ancho * (Number(alto) || 0); ladoMax = Math.max(ladoMax, ancho, Number(alto) || 0)
+    })
   }
   if (!area || !ladoMax) return FOTO_PXCM
   const q = Math.min(FOTO_PXCM, Math.sqrt(TOPE_MPX_PEDIDO * 1e6 / area), TOPE_LADO_PX / ladoMax)

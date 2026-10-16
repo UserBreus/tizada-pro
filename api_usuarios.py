@@ -308,8 +308,8 @@ def listar_roles():
 @bp.get("/api/permisos")
 @requiere("usuario.ver", "usuario.gestionar")
 def listar_permisos():
-    return jsonify({"ok": True, "permisos": db.filas(
-        "SELECT id, clave, modulo, nombre, descripcion FROM permiso ORDER BY modulo, clave")})
+    filas = db.filas("SELECT id, clave, modulo, nombre, descripcion FROM permiso ORDER BY modulo, clave")
+    return jsonify({"ok": True, "permisos": [f for f in filas if f["clave"] not in auth.PERMISOS_RETIRADOS]})
 
 
 @bp.post("/api/roles")

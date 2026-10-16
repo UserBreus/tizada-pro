@@ -47,6 +47,8 @@ la puesta en marcha en el servidor de TIZADA, los diagramas de cómo se conectan
 |---|---|
 | [`API.md`](API.md) | La API entera: llave, recorrido, cada ruta con lo que manda y lo que vuelve, el aviso y su firma, errores |
 | [`FORMATO_PEDIDO.md`](FORMATO_PEDIDO.md) | `pedido.json` campo por campo, cómo armar el arte, las alarmas y cómo evitarlas |
+| [`TIZADA_PRO_Como_usar_cada_opcion.pdf`](TIZADA_PRO_Como_usar_cada_opcion.pdf) | Lo mismo en PDF (8 págs.), para el que vende y para el que programa: «En simple» + «Para el programador», con dibujos de los dos usos de la cantidad. Se arma de `como_usar_cada_opcion.html` |
+| [`COMO_USAR_CADA_OPCION.md`](COMO_USAR_CADA_OPCION.md) | Para qué sirve y cuándo usar cada opción (sobre todo los **dos usos de la cantidad**: prendas o copias de la mesa), con ejemplos |
 | [`openapi.yaml`](openapi.yaml) | La API en OpenAPI 3 (se importa en Postman / Insomnia o se genera un cliente) |
 | [`esquemas/`](esquemas/) | JSON Schema del pedido y del estado/resultado/aviso |
 | [`pedido_ejemplo.json`](pedido_ejemplo.json) | Un pedido completo (revisado contra el catálogo real) |

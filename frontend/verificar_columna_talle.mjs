@@ -16,7 +16,6 @@ import { fileURLToPath } from 'node:url';
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const APP = fs.readFileSync(path.join(AQUI, 'src', 'App.jsx'), 'utf8');
-const DIC = fs.readFileSync(path.join(AQUI, 'src', 'diccionario.js'), 'utf8');
 const fallos = [];
 const ok = (cond, que) => {
   console.log((cond ? '  OK    ' : '  FALLA ') + que);
@@ -61,7 +60,6 @@ ok((APP.match(/<SelectorColumnaTalle/g) || []).length >= 2,
    'está montado en las DOS tarjetas: el espacio de carga y «Mis artículos»');
 ok(APP.includes("ancla=\"cargar-b-columna\"") && APP.includes("ancla=\"molde-columna-talle\""),
    'y cada una con su ancla de ayuda');
-ok(/'molde-columna-talle':/.test(DIC), 'el ancla nueva tiene su ficha en el diccionario');
 
 console.log('\n5) No se puede seguir sin decirlo (el default del alta no es una decisión)');
 // Todo molde nace con `talle: "talle"`: sin una marca explícita no hay forma de distinguir «eligió

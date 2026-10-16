@@ -58,6 +58,8 @@ globalThis.fetch = async (url, opts = {}) => {
   if (!u.startsWith(BASE + '/')) return fetchReal(url, opts)          // Google: sin la llave del robot
   const h = new Headers(opts.headers || {})
   h.set('X-Robot-Token', TOKEN)
+  // el TURNO del servidor que lanzó este robot (MAPA 698): sólo el robot de ese turno recibe trabajo
+  if (process.env.TIZADA_ROBOT_TURNO) h.set('X-Robot-Turno', process.env.TIZADA_ROBOT_TURNO)
   const veces = new Map()
   for (;;) {
     const r = await fetchReal(u, { ...opts, headers: h })
@@ -237,7 +239,9 @@ async function cargarArte(m, ref, dis, mol) {
       const pers = m.extraerPersonalizacion(m.mupdf, bytes.slice())
       informe.campos = [...new Set(Object.values(pers || {}).flatMap((x) => Object.keys(x || {})))].filter((c) => !c.startsWith('\u0000'))
     } catch { informe.campos = null }
-    const prep = await m.prepararArteEnNavegador(archivo, { pid: mol.pid, diseno: dis.slug, rutaApi })
+    // MAPEO DEL ARTE A MANO (MAPA 712): las piezas que el pedido asigna a una mesa del arte
+    const prep = await m.prepararArteEnNavegador(archivo, { pid: mol.pid, diseno: dis.slug, rutaApi, mapeoManual: mol.mapeo_arte || null })
+    if (prep && prep.mapeoManualErrores && Object.keys(prep.mapeoManualErrores).length) informe.mapeo_manual_errores = prep.mapeoManualErrores
     if (!prep) throw new Error('el servidor tiene apagado «el arte lo lee la computadora»')
     informe.modo = prep.modo
     informe.validacion = prep.validacion
@@ -544,6 +548,8 @@ async function procesarPlantilla(ref, normal) {
 
 async function vuelta() {
   const t = await apiJson('/api/externo/robot/tomar', {})
+  // 🔴 un robot de un arranque anterior del servidor (MAPA 698): se cierra para no tomar pedidos con código viejo
+  if (t.salir) { log('el servidor lanzó otro robot (otro turno): este se cierra'); process.exit(0) }
   if (t.tarea === 'probar_drive') { await probarDrive(); return true }
   if (t.tarea === 'plantilla') {
     const ref = t.referencia

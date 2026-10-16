@@ -25,7 +25,7 @@ import sys
 sys.stdout.reconfigure(encoding="utf-8")
 AQUI = os.path.dirname(os.path.abspath(__file__))
 DOC = os.path.join(AQUI, "API_RUTAS.md")
-FUENTES = ["servidor.py", "api_usuarios.py"]
+FUENTES = ["servidor.py", "api_usuarios.py", "ayuda_videos.py"]
 METODOS = ("get", "post", "put", "patch", "delete")
 
 
@@ -152,7 +152,7 @@ SECCIONES_FIJAS = [
     ("/api/permisos", "Usuarios / Roles / Permisos"),
     ("/api/registro", "Registro del sistema"),
     ("/api/consola", "Registro del sistema"),
-    ("/api/tutoriales", "Ayuda guiada (tutoriales grabados)"),
+    ("/api/ayuda", "Ayuda en video (tutoriales de Drive)"),
     ("/api/molde/config", "Productos / Moldería"),
     ("/api/pedido/fuente", "Fuentes / Catálogo"),
 ]

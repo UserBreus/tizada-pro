@@ -108,7 +108,7 @@ _VERS = {}
 _falso.get_doc = lambda c, default=None: copy.deepcopy(_DOCS.get(c, default))
 _falso.get_doc_ver = lambda c, default=None: (copy.deepcopy(_DOCS.get(c, default)), _VERS.get(c, 0))
 _falso.set_doc = lambda c, o, version_esperada=None: _VERS.__setitem__(c, _VERS.get(c, 0) + 1)
-_falso.guardar_catalogo = lambda cat, version_esperada=None: _DOCS.__setitem__("catalogo", cat)
+_falso.guardar_catalogo = lambda cat, version_esperada=None, solo=None: _DOCS.__setitem__("catalogo", cat)
 _falso.__getattr__ = lambda n: (lambda *a, **k: None)
 sys.modules["db"] = _falso
 sys.modules["api_usuarios"] = types.ModuleType("api_usuarios")

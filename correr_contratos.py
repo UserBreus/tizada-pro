@@ -48,7 +48,11 @@ def main():
     # mismo (`verificar_navegador_solo.py`). El servidor REAL (8050) no se entera: sigue prendido.
     env = dict(os.environ, PYTHONIOENCODING="utf-8",
                TIZADA_PROCESOS=os.environ.get("TIZADA_PROCESOS", "2"),
-               TIZADA_SOLO_NAVEGADOR=os.environ.get("TIZADA_SOLO_NAVEGADOR", "0"))
+               TIZADA_SOLO_NAVEGADOR=os.environ.get("TIZADA_SOLO_NAVEGADOR", "0"),
+               # 🔴 EL OPTIMIZADOR DEL NESTING (MAPA 728) con sus 16 carriles en Python tarda minutos por pedido:
+               # los contratos que generan pedidos enteros usan sólo la búsqueda de siempre (pulida). Lo prueba
+               # entero `verificar_navegador_nesting.py`, que no pasa por el plan.
+               TIZADA_NESTING_OPTIMIZAR=os.environ.get("TIZADA_NESTING_OPTIMIZAR", "0"))
     files = sorted(f for f in os.listdir(AQUI) if f.startswith("verificar_") and f.endswith(".py"))
     # 🔴 LOS PESADOS SE DECLARAN Y SE SACAN DE LA TANDA RÁPIDA. Un contrato de integración sobre
     # el archivo real de 123 MB tarda minutos y no hay forma honesta de acortarlo (no existe un

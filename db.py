@@ -683,7 +683,7 @@ def proyectar_catalogo(cat):
             _proyectar_un_producto(pid, p, cur)
 
 
-def guardar_catalogo(cat, version_esperada=None):
+def guardar_catalogo(cat, version_esperada=None, solo=None):
     """El documento del catálogo Y su proyección a las tablas, en UNA sola transacción.
     Devuelve la versión nueva.
 
@@ -691,11 +691,19 @@ def guardar_catalogo(cat, version_esperada=None):
 
     🔴 Con `version_esperada` la escritura es CONDICIONAL: si otro proceso guardó entre medio,
     levanta `ConflictoVersion` y no se guarda nada. Es lo único que evita el *lost update* cuando
-    hay MÁS DE UN PROCESO — el candado de `servidor.py` vive en la memoria de uno solo."""
+    hay MÁS DE UN PROCESO — el candado de `servidor.py` vive en la memoria de uno solo.
+
+    `solo` = los ids («prod_…») de los moldes que CAMBIARON: sólo esos se re-proyectan (MAPA 694). Medido
+    en el servidor publicado: cada guardado re-proyectaba TODOS los moldes (talles, variables, diseños…:
+    varias consultas por molde) y tardaba 1,7–2,2 s; cambiar la medida de una bandera guardaba 2-3 veces.
+    Los que no cambiaron ya están proyectados (cada guardado proyecta en la MISMA transacción que el
+    documento). `None` = todos (como antes). La identidad (`sync_productos`) va siempre: altas y bajas."""
     with cursor() as cur:
         _ver = _escribir_doc(cur, "catalogo", cat, version_esperada)
         prod_ids = sync_productos(cat, cur)
         for p in (cat.get("productos") or []):
+            if solo is not None and p.get("id") not in solo:
+                continue
             pid = prod_ids.get(p.get("id"))
             if pid is None:
                 continue
