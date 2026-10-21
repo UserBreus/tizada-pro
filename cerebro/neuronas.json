@@ -4404,6 +4404,60 @@
         "manga-toggle",
         "plan-pedido"
       ]
+    },
+    {
+      "id": "requisitos-pc",
+      "nombre": "¿Esta PC está apta? (Requisitos)",
+      "que": "El chip «Requisitos · apta / NO apta» de arriba a la derecha y su ventana: lo mide el NAVEGADOR de la PC que abre la página (núcleos, memoria que informa, WebAssembly/hilos y una prueba de velocidad de medio segundo), nunca el servidor. Mínimo 4 núcleos, 8 GB, 24 puntos; ideal 8, 16, 60.",
+      "archivos": [
+        "frontend/src/motor/apto.js",
+        "frontend/src/motor/capacidad.js",
+        "frontend/src/App.jsx"
+      ],
+      "anclas": [
+        [
+          "frontend/src/motor/apto.js",
+          "export function evaluarEquipo"
+        ],
+        [
+          "frontend/src/motor/apto.js",
+          "export function compararRequisitos"
+        ],
+        [
+          "frontend/src/motor/capacidad.js",
+          "export function puntosDePotencia"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function ChipEquipo"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function DetalleRequisitos"
+        ]
+      ],
+      "palabras": [
+        "apta",
+        "NO apta",
+        "Requisitos",
+        "evaluarEquipo",
+        "puntos de potencia",
+        "tizada_apto"
+      ],
+      "reglas": [
+        "Sólo se GUARDA (sessionStorage `tizada_apto`) un veredicto «apta»: uno peor se vuelve a medir la próxima vez.",
+        "La potencia, si no llega al mínimo, se mide hasta 3 veces y vale la mejor: es lo que la PC PUEDE, no lo que tenía libre ese medio segundo.",
+        "El chip no mide con la pestaña escondida (Windows le baja la prioridad) y vuelve a medir al mostrarse la pestaña si no dio «apta»."
+      ],
+      "cicatrices": [
+        "2026-10-21: el publicado decía «NO apta» en la PC de desarrollo (12 núcleos, 32 GB, ~430 puntos): una sola medida de 0,5 s con la PC ocupada (render de video) quedaba guardada toda la sesión; el usuario creyó que medía el servidor (MAPA 744)."
+      ],
+      "contratos": [],
+      "mapa": [
+        744
+      ],
+      "memoria": "",
+      "conexiones": []
     }
   ]
 }

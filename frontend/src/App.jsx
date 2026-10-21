@@ -6647,9 +6647,18 @@ function ChipEquipo() {
   const [v, setV] = useState(null);
   const [abierto, setAbierto] = useState(false);
   useEffect(() => {
-    // fuera del primer pintado: la medición ocupa medio segundo de CPU
-    const t = setTimeout(() => { try { setV(evaluarEquipo()); } catch { setV(null); } }, 800);
-    return () => clearTimeout(t);
+    // fuera del primer pintado: la medición ocupa medio segundo de CPU. Con la pestaña ESCONDIDA no
+    // se mide (Windows le baja la prioridad y daba «NO apta» a una PC sobrada): se mide al mostrarse,
+    // y un veredicto que no es «apta» se vuelve a medir cada vez que la pestaña vuelve a verse.
+    let ultimo = null;
+    const medir = () => {
+      if (document.hidden || (ultimo && ultimo.nivel === 'apta')) return;
+      try { ultimo = evaluarEquipo(); setV(ultimo); } catch { setV(null); }
+    };
+    const t = setTimeout(medir, 800);
+    const alVer = () => { if (!document.hidden) setTimeout(medir, 400); };
+    document.addEventListener('visibilitychange', alVer);
+    return () => { clearTimeout(t); document.removeEventListener('visibilitychange', alVer); };
   }, []);
   const g = v ? compararRequisitos(v).general : null;
   const col = g ? COL_REQ[g.estado] : 'var(--text-muted)';

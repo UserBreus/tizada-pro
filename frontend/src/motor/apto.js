@@ -25,7 +25,13 @@ export function evaluarEquipo(forzar = false) {
   const eq = equipo()
   const hilos = Math.max(2, Math.min((eq.nucleos || 4) - 1, 8))
   let puntos
-  try { puntos = (eq.wasm && eq.hilos) ? puntosDePotencia(500) : 0 } catch { puntos = 0 }
+  try {
+    puntos = (eq.wasm && eq.hilos) ? puntosDePotencia(500) : 0
+    // Una sola medida de medio segundo puede caer justo cuando la PC está ocupada (otro programa, un
+    // render, una tizada en otra pestaña) y marcar «NO apta» a una PC sobrada (pasó 2026-10-21 en el
+    // publicado). Si no llega al mínimo se repite y vale la mejor: la potencia es lo que la PC PUEDE.
+    for (let k = 0; puntos && k < 2 && puntos < UMBRAL_PUNTOS * 2; k++) puntos = Math.max(puntos, puntosDePotencia(500))
+  } catch { puntos = 0 }
   // hasta qué tamaño de molde (MB) se puede preparar con la memoria declarada: el navegador deja
   // usar más o menos el 60 % de la memoria total, y cada hilo abre el molde entero
   const memMb = eq.memoriaGb ? eq.memoriaGb * 1024 : null
@@ -42,9 +48,17 @@ export function evaluarEquipo(forzar = false) {
   } else {
     nivel = 'apta'; motivo = `Esta computadora prepara moldes y tizadas en pocos segundos${moldeMaxMb ? ` (moldes de hasta ~${moldeMaxMb} MB)` : ''}.`
   }
-  _cache = { nivel, motivo, puntos, hilos, moldeMaxMb, nucleos: eq.nucleos, memoriaGb: eq.memoriaGb, navegador: eq.navegador, medido: Date.now() }
-  try { sessionStorage.setItem('tizada_apto', JSON.stringify(_cache)) } catch { /* sin storage */ }
-  return _cache
+  const r = { nivel, motivo, puntos, hilos, moldeMaxMb, nucleos: eq.nucleos, memoriaGb: eq.memoriaGb, navegador: eq.navegador, medido: Date.now() }
+  // Sólo se GUARDA un «apta»: un veredicto peor se vuelve a medir la próxima vez (al volver a la
+  // pestaña, al recargar) en vez de quedar pegado toda la sesión por una medida tomada con la PC ocupada.
+  if (nivel === 'apta') {
+    _cache = r
+    try { sessionStorage.setItem('tizada_apto', JSON.stringify(r)) } catch { /* sin storage */ }
+  } else {
+    _cache = null
+    try { sessionStorage.removeItem('tizada_apto') } catch { /* sin storage */ }
+  }
+  return r
 }
 
 // ── REQUISITOS: MÍNIMO E IDEAL (pedido del usuario 2026-09-24: «en el pedido, un espacio que diga el

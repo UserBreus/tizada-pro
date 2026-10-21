@@ -13,6 +13,10 @@ Si una actualización no trae nada para su sistema, igual tiene su entrada dicie
 
 ---
 
+## 21/10/2026 · requisitos de la PC
+
+**¿Hay que cambiar algo en su sistema? No.** Cambió sólo la pantalla de TIZADA (el aviso «Requisitos · apta / NO apta» se mide mejor). Nada de la API.
+
 ## 21/10/2026 · TIZADA PRO `c4de207`
 
 **¿Hay que cambiar algo en su sistema? No.**
