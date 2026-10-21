@@ -698,12 +698,39 @@ def _carril(piezas, cfg, k, inicio):
     piezas de lugar o una movida), a veces otro criterio; queda si usa menos tela (o igual y deja menos pieza
     en la última mesa). → (coloc, consumo)."""
     prep = _preparar(piezas, cfg)
-    n = len(piezas)
     sa_ini = set(inicio["solo_ang"]) if inicio["solo_ang"] is not None else None
     if k == 0:
         coloc, _ = _anidar_estrategia(piezas, cfg, inicio["est"], inicio["orden"], prep, sa_ini)
         col = _pulir(cfg, coloc, prep)
         return col, _consumo(col)
+
+    def evaluar(orden, est, sa):
+        coloc, _ = _anidar_estrategia(piezas, cfg, est, orden, prep, sa)
+        return {"c": _consumo(coloc), "a": _area_ultima(coloc), "coloc": coloc}
+
+    mejor = _buscar_carril(piezas, cfg, k, inicio, evaluar)
+    col = _pulir(cfg, mejor["coloc"], prep)
+    return col, _consumo(col)
+
+
+def _area_ultima(col):
+    """Cuánta pieza (celdas) quedó en la última mesa (0 con una sola mesa). Gemelo: `areaUltima`."""
+    ll = [h for h in col if h]
+    if len(ll) < 2:
+        return 0
+    return sum(int(c["pieza"]["_mask"].sum()) for c in ll[-1])
+
+
+def _clave_combinacion(est, sa):
+    """La clave de una combinación de criterio y giros. Gemelo: `claveCombinacion`."""
+    return f"{est}|{','.join(str(a) for a in sorted(sa))}" if sa is not None else f"{est}|"
+
+
+def _buscar_carril(piezas, cfg, k, inicio, evaluar):
+    """LA BÚSQUEDA DE UN CARRIL (k ≥ 1), sin pulir: `evaluar(orden, est, sa)` → dict con `c` y `a` (acomoda o,
+    con piezas todas iguales, trae la cuenta ya hecha). → el mejor intento. Gemelo: `buscarCarril`."""
+    n = len(piezas)
+    sa_ini = set(inicio["solo_ang"]) if inicio["solo_ang"] is not None else None
     _, intentos = parametros_optimizar(n, cfg)
     A = [int(p["_mask"].sum()) for p in piezas]
     ests, vars_ = _criterios(piezas, cfg), _variantes_giro(piezas)
@@ -719,20 +746,13 @@ def _carril(piezas, cfg, k, inicio):
         clave = [a * (1 + r * (u() - 0.5)) for a in A]
         return sorted(range(n), key=lambda i: clave[i], reverse=True)
 
-    def area_ult(col):
-        ll = [h for h in col if h]
-        if len(ll) < 2:
-            return 0
-        return sum(int(c["pieza"]["_mask"].sum()) for c in ll[-1])
-
     mejor = None
 
     def probar(orden, est, sa):
         nonlocal mejor
-        coloc, _ = _anidar_estrategia(piezas, cfg, est, orden, prep, sa)
-        c, a = _consumo(coloc), area_ult(coloc)
-        if mejor is None or c < mejor["c"] - 1e-9 or (abs(c - mejor["c"]) <= 1e-9 and a <= mejor["a"]):
-            mejor = {"c": c, "a": a, "coloc": coloc, "orden": orden, "est": est, "sa": sa}
+        r = evaluar(orden, est, sa)
+        if mejor is None or r["c"] < mejor["c"] - 1e-9 or (abs(r["c"] - mejor["c"]) <= 1e-9 and r["a"] <= mejor["a"]):
+            mejor = dict(r, orden=orden, est=est, sa=sa)
 
     if k == 1:
         probar(inicio["orden"], inicio["est"], sa_ini)
@@ -756,8 +776,397 @@ def _carril(piezas, cfg, k, inicio):
             if u() < 0.15:
                 est = ests[math.floor(u() * len(ests))]
         probar(o, est, mejor["sa"])
-    col = _pulir(cfg, mejor["coloc"], prep)
-    return col, _consumo(col)
+    return mejor
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 🔴 EL PATRÓN (MAPA 736) — gemelo EXACTO de `anidarPatron` (frontend/src/motor/nesting/contorno.js)
+#
+# El usuario, con 102 banderas iguales que salieron unas derechas y otras inclinadas sin orden: «el sistema no
+# tiene que buscar bandera por bandera el mejor espacio: tiene que ver todas las que tenemos y qué espacio van a
+# ocupar; hacer los cálculos —las rotaciones y todo— con todo junto, y ahí decir cómo irá acomodado». El acomodo
+# de siempre es pieza por pieza (cada una donde mejor queda AHORA): con piezas iguales nunca «ve» el dibujo que se
+# repite. Acá se calcula ese dibujo: con TODAS las piezas en la cuenta, la UNIDAD que se repite (las formas en
+# proporción) y el PERÍODO a lo largo de la mesa en el que entran más unidades por metro, probando cada giro que
+# permite la regla en cada lugar de una franja que se repite (lo que sale por abajo vuelve a entrar por arriba: la
+# franja se calcula con sus copias de arriba y de abajo). Ese dibujo se repite a lo largo de la mesa con todas las
+# piezas. NADA de formas fijas: todo sale de las máscaras; compite con el acomodo de siempre y gana el que gasta
+# menos tela. Acá los lugares salen de la FFT (como `_anidar_estrategia`); en el navegador, de los bits.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+PATRON_MIN_PIEZAS = 2          # desde 2 piezas iguales (gemelo: con 5 banderines no se probaba)
+# 🔴 SIN TOPE DE PIEZAS POR UNIDAD (2026-10-20): con unidades grandes la franja lleva al menos 2 unidades, se busca
+# con menos largos y sin forzar giros. Gemelo: `PATRON_UNIDAD_CHICA` (contorno.js)
+PATRON_UNIDAD_CHICA = 6        # hasta acá: los giros forzados y el barrido fino
+PATRON_MAX_POR_PERIODO = 12    # piezas por período como mucho
+PATRON_PASOS = 32              # el barrido grueso del período (medido: 48 da los mismos dibujos con 25 % más de cuenta)
+
+_FIRMAS = {}
+
+
+def _huella(m):
+    """Alto, ancho, celdas y la suma de las posiciones (1…) de las celdas prendidas. Gemelo: `huella`."""
+    idx = np.flatnonzero(m.ravel())
+    return f"{m.shape[0]}x{m.shape[1]}:{len(idx)}:{int((idx + 1).sum())}"
+
+
+def _firma_cands(cands):
+    """La firma de los giros de una pieza, una vez por lista de giros. Gemelo: `firmaCands`."""
+    r = _FIRMAS.get(id(cands))
+    if r is None or r[0] is not cands:
+        r = (cands, "|".join(f"{a}/{_huella(mc)}/{_huella(mt)}" for a, mc, mt in cands))
+        _FIRMAS[id(cands)] = r
+    return r[1]
+
+
+def _cands_iguales(a, b):
+    """¿Los mismos giros con las mismas máscaras, celda por celda? Gemelo: `candsIguales`."""
+    if a is b:
+        return True
+    if len(a) != len(b):
+        return False
+    for ka, kb in zip(a, b):
+        if ka[0] != kb[0] or ka[1].shape != kb[1].shape or ka[2].shape != kb[2].shape:
+            return False
+        if not (np.array_equal(ka[1], kb[1]) and np.array_equal(ka[2], kb[2])):
+            return False
+    return True
+
+
+def _siluetas_distintas(cands):
+    """Los giros que prueba el patrón: uno por silueta (mismo tamaño y no más del 1 % de celdas distintas; queda el
+    primero). Gemelo: `siluetasDistintas`."""
+    out = []
+    for k in cands:
+        a = k[2]
+        igual = False
+        for o in out:
+            b = o[2]
+            if a.shape == b.shape and int(np.count_nonzero(a != b)) * 100 <= max(int(a.sum()), int(b.sum())):
+                igual = True
+                break
+        if not igual:
+            out.append(k)
+    return out
+
+
+def _todas_iguales(piezas):
+    """¿Todas las piezas tienen la MISMA forma? Gemelo: `todasIguales`."""
+    if len(piezas) < 2:
+        return False
+    c0 = piezas[0]["_candidatos_angulo"]
+    ok = {id(c0)}
+    for p in piezas:
+        c = p["_candidatos_angulo"]
+        if id(c) in ok:
+            continue
+        if _firma_cands(c) != _firma_cands(c0) or not _cands_iguales(c, c0):
+            return False
+        ok.add(id(c))
+    return True
+
+
+def _unidad_patron(piezas):
+    """La UNIDAD que se repite: las formas en proporción. Gemelo: `unidadPatron`."""
+    if len(piezas) < PATRON_MIN_PIEZAS:
+        return None
+    formas, de_firma = [], {}
+    for p in piezas:
+        fk = _firma_cands(p["_candidatos_angulo"])
+        f = de_firma.get(fk)
+        if f is not None and not _cands_iguales(f["cands"], p["_candidatos_angulo"]):
+            f = None
+        if f is None:
+            f = {"cands": p["_candidatos_angulo"], "piezas": []}
+            if fk not in de_firma:
+                de_firma[fk] = f
+            formas.append(f)
+        f["piezas"].append(p)
+    for f in formas:
+        f["candsP"] = _siluetas_distintas(f["cands"])
+    g = 0
+    for f in formas:
+        g = math.gcd(g, len(f["piezas"]))
+    if g < 2:
+        return None
+    U = sum(len(f["piezas"]) // g for f in formas)
+    orden = sorted(range(len(formas)), key=lambda i: (-int(formas[i]["piezas"][0]["_mask"].sum()), i))
+    unidad = []
+    for i in orden:
+        unidad.extend([i] * (len(formas[i]["piezas"]) // g))
+    return {"formas": formas, "unidad": unidad, "veces": g, "total": len(piezas)}
+
+
+def _estampar_recorte(G, yy, xx, mc):
+    """`G[...] |= mc` con las filas que caen fuera de la grilla recortadas."""
+    R = G.shape[0]
+    y0, y1 = max(0, yy), min(R, yy + mc.shape[0])
+    if y0 < y1:
+        G[y0:y1, xx:xx + mc.shape[1]] |= mc[y0 - yy:y1 - yy]
+
+
+_PROPIAS = {}
+
+
+def _choca_consigo(k, p):
+    """¿La pieza choca con SUS PROPIAS copias de la franja (una cada `p` filas)? Gemelo: `chocaConsigo`."""
+    clave = (id(k[2]), p)
+    r = _PROPIAS.get(clave)
+    if r is not None and r[0] is k[2]:
+        return r[1]
+    mt, mc = k[2], k[1]
+    dy, dx = (mt.shape[0] - mc.shape[0]) // 2, (mt.shape[1] - mc.shape[1]) // 2
+    choca = False
+    j = 1
+    while not choca and j * p < mt.shape[0] + mc.shape[0]:
+        for sg in (1, -1):
+            oy = dy + sg * j * p
+            y0, y1 = max(0, oy), min(mt.shape[0], oy + mc.shape[0])
+            if y0 < y1 and (mt[y0:y1, dx:dx + mc.shape[1]] & mc[y0 - oy:y1 - oy]).any():
+                choca = True
+                break
+        j += 1
+    _PROPIAS[clave] = (k[2], choca)
+    return choca
+
+
+def _lugar_franja(G, mt, desde, hasta, orden):
+    """El mejor lugar de la franja (tops en las filas `desde` a `hasta`) según `orden`: «arriba» (más arriba, más
+    a la izquierda), «arriba-der» (más arriba, más a la derecha) o «columna» (más a la izquierda, más arriba).
+    Gemelo: `lugarFranja` (allá se poda con el mejor de otro giro; el resultado es el mismo)."""
+    hh, ww = mt.shape
+    if G.shape[1] - ww < 0 or hasta < desde:
+        return None
+    conv = fftconvolve(G[desde:hasta + hh].astype(np.float32), mt[::-1, ::-1].astype(np.float32), mode="valid")
+    ys, xs = np.nonzero(conv < 0.5)
+    if not len(ys):
+        return None
+    if orden == "columna":
+        x = int(xs.min())
+        return [desde + int(ys[xs == x].min()), x]
+    y = int(ys[0])
+    if orden == "arriba-der":
+        return [desde + y, int(xs[ys == y].max())]
+    return [desde + y, int(xs[0])]
+
+
+def _gana_lugar(a, b, orden):
+    if orden == "columna":
+        return a[1] < b[1] or (a[1] == b[1] and a[0] < b[0])
+    if orden == "arriba-der":
+        return a[0] < b[0] or (a[0] == b[0] and a[1] > b[1])
+    return a[0] < b[0] or (a[0] == b[0] and a[1] < b[1])
+
+
+def _franja_patron(U, p, Hm, ancho_c, modo, forzar, paso):
+    """UNA FRANJA DE LARGO `p`: se llenan lugares en el orden de la unidad, cada pieza con el giro y el lugar que
+    gana según el modo, hasta que no entra la que sigue. Gemelo: `franjaPatron`."""
+    R = p + 2 * Hm
+    G = np.zeros((R, ancho_c), bool)
+    col = []
+    unidad = U["unidad"]
+    for i in range(min(U["total"], max(PATRON_MAX_POR_PERIODO, min(2 * len(unidad), 24)))):   # gemelo de `maxPeriodo`
+        fi = unidad[i % len(unidad)]
+        orden = "columna" if modo == "columna" else ("arriba-der" if modo == "alterna" and i % 2 == 1 else "arriba")
+        cands = U["formas"][fi]["candsP"]
+        if forzar and i < len(forzar):
+            f = [k for k in cands if k[0] == forzar[i]]
+            if f:
+                cands = f
+        fases = [cands]
+        if len(cands) > 8:
+            g = [k for k in cands if k[0] % 90 == 0]
+            if g and len(g) < len(cands):
+                fases = [g, None]
+        mejor = None
+
+        def probar(lista):
+            nonlocal mejor
+            for k in lista:
+                if _choca_consigo(k, p):
+                    continue
+                hasta = min(Hm + p - 1, R - k[2].shape[0])
+                r = _lugar_franja(G, k[2], Hm, hasta, orden)
+                if r is None:
+                    continue
+                if mejor is None or _gana_lugar(r, [mejor[1], mejor[2]], orden):
+                    mejor = (k, r[0], r[1])
+
+        probar(fases[0])
+        if len(fases) > 1:
+            vistos = {id(k) for k in fases[0]}
+            if mejor is None:
+                resto = [k for k in cands if id(k) not in vistos]
+            else:
+                a0 = mejor[0][0]
+                resto = [k for k in cands if id(k) not in vistos
+                         and min(abs(k[0] - a0), 360 - abs(k[0] - a0)) <= 2 * max(1, int(paso))]
+            probar(resto)
+        if mejor is None:
+            break
+        k, y, x = mejor
+        mt, mc = k[2], k[1]
+        dy, dx = (mt.shape[0] - mc.shape[0]) // 2, (mt.shape[1] - mc.shape[1]) // 2
+        # la pieza y sus copias de arriba y de abajo (las que asoman a la grilla)
+        j = -(-(y + mt.shape[0]) // p)
+        j = -j
+        while y + dy + j * p < R:
+            _estampar_recorte(G, y + dy + j * p, x + dx, mc)
+            j += 1
+        col.append({"forma": fi, "k": k, "y": y - Hm, "x": x})
+    unidades = len(col) // len(unidad)
+    return {"p": p, "colocadas": col[:unidades * len(unidad)], "unidades": unidades}
+
+
+def _franja_mejor(a, b):
+    """Densidad de a (unidades / largo) contra b, sin dividir; empate: el más corto. Gemelo: `franjaMejor`."""
+    da, db = a["unidades"] * b["p"], b["unidades"] * a["p"]
+    return da > db if da != db else a["p"] < b["p"]
+
+
+def _modos_patron(U):
+    """Los MODOS de la franja que compiten (en este orden; empate: el primero). Gemelo: `modosPatron`."""
+    vistas, clases = set(), []
+    for a, mc, mt in U["formas"][U["unidad"][0]]["candsP"]:
+        s = f"{mt.shape[0]},{mt.shape[1]}"   # el TAMAÑO girado, no las celdas (ver `modosPatron`)
+        if s not in vistas:
+            vistas.add(s)
+            clases.append(a)
+    cl = clases
+    if len(cl) > 4:
+        r = [a for a in cl if a % 90 == 0]
+        cl = r or cl[:4]
+    out = []
+    nU = len(U["unidad"])   # gemelo de `modosPatron`: con unidades grandes, menos modos
+    lista = ("arriba", "alterna", "columna") if nU <= PATRON_UNIDAD_CHICA else (("alterna", "columna") if nU <= 2 * PATRON_UNIDAD_CHICA + 2 else ("alterna",))
+    for modo in lista:
+        out.append({"modo": modo, "forzar": None})
+        # las tres primeras con el mismo giro (medido: arranca el dibujo que la de a una no ve)
+        if len(cl) > 1 and len(U["unidad"]) <= PATRON_UNIDAD_CHICA:
+            for a in cl:
+                out.append({"modo": modo, "forzar": [a, a, a]})
+    return out
+
+
+def _largos_patron(U, ancho_c):
+    h_min = min(k[2].shape[0] for f in U["formas"] for k in f["cands"])
+    h_max = max(k[2].shape[0] for f in U["formas"] for k in f["cands"])
+    # con una unidad grande la franja tiene que poder llevar su área: el largo máximo crece (gemelo: `largosPatron`)
+    au = sum(int(U["formas"][fi]["cands"][0][1].sum()) for fi in U["unidad"])
+    p_lo, p_hi = max(1, math.floor(h_min * 0.4)), math.ceil(max(h_max, 1.3 * au / ancho_c) * 2.5)
+    pasos = 10 if len(U["unidad"]) > PATRON_UNIDAD_CHICA else PATRON_PASOS
+    # `Math.round` de JS (no el redondeo bancario de Python)
+    return h_max, p_lo, p_hi, max(1, math.floor((p_hi - p_lo) / pasos + 0.5))
+
+
+def _mejor_franja_modo(U, prep, m):
+    """EL MEJOR LARGO DE UN MODO: barrido grueso y, alrededor de los 3 mejores, el largo más corto en el que
+    todavía entran las mismas unidades (bisección). Gemelo: `mejorFranjaModo`."""
+    from functools import cmp_to_key
+    Hm, p_lo, p_hi, paso = _largos_patron(U, prep[1])
+    de_largo = {}
+    mejor = None
+
+    def probar(p):
+        nonlocal mejor
+        if p not in de_largo:
+            f = _franja_patron(U, p, Hm, prep[1], m["modo"], m["forzar"], prep[4])
+            de_largo[p] = f if f["unidades"] else None
+            if f["unidades"] and (mejor is None or _franja_mejor(f, mejor)):
+                mejor = f
+        return de_largo[p]
+
+    gruesos = list(range(p_lo, p_hi + 1, paso))
+    for p in gruesos:
+        probar(p)
+    if mejor is None:
+        return None
+
+    def cmp(a, b):
+        fa, fb = de_largo[a], de_largo[b]
+        if _franja_mejor(fa, fb):
+            return -1
+        if _franja_mejor(fb, fa):
+            return 1
+        return a - b
+
+    top = sorted([p for p in gruesos if de_largo.get(p)], key=cmp_to_key(cmp))
+    for p0 in top[:3]:
+        u0 = de_largo[p0]["unidades"]
+        lo, hi = max(p_lo, p0 - paso + 1), p0
+        while lo < hi:
+            mid = (lo + hi) >> 1
+            f = probar(mid)
+            if f and f["unidades"] >= u0:
+                hi = mid
+            else:
+                lo = mid + 1
+    return dict(mejor, modo=m["modo"], forzar=m["forzar"])
+
+
+def _anidar_patron(piezas, cfg, prep=None):
+    """EL PATRÓN REPETIDO EN LA MESA → (coloc, consumo, info) o None. Gemelo: `anidarPatron`."""
+    prep = prep or _preparar(piezas, cfg)
+    U = _unidad_patron(piezas)
+    if U is None:
+        return None
+    F = None
+    for m in _modos_patron(U):
+        f = _mejor_franja_modo(U, prep, m)
+        if f and (F is None or _franja_mejor(f, F)):
+            F = f
+    if F is None:
+        return None
+    cell_pt, _, alto_c, esp_c, _ = prep
+    el = sorted([dict(c, i=i) for i, c in enumerate(F["colocadas"])], key=lambda e: (e["y"], e["i"]))
+    k, p = len(el), F["p"]
+    por_forma = [len(f["piezas"]) for f in U["formas"]]
+
+    def armar(s):
+        fila = sorted([dict(e, y=(e["y"] - el[s]["y"] if j >= s else e["y"] - el[s]["y"] + p)) for j, e in enumerate(el)],
+                      key=lambda e: (e["y"], e["i"]))
+        falta, out = list(por_forma), []
+        t = 0
+        while len(out) < len(piezas):
+            puso = False
+            for e in fila:
+                if not falta[e["forma"]]:
+                    continue
+                falta[e["forma"]] -= 1
+                out.append(dict(e, y=t * p + e["y"]))
+                puso = True
+            if not puso:
+                break
+            t += 1
+        return out
+
+    mejor = None
+    for s in range(k):
+        out = armar(s)
+        largo = 0
+        for e in out:
+            largo = max(largo, e["y"] + e["k"][2].shape[0])
+        if mejor is None or largo < mejor[0]:
+            mejor = (largo, out, s)
+    usadas = [0] * len(U["formas"])
+    coloc = [[]]
+    base = 0
+    for e in mejor[1]:
+        mt = e["k"][2]
+        hh, ww = mt.shape
+        if e["y"] - base + hh > alto_c:
+            if not coloc[-1]:
+                return None
+            coloc.append([])
+            base = e["y"]
+        pz = U["formas"][e["forma"]]["piezas"][usadas[e["forma"]]]
+        usadas[e["forma"]] += 1
+        ang = e["k"][0]
+        th = math.radians(ang)
+        bw = abs(pz["w"] * math.cos(th)) + abs(pz["h"] * math.sin(th))
+        bh = abs(pz["w"] * math.sin(th)) + abs(pz["h"] * math.cos(th))
+        coloc[-1].append({"pieza": pz, "ang": ang, "cx": (e["x"] - esp_c + ww / 2) * cell_pt,
+                          "cy": (e["y"] - base - esp_c + hh / 2) * cell_pt, "bw": bw, "bh": bh})
+    return coloc, _consumo(coloc), {"periodo": p, "por_periodo": k, "modo": F["modo"], "arranque": mejor[2]}
 
 
 def anidar_contorno(piezas, cfg):
@@ -771,16 +1180,59 @@ def anidar_contorno(piezas, cfg):
     prep = _preparar(piezas, cfg)
     area = sum(int(p["_mask"].sum()) for p in piezas) * (prep[0] / CM) ** 2
     carriles, _ = parametros_optimizar(len(piezas), cfg)
-    b = _anidar_busqueda(piezas, cfg)
+    # 🔴 PIEZAS TODAS IGUALES (MAPA 736): cambiar el orden de piezas idénticas no cambia el acomodo —sólo el
+    # criterio y los giros—, así que cada carril repetía las MISMAS cuentas. Con piezas iguales cada combinación
+    # se acomoda UNA vez (la búsqueda ya las prueba todas), los carriles se recorren con esas cuentas (mismas
+    # semillas: terminan en la misma combinación que antes) y se pule sólo cada combinación distinta en la que
+    # terminan. El MISMO largo que los carriles, sin repetir nada. Gemelo: `anidarContorno`.
+    iguales = carriles > 1 and _todas_iguales(piezas)
+    cands = _candidatos_busqueda(piezas, cfg)
+    rs_b = []
+    for c in cands:
+        coloc, _ = _anidar_estrategia(piezas, cfg, c["est"], c["orden"], prep, c["solo_ang"])
+        rs_b.append((_consumo(coloc), _area_ultima(coloc)))
+    ib = 0
+    for i in range(1, len(rs_b)):
+        if rs_b[i][0] < rs_b[ib][0]:
+            ib = i
+    b = cands[ib]
     inicio = {"orden": b["orden"], "est": b["est"],
               "solo_ang": sorted(b["solo_ang"]) if b["solo_ang"] is not None else None}
+    if iguales:
+        cuenta = {}
+        for c, (cons, ult) in zip(cands, rs_b):
+            cuenta.setdefault(_clave_combinacion(c["est"], c["solo_ang"]), dict(c, c=cons, a=ult))
+        finales = [_clave_combinacion(inicio["est"], inicio["solo_ang"])]
+        for k in range(1, carriles):
+            m = _buscar_carril(piezas, cfg, k, inicio, lambda orden, est, sa: cuenta[_clave_combinacion(est, sa)])
+            finales.append(_clave_combinacion(m["est"], m["sa"]))
+        pulidos, resultados = {}, []
+        for kc in finales:
+            if kc not in pulidos:
+                c = cuenta[kc]
+                coloc, _ = _anidar_estrategia(piezas, cfg, c["est"], c["orden"], prep, c["solo_ang"])
+                col = _pulir(cfg, coloc, prep)
+                pulidos[kc] = (col, _consumo(col))
+            resultados.append(pulidos[kc])
+    else:
+        resultados = [_carril(piezas, cfg, k, inicio) for k in range(carriles)]
     mejor = None
-    for k in range(carriles):
-        col, cons = _carril(piezas, cfg, k, inicio)
+    for col, cons in resultados:
         if mejor is None or cons < mejor[1]:
             mejor = (col, cons)
     # 🔴 y al final, con el CONTORNO REAL (MAPA 731): cada pieza a la distancia exacta de sus vecinas
-    return [(_compactar_vector(h, cfg) if h else h) for h in mejor[0]], area
+    coloc = [(_compactar_vector(h, cfg) if h else h) for h in mejor[0]]
+    # 🔴 EL PATRÓN (MAPA 736): con piezas iguales, el dibujo que se repite calculado con TODAS juntas compite con
+    # el acomodo pieza por pieza, YA con el contorno real; gana sólo si gasta menos tela (en empate, el de siempre)
+    pat = _anidar_patron(piezas, cfg, prep)
+    _DEBUG["patron"] = None
+    if pat:
+        cp = [(_compactar_vector(h, cfg) if h else h) for h in pat[0]]
+        gano = _consumo(cp) < _consumo(coloc) - 1e-9
+        _DEBUG["patron"] = dict(pat[2], consumo=_consumo(cp), gano=gano)
+        if gano:
+            coloc = cp
+    return coloc, area
 
 
 def _copias_de(fila, k):
@@ -1149,8 +1601,10 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep, solo_ang=None):
             candidatos_por_angulo = [c for c in candidatos_por_angulo if c[0] in solo_ang] or candidatos_por_angulo
         if not candidatos_por_angulo:
             # con el largo de mesa del pedido (MAPA 716) esto pasa cuando el largo elegido es más corto que la pieza
+            _an = f"{float(cfg['ancho_cm']):g}".replace(".", ",")          # coma decimal, como en la pantalla
+            _la = f"{float(cfg['altura_max_cm']) / 100:g}".replace(".", ",")
             raise ValueError(f"«{p.get('pieza') or p['etiqueta']}» (talle {p.get('talle') or '-'}) no entra en una mesa de "
-                             f"{float(cfg['ancho_cm']):g} cm de ancho × {float(cfg['altura_max_cm']) / 100:g} m de largo con el giro "
+                             f"{_an} cm de ancho × {_la} m de largo con el giro "
                              "que tiene permitido: hace falta una tela más ancha o un largo de mesa mayor.")
 
         colocada = False

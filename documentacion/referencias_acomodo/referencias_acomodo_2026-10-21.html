@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Referencias de acomodo</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: #18181b; margin: 0; }
+  .hoja { page-break-after: always; break-after: page; min-height: 180mm; display: flex; flex-direction: column; gap: 8mm; }
+  .hoja:last-child { page-break-after: auto; break-after: auto; }
+  h1 { font-size: 30px; margin: 0; letter-spacing: -0.5px; }
+  h2 { font-size: 22px; margin: 0; }
+  .sub { color: #52525b; font-size: 13px; margin-top: 2mm; }
+  .fila { display: flex; gap: 8mm; align-items: flex-start; }
+  .caja { flex: 1; border: 1px solid #e4e4e7; border-radius: 10px; padding: 5mm; }
+  .caja img { max-width: 100%; max-height: 118mm; display: block; margin: 0 auto; border: 1px solid #d4d4d8; }
+  .etq { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3mm; }
+  .etq b { font-size: 15px; }
+  .m { font-size: 26px; font-weight: 800; }
+  .gana { border: 2px solid #10b981; }
+  .gana .m { color: #059669; }
+  .pierde .m { color: #b91c1c; }
+  .dif { font-size: 15px; font-weight: 700; padding: 3mm 5mm; border-radius: 8px; background: #ecfdf5; color: #065f46; display: inline-block; }
+  .dif.rojo { background: #fef2f2; color: #991b1b; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { padding: 2.6mm 3mm; border-bottom: 1px solid #e4e4e7; text-align: left; }
+  th { background: #f4f4f5; font-weight: 700; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .verde { color: #059669; font-weight: 700; }
+  .nota { font-size: 12px; color: #52525b; }
+  .apil { display: flex; flex-direction: column; gap: 4mm; }
+  .tira img { max-width: 100%; display: block; border: 1px solid #d4d4d8; }
+  .h3 .tira img { max-height: 33mm; }
+  .h3b .tira img { max-height: 40mm; }
+  .h2 .tira img { max-height: 58mm; }
+  .h1 .tira img { max-height: 120mm; }
+  .hoja { overflow: hidden; height: 184mm; gap: 5mm; }
+  .ley { display: flex; gap: 4mm; font-size: 12px; color: #52525b; align-items: center; }
+  .pt { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; margin-right: 1mm; }
+  .rojo { color: #dc2626; font-weight: 700; } .azul { color: #2563eb; font-weight: 700; }
+  .mini td, .mini th { padding: 1.2mm 2.5mm; font-size: 11.5px; }
+  .claves { display: flex; gap: 6mm; }
+  .clave { flex: 1; border-radius: 10px; padding: 4mm 5mm; font-size: 13px; line-height: 1.45; }
+  .clave h3 { margin: 0 0 2mm; font-size: 15px; }
+  .cd { background: #eff6ff; border: 1px solid #bfdbfe; } .ci { background: #fef2f2; border: 1px solid #fecaca; }
+  .par { display: grid; grid-template-columns: 70px 1fr 1fr; gap: 3mm 5mm; align-items: center; }
+  .par img { max-width: 100%; max-height: 31mm; border: 1px solid #d4d4d8; display: block; }
+  .par > div { display: flex; flex-direction: column; align-items: flex-start; }
+  .par .t { font-size: 12px; font-weight: 700; display: flex; justify-content: space-between; }
+  .h12 .tira img { max-height: 36mm; }
+</style>
+</head>
+<body>
+
+<!-- 1 · RESUMEN -->
+<section class="hoja">
+  <div>
+    <h1>Referencias de acomodo · TIZADA PRO</h1>
+    <div class="sub">Tela Bandera (1,60): 157 cm de ancho imprimible · separación 5 mm + borde de corte · 21/10/2026</div>
+  </div>
+  <table>
+    <tr><th>Pedido</th><th>Acomodo</th><th class="n">Largo de tela</th><th class="n">Diferencia</th></tr>
+    <tr><td rowspan="2">6 banderas 50×50</td><td>Derechas, 2 por fila (el sistema)</td><td class="n verde">1,56 m</td><td class="n">—</td></tr>
+    <tr><td>Inclinadas 30° (como 5 banderas)</td><td class="n">1,75 m</td><td class="n">+18,3 cm (+11,7 %)</td></tr>
+    <tr><td rowspan="2">12 banderas 50×50</td><td>Giro libre (el sistema elige inclinadas)</td><td class="n verde">3,106 m</td><td class="n">—</td></tr>
+    <tr><td>Regla «sin rotar» (el sistema)</td><td class="n">3,134 m</td><td class="n">+2,8 cm</td></tr>
+    <tr><td rowspan="3">102 banderas 50×50</td><td>PDF del 16/10 (pieza por pieza)</td><td class="n">25,67 m</td><td class="n">—</td></tr>
+    <tr><td>Con el patrón (20/10, primera versión)</td><td class="n">24,68 m</td><td class="n">−0,99 m (−3,9 %)</td></tr>
+    <tr><td>Patrón con las tres a 30° (hoy)</td><td class="n verde">23,45 m</td><td class="n verde">−2,22 m (−8,7 %)</td></tr>
+    <tr><td rowspan="2">10 camisetas talle M<br><span class="nota">sólo 0° o 180°: la tela estira hacia los costados</span></td><td>Sin girar</td><td class="n">9,15 m</td><td class="n">—</td></tr>
+    <tr><td>Girando 180°</td><td class="n verde">8,54 m</td><td class="n verde">−0,61 m (−6,7 %)</td></tr>
+    <tr><td rowspan="2">40 camisetas talle M · 180°</td><td>Motor anterior</td><td class="n">35,15 m</td><td class="n">—</td></tr>
+    <tr><td>Hoy (con el patrón)</td><td class="n verde">34,50 m</td><td class="n verde">−0,65 m (−1,8 %)</td></tr>
+    <tr><td>Talles mezclados (6 M + 6 2XL + 6 Sfem) · 180°</td><td>Hoy</td><td class="n">16,07 m</td><td class="n">igual que antes</td></tr>
+  </table>
+  <div class="nota">Todo lo de este PDF lo acomodó el sistema (nada armado a mano). Camisetas: el molde real de las pruebas del sistema (7 piezas por camiseta). Banderas: la bandera 0,50×0,50 del pedido SUB-31889, con su contorno exacto. Los largos de hoy salen del motor del navegador; el del servidor da lo mismo.</div>
+</section>
+
+<!-- 2 · 6 BANDERAS -->
+<section class="hoja">
+  <div><h2>6 banderas 50×50 · derechas o inclinadas</h2>
+    <div class="sub">Tres derechas a lo ancho no entran (piden 158,4 cm de los 157). Con 5 conviene inclinarlas (1,43 m); con 6, la sexta va abajo y suma un piso más.</div></div>
+  <div class="fila">
+    <div class="caja gana"><div class="etq"><b>Derechas · el sistema</b><span class="m">1,56 m</span></div><img src="img/b6_derechas.png"></div>
+    <div class="caja pierde"><div class="etq"><b>Inclinadas 30°</b><span class="m">1,75 m</span></div><img src="img/b6_inclinadas.png"></div>
+  </div>
+  <div><span class="dif rojo">Inclinadas gastan 18,3 cm más de tela (+11,7 %)</span></div>
+</section>
+
+
+<!-- 3 · 12 BANDERAS -->
+<section class="hoja">
+  <div><h2>12 banderas 50×50 · con giro libre y con la regla «sin rotar»</h2>
+    <div class="sub">Las dos las acomodó el sistema: misma tela, misma separación; sólo cambia la regla de giro del molde. El largo de la mesa va de arriba hacia abajo.</div></div>
+  <div class="fila">
+    <div class="caja gana"><div class="etq"><b>Giro libre · elige inclinadas 30°</b><span class="m">3,106 m</span></div><img src="img/d12v_inclinadas.png" style="max-height:120mm"></div>
+    <div class="caja"><div class="etq"><b>Regla «sin rotar»</b><span class="m" style="color:#b45309">3,134 m</span></div><img src="img/d12v_escalera.png" style="max-height:120mm"></div>
+  </div>
+  <div><span class="dif">Sin rotar gasta 2,8 cm más: con 12 banderas la diferencia es chica</span></div>
+</section>
+
+<!-- 4 · EL ORDEN -->
+<section class="hoja">
+  <div><h2>¿Por qué 6 van derechas y 12 inclinadas? Es el ORDEN, no el tamaño</h2>
+    <div class="sub">La bandera es la misma: lo que cambia es cuántas entran en cada tramo de mesa y qué pasa con la primera y la última.</div></div>
+  <div class="claves">
+    <div class="clave cd"><h3 class="azul">Derechas: de a 2</h3>Tres a lo ancho no entran (piden 158,4 cm de 157). Entran <b>2 por fila</b> y cada fila suma <b>52,5 cm</b>. La 2.ª de cada fila es casi gratis; la 3.ª abre una fila nueva. <b>Conviene cuando la cantidad completa filas de 2</b> (4, 6, 8, 10).</div>
+    <div class="clave ci"><h3 class="rojo">Inclinadas: de a 3</h3>Inclinadas 30° entran <b>3 cada 68,4 cm</b> (22,8 cm por bandera, contra 26,3 derechas). Pero la mesa <b>arranca y termina con una punta</b> que asoma ~18 cm. Con pocas banderas esas puntas pesan; <b>desde 11 banderas siempre ganan</b>.</div>
+  </div>
+  <div class="par">
+    <div></div><div class="t"><span class="azul">derechas (el largo de la mesa va hacia abajo)</span></div><div class="t"><span class="rojo">inclinadas</span></div>
+    <b>4</b><div><div class="t"><span></span><span class="azul">1,045 m ✓</span></div><img src="img/n_0.png"></div><div><div class="t"><span></span><span>1,39 m</span></div><img src="img/n_1.png"></div>
+    <b>5</b><div><div class="t"><span></span><span>1,53 m</span></div><img src="img/n_2.png"></div><div><div class="t"><span></span><span class="rojo">1,43 m ✓</span></div><img src="img/n_3.png"></div>
+    <b>6</b><div><div class="t"><span></span><span class="azul">1,56 m ✓</span></div><img src="img/n_4.png"></div><div><div class="t"><span></span><span>1,75 m</span></div><img src="img/n_5.png"></div>
+  </div>
+</section>
+
+<!-- 5 · LA CURVA -->
+<section class="hoja">
+  <div><h2>De 2 a 16 banderas: cuánto mide cada orden</h2>
+    <div class="sub">El sistema calcula los dos (y otros) y se queda con el más corto. Punto grande = el que gana.</div></div>
+  <div class="fila">
+    <div style="flex:2.2"><svg viewBox="0 0 980 330" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial" font-size="12">
+<line x1="60" y1="290.0" x2="960" y2="290.0" stroke="#e4e4e7"/><text x="52" y="294.0" text-anchor="end" fill="#71717a">0,0 m</text>
+<line x1="60" y1="260.0" x2="960" y2="260.0" stroke="#e4e4e7"/><text x="52" y="264.0" text-anchor="end" fill="#71717a">0,5 m</text>
+<line x1="60" y1="230.0" x2="960" y2="230.0" stroke="#e4e4e7"/><text x="52" y="234.0" text-anchor="end" fill="#71717a">1,0 m</text>
+<line x1="60" y1="200.0" x2="960" y2="200.0" stroke="#e4e4e7"/><text x="52" y="204.0" text-anchor="end" fill="#71717a">1,5 m</text>
+<line x1="60" y1="170.0" x2="960" y2="170.0" stroke="#e4e4e7"/><text x="52" y="174.0" text-anchor="end" fill="#71717a">2,0 m</text>
+<line x1="60" y1="140.0" x2="960" y2="140.0" stroke="#e4e4e7"/><text x="52" y="144.0" text-anchor="end" fill="#71717a">2,5 m</text>
+<line x1="60" y1="110.0" x2="960" y2="110.0" stroke="#e4e4e7"/><text x="52" y="114.0" text-anchor="end" fill="#71717a">3,0 m</text>
+<line x1="60" y1="80.0" x2="960" y2="80.0" stroke="#e4e4e7"/><text x="52" y="84.0" text-anchor="end" fill="#71717a">3,5 m</text>
+<line x1="60" y1="50.0" x2="960" y2="50.0" stroke="#e4e4e7"/><text x="52" y="54.0" text-anchor="end" fill="#71717a">4,0 m</text>
+<line x1="60" y1="20.0" x2="960" y2="20.0" stroke="#e4e4e7"/><text x="52" y="24.0" text-anchor="end" fill="#71717a">4,5 m</text>
+<text x="60.0" y="308" text-anchor="middle" fill="#3f3f46">2</text>
+<text x="124.3" y="308" text-anchor="middle" fill="#3f3f46">3</text>
+<text x="188.6" y="308" text-anchor="middle" fill="#3f3f46">4</text>
+<text x="252.9" y="308" text-anchor="middle" fill="#3f3f46">5</text>
+<text x="317.1" y="308" text-anchor="middle" fill="#3f3f46">6</text>
+<text x="381.4" y="308" text-anchor="middle" fill="#3f3f46">7</text>
+<text x="445.7" y="308" text-anchor="middle" fill="#3f3f46">8</text>
+<text x="510.0" y="308" text-anchor="middle" fill="#3f3f46">9</text>
+<text x="574.3" y="308" text-anchor="middle" fill="#3f3f46">10</text>
+<text x="638.6" y="308" text-anchor="middle" fill="#3f3f46">11</text>
+<text x="702.9" y="308" text-anchor="middle" fill="#3f3f46">12</text>
+<text x="767.1" y="308" text-anchor="middle" fill="#3f3f46">13</text>
+<text x="831.4" y="308" text-anchor="middle" fill="#3f3f46">14</text>
+<text x="895.7" y="308" text-anchor="middle" fill="#3f3f46">15</text>
+<text x="960.0" y="308" text-anchor="middle" fill="#3f3f46">16</text>
+<text x="490.0" y="326" text-anchor="middle" fill="#3f3f46" font-weight="700">cantidad de banderas</text>
+<polyline points="60.0,258.8 124.3,228.0 188.6,227.3 252.9,198.2 317.1,196.5 381.4,167.4 445.7,165.0 510.0,134.7 574.3,133.5 638.6,104.1 702.9,102.0 767.1,71.6 831.4,70.4 895.7,40.1 960.0,38.9" fill="none" stroke="#2563eb" stroke-width="2.5"/>
+<polyline points="60.0,258.8 124.3,225.7 188.6,206.7 252.9,204.0 317.1,185.3 381.4,166.0 445.7,163.3 510.0,144.3 574.3,125.7 638.6,122.6 702.9,103.6 767.1,85.0 831.4,81.9 895.7,63.0 960.0,44.3" fill="none" stroke="#dc2626" stroke-width="2.5"/>
+<circle cx="60.0" cy="258.8" r="6" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="60.0" cy="258.8" r="3.5" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="124.3" cy="228.0" r="6" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="124.3" cy="225.7" r="3.5" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="188.6" cy="227.3" r="6" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="188.6" cy="206.7" r="3.5" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="252.9" cy="198.2" r="3.5" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="252.9" cy="204.0" r="6" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="317.1" cy="196.5" r="6" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="317.1" cy="185.3" r="3.5" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="381.4" cy="167.4" r="6" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="381.4" cy="166.0" r="3.5" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="445.7" cy="165.0" r="6" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="445.7" cy="163.3" r="3.5" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="510.0" cy="134.7" r="3.5" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="510.0" cy="144.3" r="6" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="574.3" cy="133.5" r="6" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="574.3" cy="125.7" r="3.5" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="638.6" cy="104.1" r="3.5" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="638.6" cy="122.6" r="6" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="702.9" cy="102.0" r="3.5" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="702.9" cy="103.6" r="6" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="767.1" cy="71.6" r="3.5" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="767.1" cy="85.0" r="6" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="831.4" cy="70.4" r="3.5" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="831.4" cy="81.9" r="6" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="895.7" cy="40.1" r="3.5" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="895.7" cy="63.0" r="6" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<circle cx="960.0" cy="38.9" r="3.5" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>
+<circle cx="960.0" cy="44.3" r="6" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+<rect x="70" y="24" width="270" height="44" fill="#fff" stroke="#e4e4e7"/>
+<line x1="80" y1="38" x2="104" y2="38" stroke="#2563eb" stroke-width="3"/><text x="110" y="42">derechas (2 por fila)</text>
+<line x1="80" y1="56" x2="104" y2="56" stroke="#dc2626" stroke-width="3"/><text x="110" y="60">inclinadas 30° · punto grande = la que gana</text>
+</svg></div>
+    <div style="flex:1"><table class="mini"><tr><th class="n">n</th><th class="n">derechas cm</th><th class="n">inclinadas cm</th><th>gana</th></tr><tr><td class="n">2</td><td class="n">52</td><td class="n">52</td><td class="azul">derechas</td></tr><tr><td class="n">3</td><td class="n">103,3</td><td class="n">107,2</td><td class="azul">derechas</td></tr><tr><td class="n">4</td><td class="n">104,5</td><td class="n">138,8</td><td class="azul">derechas</td></tr><tr><td class="n">5</td><td class="n">153</td><td class="n">143,4</td><td class="rojo">inclinadas</td></tr><tr><td class="n">6</td><td class="n">155,8</td><td class="n">174,5</td><td class="azul">derechas</td></tr><tr><td class="n">7</td><td class="n">204,4</td><td class="n">206,6</td><td class="azul">derechas</td></tr><tr><td class="n">8</td><td class="n">208,4</td><td class="n">211,2</td><td class="azul">derechas</td></tr><tr><td class="n">9</td><td class="n">258,9</td><td class="n">242,8</td><td class="rojo">inclinadas</td></tr><tr><td class="n">10</td><td class="n">260,9</td><td class="n">273,9</td><td class="azul">derechas</td></tr><tr><td class="n">11</td><td class="n">309,8</td><td class="n">279</td><td class="rojo">inclinadas</td></tr><tr><td class="n">12</td><td class="n">313,4</td><td class="n">310,6</td><td class="rojo">inclinadas</td></tr><tr><td class="n">13</td><td class="n">364</td><td class="n">341,7</td><td class="rojo">inclinadas</td></tr><tr><td class="n">14</td><td class="n">366</td><td class="n">346,8</td><td class="rojo">inclinadas</td></tr><tr><td class="n">15</td><td class="n">416,5</td><td class="n">378,4</td><td class="rojo">inclinadas</td></tr><tr><td class="n">16</td><td class="n">418,5</td><td class="n">409,5</td><td class="rojo">inclinadas</td></tr></table></div>
+  </div>
+</section>
+
+<!-- 6 · LINDO NO ES CORTO -->
+<section class="hoja">
+  <div><h2>Que se vea ordenado no quiere decir que gaste menos tela</h2>
+    <div class="sub">«Feo» es que parezca desordenado y con blancos; no es que sea más largo. Con 6 banderas el sistema calcula las dos maneras y se queda con la más corta, aunque se vea con huecos.</div></div>
+  <div class="fila">
+    <div class="caja gana"><div class="etq"><b>Con huecos · la que elige el sistema</b><span class="m">1,56 m</span></div><img src="img/b6_derechas.png" style="max-height:112mm"></div>
+    <div class="caja pierde"><div class="etq"><b>Pareja, todas inclinadas · el sistema la descarta</b><span class="m">1,75 m</span></div><img src="img/b6_inclinadas.png" style="max-height:112mm"></div>
+  </div>
+  <div><span class="dif">La que «se ve fea» gasta 18,3 cm menos de tela (−10,5 %)</span></div>
+</section>
+
+<!-- 3 · 102 BANDERAS -->
+<section class="hoja">
+  <div><h2>102 banderas 50×50 · el mismo pedido, tres acomodos</h2>
+    <div class="sub">Cada tira son 13 m de tela, de izquierda a derecha.</div></div>
+  <div class="apil h3">
+    <div class="tira"><div class="etq"><b>PDF del 16/10 · pieza por pieza</b><span class="m" style="color:#b91c1c">25,67 m</span></div><img src="img/b102_pdf_sub.png"></div>
+    <div class="tira"><div class="etq"><b>Patrón, primera versión</b><span class="m" style="color:#b45309">24,68 m</span></div><img src="img/b102_mesa1.png"></div>
+    <div class="tira"><div class="etq"><b>Patrón con las tres a 30° · hoy</b><span class="m" style="color:#059669">23,45 m</span></div><img src="img/b102_ahora.png"></div>
+  </div>
+  <div><span class="dif">2,22 m menos de tela que el 16/10 (−8,7 %)</span></div>
+</section>
+
+<!-- 4 · 10 CAMISETAS Y EL GIRO -->
+<section class="hoja">
+  <div><h2>10 camisetas talle M · lo que cambia dar vuelta las piezas</h2>
+    <div class="sub">En una camiseta la tela estira hacia los costados: cada pieza va derecha (0°) o dada vuelta (180°), nunca a 90° ni en giro libre. El giro lo decide la regla de acomodo del molde (Configuración → Reglas de Nesting).</div></div>
+  <div class="apil h2">
+    <div class="tira"><div class="etq"><b>Todas derechas (0°)</b><span class="m" style="color:#b91c1c">9,15 m</span></div><img src="img/ahora_0.png"></div>
+    <div class="tira"><div class="etq"><b>Derechas o dadas vuelta (0° y 180°)</b><span class="m" style="color:#059669">8,54 m</span></div><img src="img/ahora_1.png"></div>
+  </div>
+  <div class="nota">Cada color es una pieza de la camiseta.</div>
+</section>
+
+<!-- 5 · 40 CAMISETAS -->
+<section class="hoja">
+  <div><h2>40 camisetas talle M · 180° · antes y hoy</h2>
+    <div class="sub">Con prendas iguales, el sistema calcula con todas juntas el dibujo que se repite y lo compara con el acomodo pieza por pieza. Cada tira son 18 m.</div></div>
+  <div class="apil h2">
+    <div class="tira"><div class="etq"><b>Motor anterior</b><span class="m" style="color:#b91c1c">35,15 m</span></div><img src="img/antes_3.png"></div>
+    <div class="tira"><div class="etq"><b>Hoy</b><span class="m" style="color:#059669">34,50 m</span></div><img src="img/ahora_3.png"></div>
+  </div>
+  <div><span class="dif">65 cm menos de tela (−1,8 %)</span></div>
+</section>
+
+<!-- 6 · TALLES MEZCLADOS -->
+<section class="hoja">
+  <div><h2>Talles mezclados · 6 M + 6 2XL + 6 Sfem · 180°</h2>
+    <div class="sub">Piezas de distinto tamaño no forman un dibujo que se repita: acá gana la búsqueda pieza por pieza (16 caminos en paralelo y ajuste con el contorno real). Cada tira son 10 m.</div></div>
+  <div class="apil h1"><div class="tira"><div class="etq"><b>Hoy</b><span class="m">16,07 m</span></div><img src="img/ahora_4.png"></div></div>
+</section>
+
+</body>
+</html>

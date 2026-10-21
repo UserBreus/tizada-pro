@@ -852,6 +852,122 @@
         [
           "servidor.py",
           "def _guardar_cuerpo_plan"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "export async function anidarPatron"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function unidadPatron"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function franjaPatron"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function mejorFranjaModo"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function modosPatron"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function lugarFranja"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function chocaConsigo"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function todasIguales"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "PATRON_PASOS"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _anidar_patron"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _unidad_patron"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _franja_patron"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _mejor_franja_modo"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _modos_patron"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _lugar_franja"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _choca_consigo"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _todas_iguales"
+        ],
+        [
+          "nesting_contorno.py",
+          "PATRON_PASOS"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function buscarCarril"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _buscar_carril"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function areaUltima"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _area_ultima"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function siluetasDistintas"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _siluetas_distintas"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "async function compactarVarias"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "PATRON_UNIDAD_CHICA"
+        ],
+        [
+          "nesting_contorno.py",
+          "PATRON_UNIDAD_CHICA"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function largosPatron"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _largos_patron"
         ]
       ],
       "palabras": [
@@ -887,7 +1003,18 @@
         "🔴 COMPACTAR CON EL CONTORNO REAL (MAPA 731): el último paso de `anidar_contorno` desliza cada pieza (arriba/izquierda) con su polígono girado igual que la hoja hasta espaciado + bordes + 0,3 mm de sus vecinas. La grilla de 4 mm dejaba 16,8 mm donde se piden 11. Usa `cosdg`/`sindg` (mismo bit en los dos motores) y el tope es la CAJA de la pieza dentro de la mesa.",
         "Para medir el aire real entre piezas: polígonos del contorno + el giro de `matrizColocacion` y distancia vértice-segmento en los dos sentidos (la validación de la hoja sólo informa el valor configurado).",
         "Para reproducir el acomodo EXACTO de un pedido del usuario: `logs/planes/plan_*.json` (los últimos 10 cuerpos planificados) → `_plan_del_pedido` + `frontend/src/motor/pruebas/tizada.mjs` (MAPA 731).",
-        "🔴 Con más de 120 piezas NO hay carriles y la compactación por grilla va hasta 120 piezas por mesa y 2 pasadas (MAPA 732): la Copia acomoda cientos de copias varias veces. Todo cambio del acomodo se mide también con la Copia de 593 banderines y con 689 banderines."
+        "🔴 Con más de 120 piezas NO hay carriles y la compactación por grilla va hasta 120 piezas por mesa y 2 pasadas (MAPA 732): la Copia acomoda cientos de copias varias veces. Todo cambio del acomodo se mide también con la Copia de 593 banderines y con 689 banderines.",
+        "🔴 EL PATRÓN (MAPA 736): con piezas iguales (≥ 6, formas en proporción, unidad ≤ 6) se calcula con TODAS juntas el dibujo que se repite: una franja periódica (lo que sale por abajo entra por arriba) se llena con los giros de la regla en 3 órdenes («arriba», «alterna», «columna») y con las 3 primeras forzadas a cada giro; barrido de largos (32 pasos) + bisección del umbral; gana la mayor densidad (unidades/largo, sin dividir). Se repite a lo largo de la mesa desde el arranque que la deja más corta. COMPITE con el acomodo pieza por pieza: sólo gana si gasta menos tela (`anidarPatron` ↔ `_anidar_patron`).",
+        "La forma de una pieza para el patrón = su silueta en cada giro celda por celda (`firmaCands` + `candsIguales`), NO la geometría por clave: dos diseños o dos moldes con la misma pieza son la misma forma (las 102 banderas del usuario eran 47 + 55 de dos diseños).",
+        "Con piezas TODAS iguales (`todasIguales`) los carriles NO se recalculan: cada combinación de criterio y giros se acomoda una vez (la búsqueda; `estrategia` devuelve `consumo` y `ultima`), los carriles se recorren con esas cuentas (`buscarCarril` ↔ `_buscar_carril`, mismas semillas) y se pule cada combinación final distinta (tarea `pulido`). Da el MISMO largo que los 16 carriles (MAPA 736). No reducir a «sólo el carril 0»: pulir otra combinación puede ganar (Copia de 593 banderines 10,95 vs 11,00 m).",
+        "En el navegador los modos del patrón van en la MISMA tanda que los carriles y primero (`tipo: 'patron'` en `tareaCarril`); Python los corre en orden con FFT (lento: 10-45 s por pedido; sólo respaldo y contratos).",
+        "Los giros que fuerza el patrón (`modosPatron` ↔ `_modos_patron`) se distinguen por el TAMAÑO girado (alto × ancho), nunca por las celdas: una celda de redondeo dejaba fuera el giro bueno (MAPA 738).",
+        "Para medir el acomodo de un molde a medida: armar las piezas con el contorno EXACTO de su `entrada/<pid>/plantilla.ai` (sin redondear); una pieza sintética del mismo tamaño puede dar otro resultado (MAPA 738).",
+        "EL PATRÓN vale para cualquier cantidad de piezas por prenda y desde 2 piezas (MAPA 739): unidades grandes = franja de hasta 24 piezas, largo según el área de la unidad, menos modos; nunca más piezas por franja que las del pedido (`U.total`).",
+        "El patrón prueba UNA silueta por giro (`siluetasDistintas`: mismo tamaño y ≤ 1 % de celdas distintas); el acomodo de siempre sigue con todos los giros.",
+        "El patrón compite YA compactado con el contorno real contra el ganador de los carriles (compactados en paralelo, `compactarVarias` / tarea `compactar`); los hilos reciben `base` sólo con la geometría del contorno (`pieza()` de carriles.js).",
+        "Sus modos van en la tanda de los carriles, no en la de la búsqueda (junto a la búsqueda la Copia de 593 pasó de 8,4 a 11,9 s).",
+        "Antes de medir tiempos del acomodo: que no corra ninguna otra prueba pesada en la PC (los números salen falsos)."
       ],
       "cicatrices": [
         "MAPA 579: la primera versión (sólo acotado) arreglaba la mesa chica y empeoraba los pedidos grandes (25,74 → 27,53 m).",
@@ -904,10 +1031,17 @@
         "2026-10-16 (MAPA 729): con 10 m (2 mesas) salían 14,91 m y con 30 m (1 mesa) 14,99 m: la mesa partida tenía una búsqueda propia en su segunda parte y la entera no.",
         "2026-10-16 (MAPA 730): la 729 (tramos) prometió 14,86 m medido en un fixture; en el navegador del usuario dio 14,98 m y tardó 1 min 20 s → revertida.",
         "2026-10-16 (MAPA 731): un separador por superposición sobre la grilla (muestreo de lugares) dio peor que el motor (15,37 contra 15,06 m): sin búsqueda exacta del mejor lugar no sirve.",
-        "2026-10-16 (MAPA 732): Copia de 593 banderines clavada en «Buscando el mejor acomodo (9 de 16)»: 16 carriles + compactación por grilla sin tope = 520 s."
+        "2026-10-16 (MAPA 732): Copia de 593 banderines clavada en «Buscando el mejor acomodo (9 de 16)»: 16 carriles + compactación por grilla sin tope = 520 s.",
+        "2026-10-20 (MAPA 736): 102 banderas cuadradas de 52 cm en 157 cm salían unas derechas y otras inclinadas sin orden, con cuadrados blancos vacíos; el usuario: «el sistema tiene que ver todas juntas y hacer los cálculos con todo junto». Pieza por pieza nunca veía el dibujo que se repite. Patrón: 26,39 → 23,44 m.",
+        "2026-10-20 (MAPA 736): las primeras versiones del patrón tardaban 30-54 s: 16 carriles repitiendo la misma cuenta con piezas iguales (~80 s de CPU) y la firma de forma recalculada por pieza (200 millones de celdas).",
+        "2026-10-20 (MAPA 736): dejar sólo el carril 0 con piezas iguales parecía exacto («la búsqueda ya prueba todas las combinaciones») y dejó la Copia de 593 banderines 5 cm más larga: el pulido de otra combinación ganaba. Se reemplazó por recorrer los carriles con las cuentas ya hechas.",
+        "2026-10-20 (MAPA 738): la bandera real 0,50×0,50 salía 24,68 m y la sintética «igual» 23,44 m: 15° y 75° daban 16882/16883 celdas → los giros a forzar quedaban en múltiplos de 90° y no se probaban las tres a 30°.",
+        "2026-10-20 (MAPA 739): «5 banderines ocupan más y se acomodan distinto»: el patrón exigía ≥ 6 piezas; con 2-12 piezas y giro libre, después de habilitarlo, tardaba 10-15 s (24 giros casi iguales) → una silueta por giro.",
+        "2026-10-20 (MAPA 739): el patrón comparado ANTES de compactar «ganó» en una mezcla de 3 talles y la tizada quedó 9 cm más larga."
       ],
       "contratos": [
-        "verificar_molde_a_medida.py"
+        "verificar_molde_a_medida.py",
+        "verificar_navegador_nesting.py"
       ],
       "mapa": [
         158,
@@ -925,7 +1059,10 @@
         729,
         730,
         731,
-        732
+        732,
+        736,
+        738,
+        739
       ],
       "memoria": "nesting-aprovechamiento.md",
       "conexiones": [
@@ -1367,6 +1504,10 @@
         [
           "frontend/src/App.jsx",
           "urlDe.reintentar"
+        ],
+        [
+          "frontend/src/motor/vista/vista.js",
+          "export function soltarVista"
         ]
       ],
       "palabras": [
@@ -1380,13 +1521,16 @@
         "Pixel-idéntico al archivo (misma lista de dibujo, mismo recorte).",
         "«Dibujando la mesa…» mientras carga: un blanco parece «no se ve».",
         "UNA FOTO POR MESA a una sola calidad (`calidadFoto`, `FOTO_PXCM`; decisión del usuario 2026-09-18): no hay recortes de zoom ni en la pantalla ni pre-dibujados en el servidor (`_predibujar_recortes_fondo` sacado en la 624). La descarga de una mesa es `mesaSuelta` → `paginaComoPdf` (la página, sin rasterizar).",
-        "🔴 La vista de la mesa NUNCA cae al servidor con «no calcula» prendido (contesta 409): se reintenta en la PC (abrir ×4, dibujo ×3) y si no sale, «Reintentar» (MAPA 733)."
+        "🔴 La vista de la mesa NUNCA cae al servidor con «no calcula» prendido (contesta 409): se reintenta en la PC (abrir ×4, dibujo ×3) y si no sale, «Reintentar» (MAPA 733).",
+        "Cada visor (`useVistaLocal`) suelta SÓLO las vistas que abrió (`propias` + `soltarVista`); `cerrarVistas()` (todas) es sólo para «Nuevo pedido» y para armar una tizada nueva (MAPA 741).",
+        "La foto de una mesa nunca se rinde de una: el dibujo se reintenta y baja a 1/2 y 1/4 de calidad; si el `<img>` da error se vuelve a dibujar solo hasta 4 veces y recién ahí aparece «Reintentar» (MAPA 741)."
       ],
       "cicatrices": [
         "MAPA 433: «las mesas tardan o no se ven» era el pool del desplegado abandonado, no la PC.",
         "MAPA 468: recortes en serie de 4-17 s.",
         "2026-10-06 (MAPA 624): el servidor seguía pre-dibujando 128 recortes por mesa que la pantalla dejó de pedir el 09-18, y dos contratos (`verificar_mesa_por_talle.py`, `verificar_visor_display_list.py`) seguían exigiendo los recortes: estuvieron rojos semanas.",
-        "2026-10-16 (MAPA 733): un fallo pasajero al abrir la hoja dejaba la mesa para siempre en «No se pudo traer la vista previa» (el servidor contestaba 409)."
+        "2026-10-16 (MAPA 733): un fallo pasajero al abrir la hoja dejaba la mesa para siempre en «No se pudo traer la vista previa» (el servidor contestaba 409).",
+        "2026-10-21 (MAPA 741): «No se pudo dibujar la vista» con hojas que se dibujan bien: el visor de la ficha, al irse, cerraba TODAS las vistas (`cerrarVistas`) y las fotos de las mesas quedaban revocadas."
       ],
       "contratos": [
         "verificar_navegador_vista.py",
@@ -1400,7 +1544,8 @@
         484,
         503,
         624,
-        733
+        733,
+        741
       ],
       "memoria": "pool-desplegado-no-se-abandona.md",
       "conexiones": [
@@ -1844,13 +1989,19 @@
         "AbortError"
       ],
       "reglas": [
-        "Reconocer la cancelación (AbortError) sin mostrar error."
+        "Reconocer la cancelación (AbortError) sin mostrar error.",
+        "«Descargar todo» (`descargarVarios`): con UN archivo, «Guardar como» de archivo (deja Escritorio/Descargas); con varios, una carpeta y, si no se eligió (cancelar o Chrome rechaza Escritorio/Descargas/Documentos «por archivos del sistema»), se bajan DIRECTO a Descargas sin preguntar. Nada de avisos intermedios ni .zip: el usuario quiere la descarga (MAPA 737)."
       ],
-      "cicatrices": [],
+      "cicatrices": [
+        "2026-10-20 (MAPA 737): «Descargar todo» con el Escritorio o Descargas elegidos: Chrome decía «contiene archivos del sistema» y no se bajaba nada, sin explicación. El usuario: «quiero descargar algo y no me deja».",
+        "2026-10-20 (MAPA 737): un aviso intermedio «Elegir otra carpeta / .zip / A Descargas» y un `id` en el diálogo de carpeta empeoraron todo: «te pedí que se descargue, no que me digas va en un zip»."
+      ],
       "contratos": [
         "frontend/verificar_descarga_elegir_carpeta.mjs"
       ],
-      "mapa": [],
+      "mapa": [
+        737
+      ],
       "memoria": "descargas-guardar-como.md",
       "conexiones": []
     },
@@ -3024,7 +3175,9 @@
         "La documentación de la integración tiene que decir los DOS usos de la cantidad: `mesas.modo` normal = prendas (se repite la fila y se mezcla) vs `una_por_fila` = copias de la mesa (vuelven `fila`/`copias`); está en `COMO_USAR_CADA_OPCION.md` y su PDF (`como_usar_cada_opcion.html` → `TIZADA_PRO_Como_usar_cada_opcion.pdf`). Si cambia una opción del pedido, se actualizan los dos (MAPA 697).",
         "UN SOLO ROBOT (MAPA 698): `robot_tomar` le da trabajo sólo al robot que trae el turno de ESTE arranque (`X-Robot-Turno` = `_TURNO_ROBOT`, que el servidor le pasa en `TIZADA_ROBOT_TURNO`); a los demás, `salir`. `arrancar_robot` cierra antes los robots viejos de esta instalación (`_cerrar_robots_viejos`, por PID y comando exacto, sólo Linux).",
         "La revisión de los DATOS corre `_plan_del_pedido` con `_solo_reglas: True`: sólo las trabas, nunca leer el arte (eso es del robot).",
-        "🔴 TODO LO QUE EL USUARIO HACE EN EL PEDIDO SE PUEDE MANDAR POR LA API (MAPA 712): una opción nueva del Panel de Pedidos va también a `revisar_datos` + `cuerpo_de` (+ robot si toca el arte), al esquema `pedido.schema.json` (additionalProperties:false), a FORMATO_PEDIDO y con su alarma en ALARMAS. Los nombres de objetos editables los resuelve `robot_arte` con el arte."
+        "🔴 TODO LO QUE EL USUARIO HACE EN EL PEDIDO SE PUEDE MANDAR POR LA API (MAPA 712): una opción nueva del Panel de Pedidos va también a `revisar_datos` + `cuerpo_de` (+ robot si toca el arte), al esquema `pedido.schema.json` (additionalProperties:false), a FORMATO_PEDIDO y con su alarma en ALARMAS. Los nombres de objetos editables los resuelve `robot_arte` con el arte.",
+        "Guía de NOVEDADES para el sistema externo (MAPA 734): sale del `git diff` de `documentacion/integracion_externa/` desde la última entregada; HTML con los estilos de `como_usar_cada_opcion.html` → PDF con Chrome sin cabecera.",
+        "Las guías para personas van VISUALES (MAPA 734): hojas apaisadas, un dibujo por cosa, casi sin texto; el detalle largo queda en los .md."
       ],
       "cicatrices": [
         "2026-10-02: breusplanilla@gmail.com es cuenta PERSONAL con la carpeta en su Mi unidad: la cuenta de servicio del 606 no podía guardar ahí. Se agregó OAuth de la persona. Pendiente: la app de Google sigue en «Prueba» → el permiso vence a los 7 días hasta publicarla (pide página principal + política de privacidad públicas) (MAPA 607).",
@@ -3066,7 +3219,8 @@
         697,
         698,
         708,
-        712
+        712,
+        734
       ],
       "memoria": "integracion-pedido-externo",
       "conexiones": [

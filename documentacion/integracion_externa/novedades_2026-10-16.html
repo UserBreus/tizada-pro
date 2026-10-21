@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Novedades de la integración</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --cian: #00b8d4; --cian-claro: #e0f7fb; --magenta: #d6007e; --magenta-claro: #fde6f2;
+    --amarillo: #f5b800; --amarillo-claro: #fff6d6; --verde: #10a36b; --verde-claro: #e3f6ee;
+    --rojo: #e0443a; --rojo-claro: #fdeceb; --tinta: #16202a; --gris: #5b6875; --gris-claro: #eef1f4;
+    --borde: #dde3e9;
+  }
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  @page portada { margin: 0; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', 'Segoe UI', sans-serif; color: var(--tinta); font-size: 10pt; line-height: 1.55; margin: 0; }
+  h1, h2, h3, h4 { line-height: 1.2; margin: 0; }
+  p { margin: 0 0 8pt; }
+  code, .mono { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.8pt; }
+  code { background: var(--gris-claro); padding: 1px 4px; border-radius: 4px; }
+  td code { font-size: 8pt; }
+  b { font-weight: 700; }
+  .ti { vertical-align: -2px; }
+
+  /* ── portada ── */
+  .portada { page: portada; height: 297mm; width: 210mm; position: relative; overflow: hidden;
+    background: radial-gradient(circle at 85% 12%, rgba(0,184,212,0.55), transparent 42%),
+                radial-gradient(circle at 10% 90%, rgba(214,0,126,0.45), transparent 45%),
+                radial-gradient(circle at 70% 80%, rgba(245,184,0,0.35), transparent 40%),
+                linear-gradient(160deg, #0b1118 0%, #111b26 60%, #0b1118 100%);
+    color: #fff; padding: 30mm 22mm; break-after: page; }
+  .portada .logo { width: 30mm; filter: drop-shadow(0 0 18px rgba(0,184,212,0.7)); }
+  .portada .marca { font-size: 13pt; letter-spacing: 0.3em; font-weight: 700; margin-top: 8mm; opacity: 0.85; }
+  .portada .marca span { color: #3fe3ff; }
+  .portada h1 { font-size: 34pt; font-weight: 800; margin-top: 42mm; max-width: 150mm; }
+  .portada h1 em { font-style: normal; color: #3fe3ff; text-shadow: 0 0 22px rgba(63,227,255,0.45); }
+  .portada .sub { font-size: 13pt; margin-top: 8mm; max-width: 140mm; color: #c9d6e2; }
+  .portada .chips { margin-top: 14mm; display: flex; gap: 8px; flex-wrap: wrap; }
+  .portada .chip { border: 1px solid rgba(255,255,255,0.35); border-radius: 999px; padding: 5px 13px; font-size: 9.5pt; color: #e6eef5; }
+  .portada .pie { position: absolute; bottom: 20mm; left: 22mm; right: 22mm; display: flex; justify-content: space-between; font-size: 9pt; color: #9fb0c0; border-top: 1px solid rgba(255,255,255,0.18); padding-top: 5mm; }
+
+  /* ── secciones ── */
+  section { break-before: page; }
+  .seccion-titulo { display: flex; align-items: center; gap: 12px; margin-bottom: 12pt; }
+  .num { min-width: 36px; padding: 0 5px; width: auto; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15pt; color: #fff; background: linear-gradient(135deg, var(--cian), #0088a3); flex-shrink: 0; }
+  .num.m { background: linear-gradient(135deg, var(--magenta), #a3005f); }
+  .num.a { background: linear-gradient(135deg, var(--amarillo), #d99400); }
+  .num.v { background: linear-gradient(135deg, var(--verde), #0a7a50); }
+  h2 { font-size: 20pt; font-weight: 800; }
+  .kicker { font-size: 8.5pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gris); font-weight: 700; }
+  h3 { font-size: 13pt; font-weight: 700; margin: 14pt 0 6pt; display: flex; align-items: center; gap: 7px; }
+  h3 .ti { color: var(--cian); font-size: 15pt; }
+  h4 { font-size: 11pt; font-weight: 700; margin: 10pt 0 4pt; }
+  .lead { font-size: 11.5pt; color: #2d3b48; margin-bottom: 12pt; }
+
+  /* ── cajas ── */
+  .caja { border-radius: 12px; padding: 11pt 13pt; margin: 9pt 0; break-inside: avoid; border: 1px solid var(--borde); }
+  .caja .t { font-weight: 800; display: flex; align-items: center; gap: 7px; margin-bottom: 4pt; }
+  .caja p:last-child { margin-bottom: 0; }
+  .c-info { background: var(--cian-claro); border-color: #a9e7f2; } .c-info .t { color: #007a8f; }
+  .c-ojo { background: var(--amarillo-claro); border-color: #f3dc8a; } .c-ojo .t { color: #9a6d00; }
+  .c-mal { background: var(--rojo-claro); border-color: #f4b9b4; } .c-mal .t { color: #b3261e; }
+  .c-bien { background: var(--verde-claro); border-color: #a6dcc4; } .c-bien .t { color: #0a7a50; }
+  .c-mag { background: var(--magenta-claro); border-color: #f3b2d6; } .c-mag .t { color: #a3005f; }
+
+  .grilla { display: grid; gap: 9pt; }
+  .g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: 1fr 1fr 1fr; } .g4 { grid-template-columns: repeat(4, 1fr); }
+  .tarjeta { border: 1px solid var(--borde); border-radius: 12px; padding: 10pt 11pt; break-inside: avoid; background: #fff; }
+  .tarjeta .ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 17px; color: #fff; margin-bottom: 6pt; }
+  .tarjeta h4 { margin-top: 0; }
+  .tarjeta p { font-size: 9.6pt; color: #394856; margin: 0; }
+  .i-c { background: var(--cian); } .i-m { background: var(--magenta); } .i-a { background: var(--amarillo); } .i-v { background: var(--verde); } .i-g { background: #52606d; }
+
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9.2pt; margin: 6pt 0 10pt; break-inside: auto; }
+  th { background: var(--tinta); color: #fff; text-align: left; font-weight: 600; padding: 6pt 7pt; }
+  th:first-child { border-top-left-radius: 8px; } th:last-child { border-top-right-radius: 8px; }
+  td { padding: 5.5pt 7pt; border-bottom: 1px solid var(--borde); vertical-align: top; }
+  tr { break-inside: avoid; }
+  tr:nth-child(even) td { background: #f7f9fb; }
+  .si { color: var(--verde); font-weight: 700; } .no { color: var(--rojo); font-weight: 700; } .medio { color: #b58300; font-weight: 700; }
+  .pill { display: inline-block; font-size: 8pt; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .p-obl { background: var(--rojo-claro); color: #b3261e; } .p-opc { background: var(--gris-claro); color: var(--gris); }
+
+  pre.json { background: #0f1720; color: #d7e3ee; border-radius: 12px; padding: 11pt 13pt; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.3pt; line-height: 1.5; white-space: pre-wrap; break-inside: avoid; margin: 8pt 0; }
+  pre.json .k { color: #7fdcff; } pre.json .s { color: #ffd479; } pre.json .c { color: #7d8e9e; font-style: italic; } pre.json .n { color: #ff8fc8; }
+
+  .mermaid { display: flex; justify-content: center; margin: 8pt 0 10pt; break-inside: avoid; }
+  .mermaid svg { max-height: 118mm; height: auto; }
+  .figura.baja .mermaid svg { max-height: 88mm; }
+  .figura.baja2 .mermaid svg { max-height: 58mm; }
+  .figura.alta .mermaid svg { max-height: 175mm; }
+  .figura { border: 1px solid var(--borde); border-radius: 14px; padding: 8pt; background: linear-gradient(180deg, #fbfdfe, #f3f7fa); break-inside: avoid; margin: 8pt 0; }
+  .figura .pie-fig { font-size: 8.6pt; color: var(--gris); text-align: center; margin-top: 2pt; }
+
+  .pasos { counter-reset: paso; }
+  .paso { display: flex; gap: 11px; margin: 8pt 0; break-inside: avoid; }
+  .paso .b { width: 26px; height: 26px; border-radius: 50%; background: var(--cian); color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 10pt; }
+  .paso .b.m { background: var(--magenta); } .paso .b.a { background: var(--amarillo); } .paso .b.v { background: var(--verde); }
+  .paso .x { flex: 1; }
+  .paso .x b.tit { display: block; font-size: 10.8pt; }
+
+  .etapas { display: flex; align-items: stretch; gap: 5px; margin: 6pt 0 12pt; break-inside: avoid; }
+  .etapas .et { flex: 1; border: 1.5px solid; border-radius: 10px; padding: 7pt 8pt; font-size: 8.8pt; line-height: 1.35; text-align: center; min-height: 52pt; display: flex; flex-direction: column; justify-content: center; }
+  .etapas .et b { display: block; font-size: 9.6pt; margin-bottom: 2pt; }
+  .etapas .ti { color: var(--gris); font-size: 14px; align-self: center; }
+  .indice { columns: 2; column-gap: 16pt; margin-top: 8pt; }
+  .indice div { break-inside: avoid; padding: 5pt 0; border-bottom: 1px dashed var(--borde); display: flex; gap: 9px; align-items: baseline; }
+  .indice .n { font-weight: 800; color: var(--cian); width: 26px; }
+
+  .arbol { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.6pt; background: #f7f9fb; border: 1px solid var(--borde); border-radius: 12px; padding: 10pt 12pt; white-space: pre; line-height: 1.6; break-inside: avoid; }
+  .arbol .d { color: #007a8f; font-weight: 600; } .arbol .f { color: #a3005f; } .arbol .c { color: var(--gris); font-family: 'Inter', sans-serif; font-style: italic; }
+  .chico { font-size: 8.8pt; color: var(--gris); }
+
+  /* secciones con mucho contenido: que entren en su página */
+  section.apretada table { font-size: 8.6pt; margin: 4pt 0 6pt; }
+  section.apretada td { padding: 3.8pt 6pt; }
+  section.apretada th { padding: 4.5pt 6pt; }
+  section.apretada h3 { margin: 8pt 0 4pt; }
+  section.apretada .lead { margin-bottom: 6pt; }
+  section.apretada pre.json { font-size: 7.5pt; padding: 8pt 10pt; margin: 5pt 0; line-height: 1.42; }
+  section.apretada .arbol { font-size: 8pt; padding: 7pt 10pt; line-height: 1.5; }
+  section.apretada .figura.media .mermaid svg { max-height: 84mm; }
+</style>
+</head>
+<body>
+
+<style>
+  /* lo propio de esta guía */
+  .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; margin: 8pt 0; }
+  .simple { border-left: 4px solid var(--verde); background: var(--verde-claro); border-radius: 0 12px 12px 0; padding: 9pt 12pt; margin: 8pt 0; break-inside: avoid; }
+  .simple .t { font-weight: 800; color: #0a7a50; font-size: 8.5pt; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 3pt; display: flex; align-items: center; gap: 6px; }
+  .prog { border-left: 4px solid #0f1720; background: #f4f6f8; border-radius: 0 12px 12px 0; padding: 9pt 12pt; margin: 8pt 0; break-inside: avoid; }
+  .prog .t { font-weight: 800; color: #0f1720; font-size: 8.5pt; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 4pt; display: flex; align-items: center; gap: 6px; }
+  .prog pre.json { margin: 4pt 0 2pt; }
+  .simple p, .prog p { margin-bottom: 4pt; }
+  .uso { border-radius: 14px; padding: 10pt 12pt; break-inside: avoid; border: 1.5px solid; }
+  .uso.u1 { border-color: #a9e7f2; background: var(--cian-claro); }
+  .uso.u2 { border-color: #f3dc8a; background: var(--amarillo-claro); }
+  .uso h4 { margin: 0 0 4pt; font-size: 12pt; }
+  .uso .modo { font-family: 'JetBrains Mono', monospace; font-size: 8.4pt; font-weight: 600; }
+  .uso ul { margin: 4pt 0 0; padding-left: 15pt; } .uso li { margin: 2pt 0; font-size: 9.4pt; }
+  .gran { font-size: 15pt; font-weight: 800; }
+  section.fin .tarjeta { padding: 7pt 9pt; } section.fin .tarjeta p { font-size: 8.8pt; } section.fin .paso { margin: 4pt 0; } section.fin .caja { margin: 7pt 0; }
+</style>
+<div class="portada">
+  <img class="logo" src="../logo.svg" alt="">
+  <div class="marca">TIZADA <span>PRO</span></div>
+  <h1>Lo <em>nuevo</em> para el sistema que manda pedidos</h1>
+  <div class="sub">Qué se puede mandar ahora, qué herramientas nuevas hay en la API, qué contesta distinto y qué mejora solo, sin cambiar nada.</div>
+  <div class="chips">
+    <span class="chip">API /api/externo/v1</span>
+    <span class="chip">pedido.json</span>
+    <span class="chip">Desde la guía del 12/10/2026</span>
+  </div>
+  <div class="pie"><span>Novedades de la integración · 16/10/2026</span><span>Para quien arma el sistema externo</span></div>
+</div>
+
+<section>
+  <div class="seccion-titulo"><div class="num">0</div><div><div class="kicker">Para empezar</div><h2>Todo lo nuevo en una página</h2></div></div>
+  <p class="lead">Esto se suma a lo que ya estaba en <code>FORMATO_PEDIDO.md</code> y <code>API.md</code>. <b>Nada de lo anterior dejó de funcionar</b>: un pedido armado como antes se sigue aceptando igual. Todo lo nuevo es <b>opcional</b>.</p>
+  <table>
+    <tr><th style="width:30%">Qué</th><th style="width:30%">Dónde va</th><th>Para qué sirve</th></tr>
+    <tr><td><b>Mover, rotar, escalar o espejar</b> un objeto del diseño</td><td><code>disenos[].moldes[].ajustes</code></td><td>Lo mismo que «Editar diseño» en la pantalla</td></tr>
+    <tr><td><b>Cambiar el color</b> de un objeto</td><td><code>disenos[].moldes[].colores</code></td><td>Su relleno y su borde en CMYK</td></tr>
+    <tr><td><b>Elegir a mano</b> qué parte del arte va en cada pieza</td><td><code>disenos[].moldes[].mapeo_arte</code></td><td>Cuando el arte no trae el nombre de la pieza</td></tr>
+    <tr><td><b>Cambiar una tipografía</b> del arte por otra</td><td><code>disenos[].moldes[].reemplazos</code></td><td>Como «Tipografía» del paso Arte</td></tr>
+    <tr><td><b>Tipografía propia de un molde</b></td><td><code>disenos[].moldes[].tipografia_por_campo</code></td><td>La del molde manda sobre la del diseño</td></tr>
+    <tr><td><b>No imprimir</b> un objeto (ni la cruz)</td><td><code>editables: {"x": "no_imprimir"}</code></td><td>Como «Sin marca» en la pantalla</td></tr>
+    <tr><td><b>Reposición</b>: qué piezas hace una fila</td><td><code>planilla[].piezas</code></td><td>Volver a hacer sólo algunas piezas de una prenda</td></tr>
+    <tr><td><b>Perfil de color</b> forzado, por nombre</td><td><code>opciones.perfil_color</code> + <code>GET /perfiles</code></td><td>Saber qué perfiles hay y usar uno</td></tr>
+    <tr><td><b>Largo máximo</b> de cada mesa</td><td><code>mesas.largo_max_m</code></td><td>Que ninguna mesa pase de ese largo</td></tr>
+    <tr><td><b>Separar diseños</b> en mesas propias</td><td><code>mesas.separar_disenos</code></td><td>Por defecto el mismo molde se mezcla</td></tr>
+    <tr><td><b>Talles separados</b> en la misma mesa</td><td><code>mesas.modo: "talles_separados"</code></td><td>Cada talle apilado, con línea punteada entre talles</td></tr>
+    <tr><td><b>Cuentas de un molde a medida</b> con otro largo</td><td><code>GET /a_medida/calcular?largo_max_m=</code></td><td>Saber antes si entra con ese largo de mesa</td></tr>
+  </table>
+  <div class="caja c-bien"><div class="t"><i class="ti ti-sparkles"></i> Y sin mandar nada nuevo</div>
+    <p>El acomodo de las piezas mejoró: <b>gasta entre 1 y 2,5 % menos de tela</b> en todo lo que medimos (ver sección 6). Le llega igual a los pedidos que vienen de su sistema.</p></div>
+</section>
+
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">1</div><div><div class="kicker">Lo que hace el operario en el paso Arte</div><h2>Ajustar el diseño por la API</h2></div></div>
+  <p class="lead">Todo va dentro de cada variable del diseño: <code>disenos[].moldes[]</code>. Los nombres de objeto son los de las capas <b>«Editable …»</b> del arte (sin la palabra «Editable»).</p>
+
+  <h3><i class="ti ti-arrows-move"></i> <code>ajustes</code>: mover, rotar, escalar, espejar</h3>
+  <table>
+    <tr><th style="width:18%">Clave</th><th>Qué es</th></tr>
+    <tr><td><code>dx</code>, <code>dy</code></td><td>Corrimiento en <b>fracción</b> del ancho / alto del diseño. <code>+dx</code> derecha, <code>+dy</code> abajo. <code>0.05</code> = 5 %</td></tr>
+    <tr><td><code>rot</code></td><td>Giro en grados</td></tr>
+    <tr><td><code>scale</code> o <code>sx</code> / <code>sy</code></td><td>Escala (1 = igual). Negativo = <b>espejo</b> en ese eje</td></tr>
+    <tr><td><code>talles</code></td><td>Opcional: sólo en esos talles. Sin él, en todos</td></tr>
+  </table>
+  <h3><i class="ti ti-palette"></i> <code>colores</code>: el color de un objeto</h3>
+  <p><code>fill</code> (relleno) y <code>stroke</code> (borde), cada uno <code>[C, M, Y, K]</code> con valores de <b>0 a 1</b>.</p>
+  <h3><i class="ti ti-map-pin"></i> <code>mapeo_arte</code>: qué mesa del arte va en cada pieza</h3>
+  <p>Sólo hace falta cuando la guía del arte no trae el nombre de la pieza. La pieza por su nombre (genérico o exacto); la mesa por su <b>número</b> (1, 2…) o el <b>rótulo</b> escrito en ella. Manda sobre lo automático.</p>
+  <h3><i class="ti ti-typography"></i> Tipografías</h3>
+  <p><code>reemplazos</code>: una tipografía <b>del arte</b> por otra <b>del catálogo</b>. <code>tipografia_por_campo</code>: la tipografía de un campo (nombre, número…) sólo para <b>este molde</b>, pisa la del diseño. Los nombres válidos salen de <code>GET /tipografias</code> (o se mandan los archivos en <code>tipografias</code>).</p>
+  <pre class="json"><span class="k">"moldes"</span>: [{
+  <span class="k">"variable"</span>: <span class="s">"v_redondo"</span>,
+  <span class="k">"ajustes"</span>:  { <span class="k">"escudo"</span>: { <span class="k">"dx"</span>: <span class="n">0.05</span>, <span class="k">"dy"</span>: <span class="n">-0.02</span>, <span class="k">"rot"</span>: <span class="n">15</span>, <span class="k">"scale"</span>: <span class="n">1.2</span>, <span class="k">"talles"</span>: [<span class="s">"M"</span>, <span class="s">"L"</span>] } },
+  <span class="k">"colores"</span>:  { <span class="k">"escudo"</span>: { <span class="k">"fill"</span>: [<span class="n">0</span>, <span class="n">1</span>, <span class="n">1</span>, <span class="n">0</span>], <span class="k">"stroke"</span>: [<span class="n">0</span>, <span class="n">0</span>, <span class="n">0</span>, <span class="n">1</span>] } },
+  <span class="k">"mapeo_arte"</span>: { <span class="k">"Frente"</span>: <span class="n">1</span>, <span class="k">"Espalda"</span>: <span class="s">"ESPALDA"</span> },
+  <span class="k">"reemplazos"</span>: { <span class="k">"FuenteDelArte"</span>: <span class="s">"Anton Regular"</span> },
+  <span class="k">"tipografia_por_campo"</span>: { <span class="k">"numero"</span>: <span class="s">"Anton Regular"</span> },
+  <span class="k">"editables"</span>: { <span class="k">"sponsor"</span>: <span class="s">"no_imprimir"</span> }
+}]</pre>
+  <div class="caja c-info"><div class="t"><i class="ti ti-info-circle"></i> <code>"no_imprimir"</code> en <code>editables</code></div>
+    <p>El objeto no sale <b>ni sublimado ni con la cruz</b> de marca de proceso. Es el «Sin marca» de la pantalla.</p></div>
+</section>
+
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num a">2</div><div><div class="kicker">Planilla y opciones</div><h2>Reposición y perfil de color</h2></div></div>
+  <h3><i class="ti ti-refresh"></i> <code>planilla[].piezas</code>: Repo (reposición)</h3>
+  <p class="lead">Para rehacer <b>sólo algunas piezas</b> de una prenda (por ejemplo una manga que salió mal). Va en la fila, agrupado por variable o molde. Un nombre genérico («Manga») vale por todas las suyas. Sin <code>piezas</code>, la fila hace todas, como siempre.</p>
+  <pre class="json"><span class="k">"planilla"</span>: [
+  { <span class="k">"talle"</span>: <span class="s">"L"</span>, <span class="k">"nombre"</span>: <span class="s">"PÉREZ"</span>, <span class="k">"numero"</span>: <span class="s">"10"</span>,
+    <span class="k">"piezas"</span>: { <span class="k">"v_redondo"</span>: [<span class="s">"Cuello"</span>, <span class="s">"Manga 1"</span>] } }
+]</pre>
+  <div class="caja c-ojo"><div class="t"><i class="ti ti-alert-triangle"></i> Ojo</div>
+    <p>Si la planilla de ese molde tiene la Repo <b>apagada</b> en la configuración, la fila con <code>piezas</code> frena con <code>repo-no-admitido</code>: hay que mandarla sin <code>piezas</code>.</p></div>
+
+  <h3><i class="ti ti-color-filter"></i> <code>GET /perfiles</code> + <code>opciones.perfil_color</code></h3>
+  <p><b>Herramienta nueva</b>: <code>GET /perfiles</code> devuelve los perfiles de color que tiene TIZADA: <code>{"perfiles": [{"archivo", "nombre", "espacio"}]}</code>. En <code>opciones.perfil_color</code> se puede mandar <b>el archivo o el nombre</b> de uno de esos. Uno que no existe frena con <code>perfil-desconocido</code>. Sin él, se usa el del sistema.</p>
+  <pre class="json"><span class="k">"opciones"</span>: { <span class="k">"perfil_color"</span>: <span class="s">"U.S. Web Coated (SWOP) v2"</span> }</pre>
+</section>
+
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num v">3</div><div><div class="kicker">Cómo se arman las mesas</div><h2>Largo de mesa, diseños y talles</h2></div></div>
+  <h3><i class="ti ti-ruler-measure"></i> <code>mesas.largo_max_m</code>: el largo máximo de cada mesa</h3>
+  <p>En metros, de <b>0,10 a 50</b> (por ejemplo <code>12.5</code>). Ninguna mesa del pedido pasa ese largo: lo que no entra sigue en otra mesa. Sin él rige el largo del nesting del molde (<code>largo_mesa_cm</code> de <code>GET /variables</code>). Vale con cualquier <code>modo</code>. Mal mandado → <code>largo-mesa-invalido</code>. Es el botón «Largo» de la planilla.</p>
+  <h3><i class="ti ti-layers-difference"></i> <code>mesas.separar_disenos</code></h3>
+  <p><b>Por defecto, el mismo molde se mezcla aunque cambie el diseño</b> (camisetas JUGADOR y GOLERO van juntas para gastar menos tela). Con <code>true</code>, cada diseño va en sus propias mesas en cualquier <code>modo</code>, y cada archivo del resultado dice su <code>diseno</code>. Otro tipo de valor → <code>mesas-invalido</code>. Es el botón «Separar».</p>
+  <h3><i class="ti ti-stack-2"></i> <code>mesas.modo: "talles_separados"</code></h3>
+  <p>Todos en la misma mesa pero <b>sin mezclar talles</b>: cada talle acomodado solo y apilado debajo del anterior, con una <b>línea punteada</b> y el rótulo de los talles entre medio. <code>grupos</code> es opcional (esos talles sí van mezclados). El resultado trae <code>"separados": true</code>.</p>
+  <h3><i class="ti ti-copy"></i> <code>mesas.modo: "una_por_fila"</code> (Copia), cómo quedó</h3>
+  <div class="dos">
+    <div class="caja c-info" style="margin:0"><div class="t">Mesa llena que se repite</div><p>Las copias de una fila se acomodan en una mesa del <b>largo máximo</b>. Si alcanzan para llenarla, sale <b>UN archivo</b> que se imprime <code>copias</code> veces (19 copias con lugar para 5 por mesa → 5 × 3, y el resto aparte).</p></div>
+    <div class="caja c-bien" style="margin:0"><div class="t">El resto, junto</div><p>Todo lo que no llena una mesa, <b>de cualquier fila y talle</b>, se acomoda junto como en <code>normal</code> y se imprime 1 vez. Ya no se separa por talle (eso es sólo <code>por_talles</code> / <code>talles_separados</code>).</p></div>
+  </div>
+  <pre class="json"><span class="k">"mesas"</span>: { <span class="k">"modo"</span>: <span class="s">"normal"</span>, <span class="k">"largo_max_m"</span>: <span class="n">10</span>, <span class="k">"separar_disenos"</span>: <span class="n">false</span> }</pre>
+  <h3><i class="ti ti-calculator"></i> <code>GET /a_medida/calcular</code> acepta <code>largo_max_m</code></h3>
+  <p>Para banderas y piezas a medida: las cuentas («¿entra en la tela?», cuánto mide) se hacen con <b>ese largo de mesa</b>, el mismo que después va en <code>mesas.largo_max_m</code>.</p>
+</section>
+
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num">4</div><div><div class="kicker">Lo que contesta</div><h2>Cambios en el resultado</h2></div></div>
+  <p class="lead">En <code>archivos[]</code> del resultado (las tizadas), además de lo de siempre:</p>
+  <table>
+    <tr><th style="width:24%">Campo</th><th>Qué dice</th></tr>
+    <tr><td><code>ancho_cm</code></td><td>El <b>ancho imprimible</b> de la tela (la mesa nunca se achica)</td></tr>
+    <tr><td><code>copias</code></td><td>Con <code>una_por_fila</code>: cuántas veces se imprime <b>ese archivo</b></td></tr>
+    <tr><td><code>por_mesa</code></td><td>Cuántas unidades trae cada mesa. Unidades = <code>por_mesa × copias</code></td></tr>
+    <tr><td><code>fila</code> / <code>filas</code></td><td>De qué fila es la mesa. Si mezcla filas del mismo molde: <code>fila: null</code> y <code>filas: [{fila, por_mesa}]</code></td></tr>
+    <tr><td><code>diseno</code></td><td>Con <code>separar_disenos</code>: de qué diseño es la mesa</td></tr>
+    <tr><td><code>separados</code></td><td>Con <code>talles_separados</code>: <code>true</code>, y los cortes entre talles</td></tr>
+  </table>
+  <h3><i class="ti ti-bell"></i> Alarmas nuevas</h3>
+  <p>Todas <b>frenan</b> el pedido (no se fabrica a medias). La lista completa y actualizada: <code>GET /alarmas</code>.</p>
+  <table>
+    <tr><th style="width:26%">Código</th><th style="width:40%">Qué pasó</th><th>Cómo se arregla</th></tr>
+    <tr><td><code>ajuste-invalido</code></td><td><code>ajustes</code> mal: números en dx/dy/rot/scale/sx/sy, <code>talles</code> lista</td><td>Ver el campo indicado</td></tr>
+    <tr><td><code>color-invalido</code></td><td><code>colores</code> mal: <code>[C, M, Y, K]</code> de 0 a 1</td><td>Ver el campo indicado</td></tr>
+    <tr><td><code>mapeo-arte-invalido</code></td><td>Nombra una pieza que el molde no tiene, o una mesa que no es número ni rótulo</td><td>Pieza por su nombre; mesa por número o rótulo</td></tr>
+    <tr><td><code>mapeo-arte-mesa</code></td><td>Pide una mesa del arte que no existe</td><td>Revisar número o rótulo en el arte</td></tr>
+    <tr><td><code>tipografia-desconocida</code></td><td>Una tipografía que no está en el catálogo</td><td>Usar una de <code>GET /tipografias</code> o mandarla</td></tr>
+    <tr><td><code>perfil-desconocido</code></td><td><code>perfil_color</code> no existe</td><td>Usar uno de <code>GET /perfiles</code></td></tr>
+    <tr><td><code>repo-invalido</code></td><td><code>piezas</code> nombra un molde o una pieza que no corresponde</td><td><code>{"variable": ["Frente", …]}</code></td></tr>
+    <tr><td><code>repo-no-admitido</code></td><td>La planilla de ese molde no admite Repo</td><td>Mandar la fila sin <code>piezas</code></td></tr>
+    <tr><td><code>largo-mesa-invalido</code></td><td><code>largo_max_m</code> fuera de 0,10 a 50 m</td><td>Mandarlo en metros, o no mandarlo</td></tr>
+    <tr><td><code>mesas-invalido</code></td><td><code>separar_disenos</code> no es <code>true</code>/<code>false</code> (o <code>mesas</code> no se entiende)</td><td>Ver <code>mesas</code> en el formato</td></tr>
+  </table>
+</section>
+
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">5</div><div><div class="kicker">Un pedido con todo</div><h2>Ejemplo completo</h2></div></div>
+  <p class="lead">Un pedido de camisetas con dos diseños, un escudo corrido y de otro color, el sponsor sin imprimir, una reposición, perfil de color y mesas de 10 m.</p>
+  <pre class="json">{
+  <span class="k">"formato"</span>: <span class="s">"tizadapro.pedido/1"</span>,
+  <span class="k">"referencia"</span>: <span class="s">"SOL-2045"</span>,
+  <span class="k">"disenos"</span>: [
+    { <span class="k">"nombre"</span>: <span class="s">"JUGADOR"</span>,
+      <span class="k">"moldes"</span>: [{ <span class="k">"variable"</span>: <span class="s">"v_redondo"</span>, <span class="k">"arte"</span>: <span class="s">"artes/jugador.ai"</span>, <span class="k">"tela"</span>: <span class="s">"232"</span>,
+        <span class="k">"ajustes"</span>:   { <span class="k">"escudo"</span>: { <span class="k">"dx"</span>: <span class="n">0.03</span>, <span class="k">"scale"</span>: <span class="n">1.1</span> } },
+        <span class="k">"colores"</span>:   { <span class="k">"escudo"</span>: { <span class="k">"fill"</span>: [<span class="n">0</span>, <span class="n">0</span>, <span class="n">0</span>, <span class="n">1</span>] } },
+        <span class="k">"editables"</span>: { <span class="k">"sponsor"</span>: <span class="s">"no_imprimir"</span> } }] },
+    { <span class="k">"nombre"</span>: <span class="s">"GOLERO"</span>,
+      <span class="k">"moldes"</span>: [{ <span class="k">"variable"</span>: <span class="s">"v_redondo"</span>, <span class="k">"arte"</span>: <span class="s">"artes/golero.ai"</span>, <span class="k">"tela"</span>: <span class="s">"232"</span> }] }
+  ],
+  <span class="k">"planilla"</span>: [
+    { <span class="k">"diseno"</span>: <span class="s">"JUGADOR"</span>, <span class="k">"talle"</span>: <span class="s">"L"</span>, <span class="k">"nombre"</span>: <span class="s">"PÉREZ"</span>, <span class="k">"numero"</span>: <span class="s">"10"</span> },
+    { <span class="k">"diseno"</span>: <span class="s">"JUGADOR"</span>, <span class="k">"talle"</span>: <span class="s">"M"</span>, <span class="k">"nombre"</span>: <span class="s">"GÓMEZ"</span>, <span class="k">"numero"</span>: <span class="s">"7"</span>,
+      <span class="k">"piezas"</span>: { <span class="k">"v_redondo"</span>: [<span class="s">"Manga"</span>] } },          <span class="c">// reposición: sólo las mangas</span>
+    { <span class="k">"diseno"</span>: <span class="s">"GOLERO"</span>, <span class="k">"talle"</span>: <span class="s">"XL"</span>, <span class="k">"nombre"</span>: <span class="s">"DÍAZ"</span>, <span class="k">"numero"</span>: <span class="s">"1"</span> }
+  ],
+  <span class="k">"opciones"</span>: { <span class="k">"perfil_color"</span>: <span class="s">"U.S. Web Coated (SWOP) v2"</span> },
+  <span class="k">"mesas"</span>:    { <span class="k">"modo"</span>: <span class="s">"normal"</span>, <span class="k">"largo_max_m"</span>: <span class="n">10</span>, <span class="k">"separar_disenos"</span>: <span class="n">false</span> }
+}</pre>
+  <p class="chico">Los nombres exactos de cada campo (variable, columnas de la planilla, arte) son los de <code>FORMATO_PEDIDO.md</code>; este ejemplo muestra dónde va cada cosa nueva. Antes de mandarlo, <code>POST /pedidos/validar</code> dice si algo frena, sin fabricar nada.</p>
+</section>
+
+<section class="apretada fin">
+  <div class="seccion-titulo"><div class="num v">6</div><div><div class="kicker">Sin cambiar nada de su lado</div><h2>Lo que mejoró solo</h2></div></div>
+  <p class="lead">Los pedidos que llegan de su sistema se arman con el mismo motor que la pantalla, así que reciben estas mejoras sin mandar nada distinto.</p>
+  <div class="grilla g2">
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-puzzle"></i></div><h4>Acomodo más preciso</h4><p>Cada pieza queda a la distancia exacta de sus vecinas, medida con su contorno real (rectas, curvas, puntas). Antes quedaban 5-6 mm de más en cada contacto.</p></div>
+    <div class="tarjeta"><div class="ico i-m"><i class="ti ti-search"></i></div><h4>Busca el mejor orden</h4><p>Prueba muchas formas de ordenar las piezas a la vez (usa todos los núcleos de la PC) y se queda con la que gasta menos tela. Las chicas se meten en los huecos de las grandes.</p></div>
+    <div class="tarjeta"><div class="ico i-v"><i class="ti ti-ruler-2"></i></div><h4>Menos tela</h4><p>Medido: 20 camisetas 14,90 → 14,72 m; 689 banderines 35,29 → 34,42 m; 40 mangas 3,42 → 3,23 m.</p></div>
+    <div class="tarjeta"><div class="ico i-a"><i class="ti ti-repeat"></i></div><h4>Siempre igual</h4><p>El mismo pedido con la misma configuración da <b>la misma tizada</b>, pieza por pieza, en cualquier PC. Cambia sólo si cambia algo del pedido o de la tela.</p></div>
+    <div class="tarjeta"><div class="ico i-g"><i class="ti ti-arrows-shuffle"></i></div><h4>El mismo molde se mezcla</h4><p>Distintos diseños del mismo molde comparten mesa para gastar menos (salvo <code>separar_disenos</code>).</p></div>
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-scissors"></i></div><h4>Marcas de tiras más visibles</h4><p>En banderas y piezas a medida, las marcas de las tiras salen negras con contorno blanco.</p></div>
+  </div>
+  <div class="caja c-ojo" style="margin-top:14pt"><div class="t"><i class="ti ti-clock"></i> Tiempos</div>
+    <p>Un pedido de unas 100 piezas tarda alrededor de 15 s en acomodarse; con más de 120 piezas por acomodo (Copia grande, cientos de banderines) se acomoda como antes, en pocos segundos. Conviene que su sistema espere el resultado por el aviso (webhook) o consultando <code>GET /pedidos/{referencia}</code>, sin un tiempo fijo.</p></div>
+
+  <h3><i class="ti ti-checklist"></i> Lista para el que programa</h3>
+  <div class="pasos">
+    <div class="paso"><div class="b">1</div><div class="x"><b class="tit">Nada es obligatorio</b>Lo que ya mandan sigue funcionando igual.</div></div>
+    <div class="paso"><div class="b m">2</div><div class="x"><b class="tit">Leer las listas, no adivinar</b><code>GET /perfiles</code>, <code>GET /tipografias</code>, <code>GET /variables</code> y <code>GET /alarmas</code> dicen qué existe hoy.</div></div>
+    <div class="paso"><div class="b a">3</div><div class="x"><b class="tit">Probar antes con <code>POST /pedidos/validar</code></b>Contesta las alarmas sin fabricar nada.</div></div>
+    <div class="paso"><div class="b v">4</div><div class="x"><b class="tit">Contar las prendas con <code>por_mesa × copias</code></b>Con Copia, cada archivo puede imprimirse varias veces.</div></div>
+  </div>
+  <p class="chico" style="margin-top:12pt">Referencia completa: <code>FORMATO_PEDIDO.md</code> (campo por campo), <code>API.md</code> (las rutas), <code>COMO_USAR_CADA_OPCION.md</code> (cómo pedir cada cosa) y <code>openapi.yaml</code>.</p>
+</section>
+</body>
+</html>

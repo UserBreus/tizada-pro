@@ -196,6 +196,14 @@ def armar_fixture():
     esc.append({"nombre": "mezcla: 16 triángulos + 8 rectángulos + 10 círculos", "cfg": cfg_b,
                 "piezas": _piezas_forma("Banderin", tri, 16, "90") + _piezas_forma("Bandera", rec, 8, "90")
                 + _piezas_forma("Circulo", cir, 10, "90")})
+    # P · EL PATRÓN (MAPA 736): piezas iguales → el dibujo que se repite, calculado con todas juntas, compite con
+    #     el acomodo pieza por pieza. 60 círculos (gana el patrón) y una unidad de DOS formas en proporción
+    #     (20 triángulos + 10 rectángulos chicos = 2 + 1 por unidad)
+    esc.append({"nombre": "60 círculos Ø40, giro 90 (el patrón)", "cfg": cfg_b,
+                "piezas": _piezas_forma("Circulo", cir, 60, "90")})
+    rec_ch = _forma_cont([(0, 0), (30 * cm, 0), (30 * cm, 20 * cm), (0, 20 * cm)])
+    esc.append({"nombre": "patrón de dos formas: 20 triángulos + 10 rectángulos, giro 90", "cfg": cfg_b,
+                "piezas": _piezas_forma("Banderin", tri, 20, "90") + _piezas_forma("Chico", rec_ch, 10, "90")})
     # M · COPIA CON EL MISMO MOLDE EN DOS DISEÑOS (MAPA 717): dos filas de banderines (33 y 34 copias) con
     #     la MISMA geometría y distinto diseño → mesas MEZCLADAS que se repiten (`filas` en `mesas`); y una
     #     tercera fila de otra forma, que va sola

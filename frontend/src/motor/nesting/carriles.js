@@ -54,9 +54,11 @@ export async function abrirCarriles(n) {
  * vez por geometría, el mensaje conserva lo compartido), así el hilo no las vuelve a armar (3,8 s con 100
  * piezas). Nada del dibujo. */
 function pieza(p) {
+  // del `base`, sólo la geometría del contorno (la compactación con el contorno real corre en un hilo, MAPA 736)
+  const b = p.base && p.base.cont ? (p.base._geo || (p.base._geo = { cont: p.base.cont, S: p.base.S, x0: p.base.x0, y0: p.base.y0, B: p.base.B, W: p.base.W, Hp: p.base.Hp })) : null
   return { w: p.w, h: p.h, pieza: p.pieza, talle: p.talle, variante: p.variante, _molde: p._molde, rotacion: p.rotacion,
            borde_cm: p.borde_cm, etiqueta: p.etiqueta, _mask: p._mask, _borde_c: p._borde_c, _cell_pt: p._cell_pt,
-           _candidatos_angulo: p._candidatos_angulo, _cache_key: p._cache_key, _geo_key: p._geo_key }
+           _candidatos_angulo: p._candidatos_angulo, _cache_key: p._cache_key, _geo_key: p._geo_key, base: b }
 }
 
 /** Un canal (MessagePort del navegador o de Node) como `{enviar, recibir, cerrar}`. */

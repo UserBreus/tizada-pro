@@ -78,7 +78,7 @@ ok(/function esCancelacion[\s\S]*AbortError/.test(mod), 'reconoce la cancelació
 // cancelar → return sin descargar: en descargarArchivo el catch del picker devuelve antes del respaldo
 ok(/if \(esCancelacion\(e\)\) return false\s*\/\/ canceló/.test(mod),
    '🔴 cancelar NO descarga nada (ni al respaldo)');
-ok(/if \(esCancelacion\(e\)\) return -1/.test(mod), 'cancelar la carpeta tampoco');
+// (la CARPETA de «Descargar todo» ya no: sin carpeta se baja igual a Descargas, ver el punto 5 — 2026-10-20)
 ok(/function descargaClasica/.test(mod) && /if \(!puedeElegirDonde\(\)\) \{\s*(?:try \{ await )?descargaClasica/.test(mod),
    'sin la API cae al <a download> de siempre: la descarga nunca deja de funcionar');
 ok(/await fetch\(url\)/.test(mod) || /fetch\(url\)/.test(mod), 'el archivo se pide con fetch de la misma origen (viaja la sesión)');
@@ -95,8 +95,15 @@ ok(/Content-Length/.test(mod), 'el total sale del Content-Length que manda el se
 ok(/DESC\.avance\(id, bytes, total\)/.test(mod), 'informa el avance por BYTES en cada pedazo');
 ok(/descargarArchivo[\s\S]{0,1800}bajarA\(url, handle, nombre\)/.test(mod),
    'un archivo suelto pasa por el streaming');
-ok(/descargarVarios[\s\S]{0,1600}bajarA\(it\.url, fh, it\.nombre\)/.test(mod),
+ok(/descargarVarios[\s\S]{0,2600}bajarA\(it\.url, fh, it\.nombre\)/.test(mod),
    '«Descargar todo» también');
+// 🔴 2026-10-20: Chrome no deja usar el Escritorio, Descargas ni Documentos como CARPETA («contiene archivos del
+// sistema») y eso llega como una cancelación. El usuario: «te pedí que se descargue, no que me digas va en un zip».
+ok(/items\.length === 1[\s\S]{0,200}descargarArchivo\(it\.url, it\.nombre/.test(mod),
+   'con UN archivo no se pide carpeta: el «Guardar como» (deja el Escritorio y Descargas)');
+ok(/showDirectoryPicker\(\{ mode: 'readwrite' \}\)[\s\S]{0,250}return directo\(\)/.test(mod),
+   'sin carpeta (o rechazada por Chrome) se bajan igual a Descargas, sin preguntar');
+ok(!/preguntarCarpeta|guardarZip/.test(mod), 'sin aviso intermedio ni .zip');
 ok(/export function suscribir/.test(est) && /export function avance/.test(est),
    'el estado compartido expone suscribir/avance');
 ok(/function PanelDescargas\(\)/.test(app), 'existe el panel en pantalla');

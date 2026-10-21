@@ -1246,13 +1246,34 @@ function pulir(cfg, colocaciones, prep) {
  */
 export function carril(piezas, cfg, k, inicio) {
   const prep = preparar(piezas, cfg)
-  const n = piezas.length
   const saIni = inicio.soloAng ? new Set(inicio.soloAng) : null
   if (k === 0) {
     const { colocaciones } = anidarEstrategia(piezas, cfg, inicio.est, inicio.orden, prep, saIni)
     const col = pulir(cfg, colocaciones, prep)
     return { colocaciones: col, consumo: consumoDe(col) }
   }
+  const mejor = buscarCarril(piezas, cfg, k, inicio, (orden, est, sa) => {
+    const { colocaciones } = anidarEstrategia(piezas, cfg, est, orden, prep, sa)
+    return { c: consumoDe(colocaciones), a: areaUltima(colocaciones), colocaciones }
+  })
+  const col = pulir(cfg, mejor.colocaciones, prep)
+  return { colocaciones: col, consumo: consumoDe(col) }
+}
+
+/** Cuánta pieza (celdas) quedó en la última mesa (0 con una sola mesa): el desempate de los carriles. */
+function areaUltima(col) {
+  const ll = col.filter((h) => h.length)
+  if (ll.length < 2) return 0
+  let s = 0
+  for (const c of ll[ll.length - 1]) s += contar(c.pieza._mask)
+  return s
+}
+
+/** LA BÚSQUEDA DE UN CARRIL (k ≥ 1), sin pulir: `evaluar(orden, est, sa)` → `{c, a, ...}` acomoda (o, con piezas
+ * todas iguales, trae la cuenta ya hecha de esa combinación). → el mejor intento `{c, a, orden, est, sa, ...}`. */
+function buscarCarril(piezas, cfg, k, inicio, evaluar) {
+  const n = piezas.length
+  const saIni = inicio.soloAng ? new Set(inicio.soloAng) : null
   const { intentos } = parametrosOptimizar(n, cfg)
   const A = piezas.map((p) => contar(p._mask))
   const ests = criterios(piezas, cfg), vars = variantesGiro(piezas)
@@ -1263,18 +1284,10 @@ export function carril(piezas, cfg, k, inicio) {
     const clave = A.map((a) => a * (1 + r * (u() - 0.5)))
     return ordenDesc(piezas.map((_, i) => i), (i) => clave[i])
   }
-  const areaUlt = (col) => {
-    const ll = col.filter((h) => h.length)
-    if (ll.length < 2) return 0
-    let s = 0
-    for (const c of ll[ll.length - 1]) s += contar(c.pieza._mask)
-    return s
-  }
   let mejor = null
   const probar = (orden, est, sa) => {
-    const { colocaciones } = anidarEstrategia(piezas, cfg, est, orden, prep, sa)
-    const c = consumoDe(colocaciones), a = areaUlt(colocaciones)
-    if (mejor === null || c < mejor.c - 1e-9 || (Math.abs(c - mejor.c) <= 1e-9 && a <= mejor.a)) mejor = { c, a, colocaciones, orden, est, sa }
+    const r = evaluar(orden, est, sa)
+    if (mejor === null || r.c < mejor.c - 1e-9 || (Math.abs(r.c - mejor.c) <= 1e-9 && r.a <= mejor.a)) mejor = { ...r, orden, est, sa }
   }
   if (k === 1) probar(inicio.orden, inicio.est, saIni)
   else probar(mezclado(), ests[k % ests.length], vars[k % vars.length])
@@ -1294,12 +1307,423 @@ export function carril(piezas, cfg, k, inicio) {
     }
     probar(o, est, mejor.sa)
   }
-  const col = pulir(cfg, mejor.colocaciones, prep)
-  return { colocaciones: col, consumo: consumoDe(col) }
+  return mejor
 }
+
+/** La clave de una combinación de criterio y giros (con piezas todas iguales es lo único que decide el acomodo). */
+const claveCombinacion = (est, sa) => `${est}|${sa ? [...sa].join(',') : ''}`
 
 /** Para mandar un punto de partida a otro hilo (el Set de giros viaja como lista). */
 const inicioSerial = (c) => ({ orden: c.orden, est: c.est, soloAng: c.soloAng ? [...c.soloAng] : null })
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 🔴 EL PATRÓN (MAPA 736) — gemelo EXACTO de `_anidar_patron` (nesting_contorno.py)
+//
+// El usuario, con 102 banderas iguales que salieron unas derechas y otras inclinadas sin orden: «el sistema
+// no tiene que buscar bandera por bandera el mejor espacio: tiene que ver todas las que tenemos y qué espacio
+// van a ocupar; hacer los cálculos —las rotaciones y todo— con todo junto, y ahí decir cómo irá acomodado».
+// El acomodo de siempre es pieza por pieza (cada una donde mejor queda AHORA): con piezas iguales nunca «ve»
+// el dibujo que se repite. Acá se calcula ese dibujo: con TODAS las piezas en la cuenta, la UNIDAD que se
+// repite (las formas en proporción: 102 banderas → 1 bandera; una fila de Copia → sus piezas) y el PERÍODO a
+// lo largo de la mesa en el que entran más unidades por metro, probando cada giro que permite la regla en
+// cada lugar de una franja que se repite (lo que sale por abajo de la franja vuelve a entrar por arriba: la
+// franja se calcula con sus copias de arriba y de abajo). Ese dibujo se repite a lo largo de la mesa con
+// todas las piezas. NADA de formas fijas: todo sale de las máscaras (el contorno); compite con el acomodo de
+// siempre y gana el que gasta menos tela.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+const PATRON_MIN_PIEZAS = 2          // desde 2 piezas iguales (2026-10-20: con 5 banderines no se probaba y salían peor)
+// 🔴 SIN TOPE DE PIEZAS POR UNIDAD (2026-10-20): el usuario, «no importa la cantidad de piezas ni su forma, una
+// camiseta puede traer miles de piezas». Con unidades grandes la franja lleva al menos 2 unidades y se busca con
+// menos largos y sin forzar giros (medido: 40 camisetas de 7 piezas 35,15 → 34,50 m)
+const PATRON_UNIDAD_CHICA = 6        // hasta acá: los giros forzados y el barrido fino
+const PATRON_MAX_POR_PERIODO = 12    // piezas por período como mucho
+const PATRON_PASOS = 32              // el barrido grueso del período: ~32 largos (medido: 48 da los mismos dibujos con 25 % más de cuenta)
+
+const _mcd = (a, b) => { while (b) { const t = a % b; a = b; b = t } return a }
+
+/** Huella de una máscara: alto, ancho, celdas y la suma de las posiciones (1…) de las celdas prendidas. */
+function huella(m) {
+  let n = 0, s = 0
+  for (let i = 0; i < m.d.length; i++) if (m.d[i]) { n++; s += i + 1 }
+  return `${m.h}x${m.w}:${n}:${s}`
+}
+/** La firma de los giros de una pieza (giro + huella de cada máscara), para juntar las piezas de igual forma.
+ * Una vez por lista de giros (las piezas de la misma geometría comparten la lista): recorrer las máscaras de
+ * cada una de 102 piezas con 24 giros eran 200 millones de celdas. */
+const _firmas = new WeakMap()
+function firmaCands(cands) {
+  let f = _firmas.get(cands)
+  if (f === undefined) { f = cands.map((k) => `${k.ang}/${huella(k.mrCol)}/${huella(k.mrTest)}`).join('|'); _firmas.set(cands, f) }
+  return f
+}
+/** ¿Los mismos giros con las mismas máscaras, celda por celda? (la firma podría coincidir sin serlo) */
+const candsIguales = (a, b) => a === b || (a.length === b.length &&
+  a.every((k, i) => k.ang === b[i].ang && mascarasIguales(k.mrCol, b[i].mrCol) && mascarasIguales(k.mrTest, b[i].mrTest)))
+
+/** LOS GIROS QUE PRUEBA EL PATRÓN: uno por silueta (2026-10-20). Con giro libre son 24 y muchos dan casi la
+ * misma (una bandera cuadrada a 0°, 90°, 180° y 270°; a 15° y a 105°…): el dibujo se buscaba 4 veces por cada
+ * una y 5 banderas tardaban 11 s. Dos giros son la misma silueta si su máscara de prueba tiene el mismo tamaño y
+ * difiere en no más del 1 % de las celdas; queda el primero. (El acomodo de siempre sigue probando todos.) */
+function siluetasDistintas(cands) {
+  const out = []
+  for (const k of cands) {
+    const a = k.mrTest
+    const igual = out.some((o) => {
+      const b = o.mrTest
+      if (a.h !== b.h || a.w !== b.w) return false
+      let x = 0, na = 0, nb = 0
+      for (let i = 0; i < a.d.length; i++) { na += a.d[i]; nb += b.d[i]; if (a.d[i] !== b.d[i]) x++ }
+      return x * 100 <= Math.max(na, nb)
+    })
+    if (!igual) out.push(k)
+  }
+  return out
+}
+
+/** ¿Todas las piezas tienen la MISMA forma (misma silueta en cada giro)? Se compara una vez por lista de giros. */
+function todasIguales(piezas) {
+  if (piezas.length < 2) return false
+  const c0 = piezas[0]._candidatos_angulo, ok = new Set([c0])
+  for (const p of piezas) {
+    const c = p._candidatos_angulo
+    if (ok.has(c)) continue
+    if (firmaCands(c) !== firmaCands(c0) || !candsIguales(c, c0)) return false
+    ok.add(c)
+  }
+  return true
+}
+
+/** La UNIDAD que se repite: las formas (piezas con la misma silueta y los mismos giros) en proporción.
+ * → `{formas: [{cands, piezas}], unidad: [índice de forma…]}` o null si no hay dibujo que repetir. */
+function unidadPatron(piezas) {
+  if (piezas.length < PATRON_MIN_PIEZAS) return null
+  // la forma = la silueta en cada giro, celda por celda (dos moldes o dos diseños con la misma pieza son la
+  // misma forma: las 102 banderas del usuario eran 47 de un diseño y 55 de otro)
+  const formas = [], deFirma = new Map()
+  for (const p of piezas) {
+    const fk = firmaCands(p._candidatos_angulo)
+    let f = deFirma.get(fk)
+    if (f && !candsIguales(f.cands, p._candidatos_angulo)) f = null
+    if (!f) { f = { cands: p._candidatos_angulo, piezas: [] }; if (!deFirma.has(fk)) deFirma.set(fk, f); formas.push(f) }
+    f.piezas.push(p)
+  }
+  for (const f of formas) f.candsP = siluetasDistintas(f.cands)
+  let g = 0
+  for (const f of formas) g = _mcd(g, f.piezas.length)
+  if (g < 2) return null
+  let U = 0
+  for (const f of formas) U += f.piezas.length / g
+  // dentro de la unidad, las formas grandes primero (como el acomodo de siempre)
+  const orden = formas.map((_, i) => i).sort((a, b) => contar(formas[b].piezas[0]._mask) - contar(formas[a].piezas[0]._mask) || a - b)
+  const unidad = []
+  for (const i of orden) for (let v = 0; v < formas[i].piezas.length / g; v++) unidad.push(i)
+  return { formas, unidad, veces: g, total: piezas.length }
+}
+
+/** `estampar` con las filas que caen fuera de la grilla recortadas (las copias de la franja que asoman). */
+function estamparRecorte(G, yy, xx, m) {
+  const s = xx & 31, wo = xx >> 5
+  const { bits, nw } = corridaDe(m, s)
+  const gb = G.bits, W = G.words, L = G.libres
+  for (let r = 0; r < m.h; r++) {
+    const fy = yy + r
+    if (fy < 0 || fy >= G.h) continue
+    const g = fy * W + wo, b = r * nw
+    let nuevas = 0
+    for (let j = 0; j < nw; j++) { const v = bits[b + j] & ~gb[g + j]; if (v) nuevas += bitsEn(v); gb[g + j] |= bits[b + j] }
+    L[fy] -= nuevas
+    if (G.tramo) G.tramo[fy] = -1
+  }
+}
+
+/** ¿La pieza (máscara de prueba `k.mrTest`) choca con SUS PROPIAS copias de la franja (una cada `p` filas)? */
+function chocaConsigo(k, p) {
+  if (!k._propia) k._propia = new Map()
+  let r = k._propia.get(p)
+  if (r === undefined) {
+    r = false
+    const mt = k.mrTest, mc = k.mrCol
+    const dy = Math.floor((mt.h - mc.h) / 2), dx = Math.floor((mt.w - mc.w) / 2)
+    for (let j = 1; !r && j * p < mt.h + mc.h; j++) {
+      for (const sg of [1, -1]) {
+        const oy = dy + sg * j * p                    // la copia (mrCol) relativa a la máscara de prueba
+        for (let y = Math.max(0, oy); !r && y < Math.min(mt.h, oy + mc.h); y++) {
+          for (let x = dx; x < dx + mc.w; x++) {
+            if (mt.d[y * mt.w + x] && mc.d[(y - oy) * mc.w + (x - dx)]) { r = true; break }
+          }
+        }
+      }
+    }
+    k._propia.set(p, r)
+  }
+  return r
+}
+
+/** El mejor lugar de la franja (tops en las filas `desde` a `hasta`) para la máscara, según `orden`:
+ * «arriba» (más arriba y, en la fila, más a la izquierda), «arriba-der» (más arriba, más a la derecha) o
+ * «columna» (más a la izquierda y, en la columna, más arriba). `tope` = el mejor de otro giro ya encontrado
+ * (sólo se busca lo que todavía puede ganarle; en empate gana el giro anterior). → [y, x] o null. */
+function lugarFranja(G, m, desde, hasta, orden, tope) {
+  const xMax = G.w - m.w
+  if (xMax < 0) return null
+  // 🔴 SE RETOMA DONDE QUEDÓ (exacto, como «bl» del acomodo): la franja sólo se LLENA, así que en cada fila el
+  // primer x libre desde la izquierda sólo puede correrse a la derecha (`izq[y]`) y el último desde la derecha a
+  // la izquierda (`der[y]`): lo ya revisado no se vuelve a mirar. Mismo resultado que revisar todo
+  if (!G._izq) { G._izq = new Map(); G._der = new Map() }
+  let izq = G._izq.get(m)
+  if (!izq) { izq = new Int32Array(G.h); G._izq.set(m, izq) }
+  // el primer x libre de la fila y en [desde x, lim], o -1 (y anota hasta dónde no hay nada)
+  const primero = (y, lim) => {
+    const a = izq[y]
+    if (a > lim) return -1
+    if (!puedeFila(G, y, m)) { izq[y] = xMax + 1; return -1 }
+    const x = primerLibre(G, y, m, a, lim)
+    izq[y] = x >= 0 ? x : lim + 1
+    return x
+  }
+  if (orden === 'columna') {
+    let mejor = null
+    for (let y = desde; y <= hasta; y++) {
+      // le gana un x menor; con el mismo x, sólo una fila más arriba que la del tope
+      const lim = mejor ? mejor[1] - 1 : tope ? (y < tope[0] ? tope[1] : tope[1] - 1) : xMax
+      if (lim < 0) break
+      const x = primero(y, Math.min(xMax, lim))
+      if (x >= 0) mejor = [y, x]
+    }
+    return mejor
+  }
+  if (tope) hasta = Math.min(hasta, tope[0])
+  if (orden === 'arriba-der') {
+    let der = G._der.get(m)
+    if (!der) { der = new Int32Array(G.h).fill(xMax); G._der.set(m, der) }
+    for (let y = desde; y <= hasta; y++) {
+      // en la fila del mejor de otro giro, sólo un x que le gane (más a la derecha)
+      const a = tope && y === tope[0] ? tope[1] + 1 : 0
+      const b = der[y]
+      if (a > b) continue
+      if (!puedeFila(G, y, m)) { der[y] = -1; continue }
+      const rg = rangosX(G, y, m, a, b)
+      let x = -1
+      for (let t = rg.length - 2; t >= 0 && x < 0; t -= 2) for (let xx = rg[t + 1]; xx >= rg[t]; xx--) if (!choca(G, y, xx, m)) { x = xx; break }
+      der[y] = x >= 0 ? x : a - 1
+      if (x >= 0) return [y, x]
+    }
+    return null
+  }
+  for (let y = desde; y <= hasta; y++) {
+    // en la fila del mejor de otro giro, sólo un x que le gane (más a la izquierda)
+    const x = primero(y, tope && y === tope[0] ? Math.min(xMax, tope[1] - 1) : xMax)
+    if (x >= 0) return [y, x]
+  }
+  return null
+}
+
+/** ¿El lugar a = [y, x] le gana al b según el orden? */
+const ganaLugar = (a, b, orden) => (orden === 'columna' ? (a[1] < b[1] || (a[1] === b[1] && a[0] < b[0]))
+  : orden === 'arriba-der' ? (a[0] < b[0] || (a[0] === b[0] && a[1] > b[1])) : (a[0] < b[0] || (a[0] === b[0] && a[1] < b[1])))
+
+/** UNA FRANJA DE LARGO `p` (lo que se repite): se llenan lugares en el orden de la unidad, cada pieza con el giro
+ * y el lugar que gana según el modo, hasta que no entra la que sigue. Modos: «arriba» (siempre más arriba y a la
+ * izquierda), «alterna» (una de cada lado), «columna» (columna por columna). `forzar` = los giros de las primeras
+ * piezas (las combinaciones también compiten: de a una, el lugar que gana no siempre arma el mejor dibujo).
+ * Con giro libre (muchos giros): primero los múltiplos de 90° y los vecinos del mejor; si ninguno entra, todos.
+ * → `{p, colocadas: [{forma, k, y, x}], unidades}` (y relativo al inicio de la franja). */
+function franjaPatron(U, p, Hm, anchoC, modo, forzar, paso) {
+  const R = p + 2 * Hm
+  const G = hojaNueva(R, anchoC)
+  const col = []
+  const unidad = U.unidad
+  // 2 unidades por período si la unidad es chica; con una unidad grande (varios talles juntos) alcanza con una
+  // y nunca más piezas que las del pedido (con 2 banderas no se buscan dibujos de 12)
+  const maxPeriodo = Math.min(U.total, Math.max(PATRON_MAX_POR_PERIODO, Math.min(2 * unidad.length, 24)))
+  for (let i = 0; i < maxPeriodo; i++) {
+    const fi = unidad[i % unidad.length]
+    const orden = modo === 'columna' ? 'columna' : modo === 'alterna' && i % 2 === 1 ? 'arriba-der' : 'arriba'
+    let cands = U.formas[fi].candsP
+    if (forzar && i < forzar.length) { const f = cands.filter((k) => k.ang === forzar[i]); if (f.length) cands = f }
+    let fases = [cands]
+    if (cands.length > 8) {
+      const g = cands.filter((k) => k.ang % 90 === 0)
+      if (g.length && g.length < cands.length) fases = [g, null]
+    }
+    let mejor = null
+    const probarCands = (lista) => {
+      for (const k of lista) {
+        if (chocaConsigo(k, p)) continue
+        const hasta = Math.min(Hm + p - 1, R - k.mrTest.h)
+        const r = lugarFranja(G, k.mrTest, Hm, hasta, orden, mejor ? [mejor.y, mejor.x] : null)
+        if (r === null) continue
+        if (mejor === null || ganaLugar(r, [mejor.y, mejor.x], orden)) mejor = { k, y: r[0], x: r[1] }
+      }
+    }
+    probarCands(fases[0])
+    if (fases.length > 1) {
+      const vistos = new Set(fases[0])
+      // los vecinos del mejor (±2 pasos) o, si ningún múltiplo de 90° entró, todos los demás giros
+      const resto = mejor === null ? cands.filter((k) => !vistos.has(k))
+        : cands.filter((k) => !vistos.has(k) && Math.min(Math.abs(k.ang - mejor.k.ang), 360 - Math.abs(k.ang - mejor.k.ang)) <= 2 * Math.max(1, Math.trunc(paso)))
+      probarCands(resto)
+    }
+    if (mejor === null) break
+    const mt = mejor.k.mrTest, mc = mejor.k.mrCol
+    const dy = Math.floor((mt.h - mc.h) / 2), dx = Math.floor((mt.w - mc.w) / 2)
+    // la pieza y sus copias de arriba y de abajo (las que asoman a la grilla)
+    for (let j = -Math.ceil((mejor.y + mt.h) / p); mejor.y + dy + j * p < R; j++) estamparRecorte(G, mejor.y + dy + j * p, mejor.x + dx, mc)
+    col.push({ forma: fi, k: mejor.k, y: mejor.y - Hm, x: mejor.x })
+  }
+  const unidades = Math.floor(col.length / unidad.length)
+  return { p, colocadas: col.slice(0, unidades * unidad.length), unidades }
+}
+
+/** Densidad de a (unidades / largo) contra b, sin dividir (exacto en los dos motores); empate: el más corto. */
+const franjaMejor = (a, b) => {
+  const da = a.unidades * b.p, db = b.unidades * a.p
+  return da !== db ? da > db : a.p < b.p
+}
+
+/** Los MODOS de la franja que compiten (en este orden; empate: el primero). */
+function modosPatron(U) {
+  // los giros con los que arranca la franja: los de la primera forma con distinto TAMAÑO girada (alto × ancho);
+  // si son muchos (giro libre), los múltiplos de 90°. 🔴 NO las celdas (2026-10-20): la bandera del usuario a 15°
+  // y a 75° daba 16882 y 16883 celdas (una celda de redondeo de la grilla) → 6 giros «distintos» → quedaban
+  // sólo los múltiplos de 90° y se perdía el dibujo con las tres a 30° (24,68 m en vez de 23,4)
+  const vistas = new Set(), clases = []
+  for (const k of U.formas[U.unidad[0]].candsP) {
+    const s = `${k.mrTest.h},${k.mrTest.w}`
+    if (!vistas.has(s)) { vistas.add(s); clases.push(k.ang) }
+  }
+  let cl = clases
+  if (cl.length > 4) { const r = cl.filter((a) => a % 90 === 0); cl = r.length ? r : cl.slice(0, 4) }
+  const out = []
+  // con una unidad grande (una prenda de muchas piezas) sólo los modos que llegaron a ganar y, con unidades de
+  // varias prendas juntas, sólo «alterna» («columna» revisa fila por fila: 2,6 s con 21 piezas y no ganó nunca)
+  const nU = U.unidad.length
+  const lista = nU <= PATRON_UNIDAD_CHICA ? ['arriba', 'alterna', 'columna'] : nU <= 2 * PATRON_UNIDAD_CHICA + 2 ? ['alterna', 'columna'] : ['alterna']
+  for (const modo of lista) {
+    out.push({ modo, forzar: null })
+    // las tres primeras con el mismo giro (medido: arranca el dibujo que la de a una no ve — 102 banderas con
+    // giro libre 16,76 → 17,54 unidades por metro con las tres primeras a 30°; rectángulos 8,73 → 10,82 a 90°)
+    if (cl.length > 1 && U.unidad.length <= PATRON_UNIDAD_CHICA) for (const a of cl) out.push({ modo, forzar: [a, a, a] })
+  }
+  return out
+}
+
+/** Los largos que se prueban: el mínimo y el máximo de la franja y el paso del barrido grueso. */
+function largosPatron(U, anchoC) {
+  let hMin = Infinity, hMax = 0
+  for (const f of U.formas) for (const k of f.cands) { hMin = Math.min(hMin, k.mrTest.h); hMax = Math.max(hMax, k.mrTest.h) }
+  // con una unidad grande (una camiseta entera) la franja tiene que poder llevar su área: el largo máximo crece
+  let au = 0
+  for (const fi of U.unidad) au += contar(U.formas[fi].cands[0].mrCol)
+  const pLo = Math.max(1, Math.floor(hMin * 0.4)), pHi = Math.ceil(Math.max(hMax, 1.3 * au / anchoC) * 2.5)
+  const pasos = U.unidad.length > PATRON_UNIDAD_CHICA ? 10 : PATRON_PASOS
+  return { Hm: hMax, pLo, pHi, paso: Math.max(1, Math.round((pHi - pLo) / pasos)) }
+}
+
+/** EL MEJOR LARGO DE UN MODO: barrido grueso y, alrededor de los 3 mejores, el largo MÁS CORTO en el que
+ * todavía entran las mismas unidades (el umbral exacto, por bisección). → franja o null. */
+function mejorFranjaModo(U, prep, m) {
+  const { Hm, pLo, pHi, paso } = largosPatron(U, prep.anchoC)
+  const deLargo = new Map()
+  let mejor = null
+  const probar = (p) => {
+    if (!deLargo.has(p)) {
+      const f = franjaPatron(U, p, Hm, prep.anchoC, m.modo, m.forzar, prep.paso)
+      deLargo.set(p, f.unidades ? f : null)
+      if (f.unidades && (mejor === null || franjaMejor(f, mejor))) mejor = f
+    }
+    return deLargo.get(p)
+  }
+  const gruesos = []
+  for (let p = pLo; p <= pHi; p += paso) gruesos.push(p)
+  for (const p of gruesos) probar(p)
+  if (mejor === null) return null
+  const top = gruesos.filter((p) => deLargo.get(p))
+    .sort((a, b) => (franjaMejor(deLargo.get(a), deLargo.get(b)) ? -1 : franjaMejor(deLargo.get(b), deLargo.get(a)) ? 1 : a - b))
+  for (const p0 of top.slice(0, 3)) {
+    const u0 = deLargo.get(p0).unidades
+    let lo = Math.max(pLo, p0 - paso + 1), hi = p0
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      const f = probar(mid)
+      if (f && f.unidades >= u0) hi = mid
+      else lo = mid + 1
+    }
+  }
+  return { ...mejor, modo: m.modo, forzar: m.forzar }
+}
+
+/** La franja para mandar entre hilos (el giro en vez de la máscara) y de vuelta. */
+const franjaSerial = (f) => (f ? { p: f.p, unidades: f.unidades, modo: f.modo, forzar: f.forzar, colocadas: f.colocadas.map((c) => ({ forma: c.forma, ang: c.k.ang, y: c.y, x: c.x })) } : null)
+const franjaDeSerial = (U, f) => (f ? { ...f, colocadas: f.colocadas.map((c) => ({ forma: c.forma, k: U.formas[c.forma].cands.find((k) => k.ang === c.ang), y: c.y, x: c.x })) } : null)
+
+/** El mejor dibujo entre todos los modos (con `ejecutor`, los modos en varios hilos): gana la mayor densidad;
+ * empate, el modo anterior. → franja o null. */
+async function mejorFranja(U, piezas, cfg, prep, ejecutor, franjas = null) {
+  const modos = modosPatron(U)
+  let rs = franjas
+  if (!rs && ejecutor) rs = (await ejecutor(piezas, cfg, modos.map((_, i) => ({ tipo: 'patron', i })))).map((r) => franjaDeSerial(U, r.franja))
+  else if (!rs) rs = modos.map((m) => mejorFranjaModo(U, prep, m))
+  let mejor = null
+  for (const f of rs) if (f && (mejor === null || franjaMejor(f, mejor))) mejor = f
+  return mejor
+}
+
+/** EL PATRÓN REPETIDO EN LA MESA: la franja elegida, de punta a punta con todas las piezas (cada forma en su
+ * orden), desde el arranque de la franja que deja la mesa más corta; si no entra en una mesa, sigue en otra.
+ * → `{colocaciones, consumo, info}` o null. */
+export async function anidarPatron(piezas, cfg, prep = null, ejecutor = null, franjas = null) {
+  prep = prep || preparar(piezas, cfg)
+  const U = unidadPatron(piezas)
+  if (!U) return null
+  // `franjas` = el mejor de cada modo ya calculado en los hilos (junto con los carriles)
+  const F = await mejorFranja(U, piezas, cfg, prep, ejecutor, franjas)
+  if (!F) return null
+  const { cellPt, altoC, espC } = prep
+  const el = F.colocadas.map((c, i) => ({ ...c, i })).sort((a, b) => a.y - b.y || a.i - b.i)
+  const k = el.length, p = F.p
+  const porForma = U.formas.map((f) => f.piezas.length)
+  // por cada arranque posible de la franja (qué pieza va primero), la lista de lugares en orden y el largo
+  const armar = (s) => {
+    const fila = el.map((e, j) => ({ ...e, y: j >= s ? e.y - el[s].y : e.y - el[s].y + p }))
+      .sort((a, b) => a.y - b.y || a.i - b.i)
+    const falta = porForma.slice(), out = []
+    for (let t = 0; out.length < piezas.length; t++) {
+      let puso = false
+      for (const e of fila) {
+        if (!falta[e.forma]) continue
+        falta[e.forma]--
+        out.push({ ...e, y: t * p + e.y })
+        puso = true
+      }
+      if (!puso) break
+    }
+    return out
+  }
+  let mejor = null
+  for (let s = 0; s < k; s++) {
+    const out = armar(s)
+    let largo = 0
+    for (const e of out) largo = Math.max(largo, e.y + e.k.mrTest.h)
+    if (mejor === null || largo < mejor.largo) mejor = { largo, out, s }
+  }
+  // las piezas de cada forma, en su orden, a los lugares de esa forma
+  const usadas = U.formas.map(() => 0)
+  const colocaciones = [[]]
+  let base = 0
+  for (const e of mejor.out) {
+    const mt = e.k.mrTest
+    if (e.y - base + mt.h > altoC) {
+      if (!colocaciones[colocaciones.length - 1].length) return null
+      colocaciones.push([])
+      base = e.y
+    }
+    const p = U.formas[e.forma].piezas[usadas[e.forma]++]
+    const [bw, bh] = bboxGirado(p, e.k.ang)
+    colocaciones[colocaciones.length - 1].push({ pieza: p, ang: e.k.ang, cx: (e.x - espC + mt.w / 2) * cellPt, cy: (e.y - base - espC + mt.h / 2) * cellPt, bw, bh })
+  }
+  return { colocaciones, consumo: consumoDe(colocaciones), info: { periodo: p, por_periodo: k, modo: F.modo, arranque: mejor.s } }
+}
 
 /**
  * `anidar_contorno` (MAPA 708 + 714 + 719 + 726 + 728): LA TIZADA MÁS EFICIENTE → `{colocaciones, area,
@@ -1315,37 +1739,118 @@ export async function anidarContorno(piezas, cfg, ejecutor = null) {
   const kk = prep.cellPt / CM
   const area = celdas * (kk * kk)
   const { carriles } = parametrosOptimizar(piezas.length, cfg)
-  let inicio
-  if (ejecutor) {
-    const cands = candidatosBusqueda(piezas, cfg)
-    const rs = await ejecutor(piezas, cfg, cands.map((c) => ({ tipo: 'estrategia', ...inicioSerial(c) })))
-    let b = 0
-    for (let i = 1; i < rs.length; i++) if (rs[i].consumo < rs[b].consumo) b = i
-    inicio = cands[b]
-  } else inicio = anidarBusqueda(piezas, cfg)
-  const tareas = []
-  for (let k = 0; k < carriles; k++) tareas.push({ tipo: 'carril', k, inicio: inicioSerial(inicio) })
-  let res
-  if (ejecutor && carriles > 1) {
-    res = (await ejecutor(piezas, cfg, tareas)).map((r) => ({
-      consumo: r.consumo, colocaciones: r.hojas.map((h) => h.map((c) => ({ pieza: piezas[c.i], ang: c.ang, cx: c.cx, cy: c.cy, bw: c.bw, bh: c.bh }))) }))
-  } else res = tareas.map((t) => carril(piezas, cfg, t.k, t.inicio))
+  // 🔴 PIEZAS TODAS IGUALES (MAPA 736): cambiar el orden de piezas idénticas no cambia el acomodo — sólo el
+  // criterio y los giros —, así que cada carril repetía las MISMAS cuentas (medido: 16 carriles con 102 banderas
+  // daban 3 resultados distintos, ~80 s de CPU). Con piezas iguales cada combinación se acomoda UNA vez (la
+  // búsqueda ya las prueba todas), los carriles se recorren con esas cuentas (mismas semillas, mismos intentos:
+  // terminan en la misma combinación que antes) y se pule sólo cada combinación distinta en la que terminan.
+  // Resultado: el MISMO largo que los 16 carriles, sin repetir nada.
+  const iguales = carriles > 1 && todasIguales(piezas)
+  const cands = candidatosBusqueda(piezas, cfg)
+  let rsB
+  if (ejecutor) rsB = await ejecutor(piezas, cfg, cands.map((c) => ({ tipo: 'estrategia', ...inicioSerial(c) })))
+  else rsB = cands.map((c) => tareaCarril(piezas, cfg, { tipo: 'estrategia', ...inicioSerial(c) }))
+  let bB = 0
+  for (let i = 1; i < rsB.length; i++) if (rsB[i].consumo < rsB[bB].consumo) bB = i
+  const inicio = cands[bB]
+  const tareas = [], deCarril = []                   // deCarril[k] = qué tarea trae el resultado del carril k
+  if (iguales) {
+    const cuenta = new Map()
+    cands.forEach((c, i) => { const kc = claveCombinacion(c.est, c.soloAng); if (!cuenta.has(kc)) cuenta.set(kc, { c: rsB[i].consumo, a: rsB[i].ultima, ...c }) })
+    const finales = [claveCombinacion(inicio.est, inicio.soloAng)]
+    for (let k = 1; k < carriles; k++) {
+      const m = buscarCarril(piezas, cfg, k, inicioSerial(inicio), (orden, est, sa) => cuenta.get(claveCombinacion(est, sa)))
+      finales.push(claveCombinacion(m.est, m.sa))
+    }
+    const tareaDe = new Map()
+    for (const kc of finales) {
+      if (!tareaDe.has(kc)) {
+        const c = cuenta.get(kc)
+        tareaDe.set(kc, tareas.length)
+        tareas.push({ tipo: 'pulido', orden: c.orden, est: c.est, soloAng: c.soloAng ? [...c.soloAng] : null })
+      }
+      deCarril.push(tareaDe.get(kc))
+    }
+  } else {
+    for (let k = 0; k < carriles; k++) { deCarril.push(k); tareas.push({ tipo: 'carril', k, inicio: inicioSerial(inicio) }) }
+  }
+  // 🔴 EL PATRÓN (MAPA 736): con piezas iguales, el dibujo que se repite calculado con TODAS juntas compite con
+  // el acomodo pieza por pieza; gana sólo si gasta menos tela (en empate, el de siempre). Sus modos van en la
+  // MISMA tanda que los carriles y primero (los de giro libre son los más largos: así no quedan solos al final; con
+  // más de 120 piezas corren junto al carril solo, que es largo). Probado: junto a la búsqueda tardaba más con la
+  // Copia de 593 banderines (8,4 → 11,9 s)
+  const U = unidadPatron(piezas)
+  const nModos = U ? modosPatron(U).length : 0
+  const todas = []
+  for (let i = 0; i < nModos; i++) todas.push({ tipo: 'patron', i })
+  todas.push(...tareas)
+  // con hilos, todo a la vez; sin hilos (o una sola tarea: el carril solo de un pedido grande), acá mismo y en
+  // orden — el resultado es el mismo
+  const rs = ejecutor && todas.length > 1 ? await ejecutor(piezas, cfg, todas) : todas.map((t) => tareaCarril(piezas, cfg, t))
+  const franjas = nModos ? rs.slice(0, nModos).map((r) => franjaDeSerial(U, r.franja)) : null
+  const resT = rs.slice(nModos).map((r) => ({
+    consumo: r.consumo, colocaciones: r.hojas.map((h) => h.map((c) => ({ pieza: piezas[c.i], ang: c.ang, cx: c.cx, cy: c.cy, bw: c.bw, bh: c.bh }))) }))
+  const res = deCarril.map((i) => resT[i])            // el resultado de cada carril (con piezas iguales, compartido)
   let b = 0
   for (let i = 1; i < res.length; i++) if (res[i].consumo < res[b].consumo) b = i
   // 🔴 y al final, con el CONTORNO REAL (MAPA 731): cada pieza a la distancia exacta de sus vecinas
-  const colocaciones = res[b].colocaciones.map((h) => (h.length ? compactarVector(h, cfg) : h))
+  const pat = U ? await anidarPatron(piezas, cfg, prep, null, franjas) : null
+  // las dos compactaciones (el ganador de los carriles y el patrón) a la vez, una por hilo
+  const [colocacionesC, cp] = await compactarVarias(piezas, cfg, pat ? [res[b].colocaciones, pat.colocaciones] : [res[b].colocaciones], ejecutor)
+  let colocaciones = colocacionesC
+  if (pat) {
+    // el patrón compite YA con el contorno real (2026-10-20: comparado antes, una mezcla de 3 talles «ganaba» por
+    // 16,1 m y quedaba 9 cm más larga que el acomodo de siempre después de compactar)
+    const gano = consumoDe(cp) < consumoDe(colocaciones) - 1e-9
+    DEBUG.patron = { ...pat.info, consumo: consumoDe(cp), gano }
+    if (gano) colocaciones = cp
+  } else DEBUG.patron = null
   return { colocaciones, area, consumo: consumoDe(colocaciones) }
+}
+
+/** Compacta con el contorno real varias tizadas (cada una, lista de mesas): con `ejecutor`, una mesa por hilo, a
+ * la vez; sin él, acá en orden. Mismo resultado. */
+async function compactarVarias(piezas, cfg, tizadas, ejecutor) {
+  const tareas = []
+  tizadas.forEach((t, ti) => t.forEach((h, hi) => { if (h.length) tareas.push({ ti, hi, h }) }))
+  const pos = new Map(piezas.map((p, i) => [p, i]))
+  let rs
+  if (ejecutor && tareas.length > 1) {
+    rs = await ejecutor(piezas, cfg, tareas.map((x) => ({ tipo: 'compactar', hoja: x.h.map((c) => ({ i: pos.get(c.pieza), ang: c.ang, cx: c.cx, cy: c.cy, bw: c.bw, bh: c.bh })) })))
+    rs = rs.map((r) => r.hoja.map((c) => ({ pieza: piezas[c.i], ang: c.ang, cx: c.cx, cy: c.cy, bw: c.bw, bh: c.bh })))
+  } else rs = tareas.map((x) => compactarVector(x.h, cfg))
+  const out = tizadas.map((t) => t.slice())
+  tareas.forEach((x, k) => { out[x.ti][x.hi] = rs[k] })
+  return out
 }
 
 /** Lo que hace un hilo de carriles con una tarea (`nesting/carril.worker.js`). → algo que se puede mandar. */
 export function tareaCarril(piezas, cfg, t) {
+  if (t.tipo === 'compactar') {
+    // una mesa con el contorno real (MAPA 731), en un hilo aparte
+    const h = compactarVector(t.hoja.map((c) => ({ pieza: piezas[c.i], ang: c.ang, cx: c.cx, cy: c.cy, bw: c.bw, bh: c.bh })), cfg)
+    const pos = new Map(piezas.map((p, i) => [p, i]))
+    return { hoja: h.map((c) => ({ i: pos.get(c.pieza), ang: c.ang, cx: c.cx, cy: c.cy, bw: c.bw, bh: c.bh })) }
+  }
+  if (t.tipo === 'patron') {
+    // un modo del patrón (MAPA 736): el mejor largo de franja de ese modo
+    const prep = preparar(piezas, cfg)
+    const U = unidadPatron(piezas)
+    return { franja: U ? franjaSerial(mejorFranjaModo(U, prep, modosPatron(U)[t.i])) : null }
+  }
   if (t.tipo === 'estrategia') {
     const prep = preparar(piezas, cfg)
     const { colocaciones } = anidarEstrategia(piezas, cfg, t.est, t.orden, prep, t.soloAng ? new Set(t.soloAng) : null)
-    return { consumo: consumoDe(colocaciones) }
+    return { consumo: consumoDe(colocaciones), ultima: areaUltima(colocaciones) }
   }
   const pos = new Map(piezas.map((p, i) => [p, i]))
-  const r = carril(piezas, cfg, t.k, t.inicio)
+  let r
+  if (t.tipo === 'pulido') {
+    // piezas todas iguales (MAPA 736): la combinación en la que terminó algún carril, acomodada y pulida
+    const prep = preparar(piezas, cfg)
+    const col = pulir(cfg, anidarEstrategia(piezas, cfg, t.est, t.orden, prep, t.soloAng ? new Set(t.soloAng) : null).colocaciones, prep)
+    r = { colocaciones: col, consumo: consumoDe(col) }
+  } else r = carril(piezas, cfg, t.k, t.inicio)
   return { consumo: r.consumo, hojas: r.colocaciones.map((h) => h.map((c) => ({ i: pos.get(c.pieza), ang: c.ang, cx: c.cx, cy: c.cy, bw: c.bw, bh: c.bh }))) }
 }
 
@@ -1665,7 +2170,7 @@ export function anidarEstrategia(piezas, cfg, estrategia, orden, prep, soloAng =
     const candidatosPorAngulo = candsDe(p)
     // con el largo de mesa del pedido (MAPA 716) esto pasa cuando el largo elegido es más corto que la pieza
     if (!candidatosPorAngulo.length) throw new Error(`«${p.pieza || p.etiqueta}» (talle ${p.talle || '-'}) no entra en una mesa de ` +
-      `${Number(cfg.ancho_cm)} cm de ancho × ${Number(cfg.altura_max_cm) / 100} m de largo con el giro que tiene permitido: ` +
+      `${String(Number(cfg.ancho_cm)).replace('.', ',')} cm de ancho × ${String(Number(cfg.altura_max_cm) / 100).replace('.', ',')} m de largo con el giro que tiene permitido: ` +
       'hace falta una tela más ancha o un largo de mesa mayor.')
     let colocada = false
     DEBUG.fft++

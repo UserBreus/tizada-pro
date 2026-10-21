@@ -8,7 +8,7 @@ import { leerMetros, problemaMedida, metrosTexto, margenPorBorde, margenSobreCon
          TERMINACIONES, NOMBRE_TERMINACION, normTerminacion, margenDeTerminacion, OVERLOCK_DEFECTO_CM } from './motor/molde/aMedida.js';   // MOLDE A MEDIDA (MAPA 623)
 import { FORMAS, NOMBRE_FORMA, normForma, normOrientacion, margenUniforme, guiaForma, contornoForma, pathForma, cajaForma, pathCostura, trianguloCorrido } from './motor/molde/formas.js';   // círculo y triángulo (MAPA 645)
 import { guardarCache, leerCache, claveDe, soltarMoldesEnPc, soltarPaginasEnPc } from './motor/cache.js';   // el molde con diseño en la PC (MAPA 585)
-import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, calidadFoto, anchoMesaCm } from './motor/vista/vista.js';
+import { navegadorDibujaVista, abrirVista, cerrarVistas, soltarVista, precalentarVista, precalentarTodo, progresoVistas, calidadFoto, anchoMesaCm } from './motor/vista/vista.js';
 import { previasCaminoB, previasCaminoA, cerrarMotores, validarMapeoEnNavegador, editablesEnNavegador } from './motor/arte/previa.js';
 import { fuentesEstadoLocal, fuenteCharsLocal } from './motor/arte/fuentesEstado.js';
 import { TIRA_CONTORNO_MM } from './motor/pieza/base.js';   // el contorno blanco de la marca de tira (MAPA 682)
@@ -4019,13 +4019,17 @@ function useVistaLocal(idTrabajo, pxcm = null) {
   const abriendo = useRef(new Set());
   const localOn = useRef(null);                    // ¿el servidor quiere que dibuje esta computadora?
   const [fallidas, setFallidas] = useState({});     // archivo → esta PC no lo pudo abrir: lo dibuja el servidor
+  const propias = useRef(new Set());               // las vistas que abrió ESTE visor (las suelta al irse)
   // 🔴 OTRA TIZADA = EMPEZAR LIMPIO. Lo abierto se guarda por NOMBRE de archivo («HOJA_g0_…pdf»), y
   // los nombres se repiten entre pedidos: sin vaciar esto, la tizada nueva encontraba la hoja VIEJA
   // (ya cerrada) con el mismo nombre y no mostraba nada (2026-09-22).
   useEffect(() => {
     setVistas({}); setUrls({}); setFallidas({});
     pidiendo.current = new Set(); abriendo.current = new Set(); localOn.current = null;
-    return () => { cerrarVistas(); };
+    // 🔴 SÓLO LAS SUYAS (2026-10-21): antes `cerrarVistas()` cerraba TODAS al irse este visor (la ficha), y las
+    // fotos de las mesas, que las usa otro visor, quedaban borradas → «No se pudo dibujar la vista»
+    const mias = propias.current;
+    return () => { for (const h of mias) soltarVista(h); mias.clear(); };
   }, [idTrabajo]);
 
   // 🔴 SE REINTENTA ACÁ, NUNCA SE CAE AL SERVIDOR (MAPA 733). Con «el servidor no calcula» el servidor contesta
@@ -4042,6 +4046,7 @@ function useVistaLocal(idTrabajo, pxcm = null) {
       for (let k = 0; k < 4 && !v; k++) {
         if (k) await espera(1500 * k);
         try {
+          propias.current.add(`${idTrabajo}|${archivo}`);
           v = await abrirVista(`${idTrabajo}|${archivo}`, async () => {
             const r = await fetch(rutaApi(`/trabajos/${idTrabajo}/${encodeURIComponent(archivo)}`));
             if (!r.ok) return null;
@@ -4059,13 +4064,18 @@ function useVistaLocal(idTrabajo, pxcm = null) {
     } catch { setFallidas(x => ({ ...x, [archivo]: true })); } finally { abriendo.current.delete(archivo); }
   };
 
-  // el dibujo también se reintenta; si no sale, queda marcado y la pantalla ofrece «Reintentar»
+  // el dibujo también se reintenta y, si no sale (la PC sin memoria para una foto tan grande), se dibuja a la mitad
+  // y a la cuarta parte de la calidad: siempre hay vista. Si la vista se cerró, se vuelve a abrir.
   const pedir = async (v, clave, pagina, ancho, recorte) => {
     if (pidiendo.current.has(clave)) return;
     pidiendo.current.add(clave);
-    for (let k = 0; k < 3; k++) {
-      if (k) await espera(1500 * k);
-      try { const u = await v.dibujo(pagina, ancho, recorte); setUrls(x => ({ ...x, [clave]: u })); return; } catch { /* otra vez */ }
+    for (const factor of [1, 1, 1, 0.5, 0.25]) {
+      if (v.cerrada) {
+        pidiendo.current.delete(clave);
+        setVistas(x => { const n = { ...x }; for (const k of Object.keys(n)) if (n[k] === v) delete n[k]; return n; });
+        return;
+      }
+      try { const u = await v.dibujo(pagina, Math.max(200, Math.round(ancho * factor)), recorte); setUrls(x => ({ ...x, [clave]: u })); return; } catch { await espera(1500); }
     }
     setUrls(x => ({ ...x, [clave]: VISTA_FALLO }));
   };
@@ -4083,17 +4093,19 @@ function useVistaLocal(idTrabajo, pxcm = null) {
     // dijo que NO dibuja esta computadora.
     // al servidor SÓLO si dijo que esta computadora no dibuja (con «no calcula» prendido no dibuja él)
     if (localOn.current === false) return urlServidor;
-    if (!v) { if (fallidas[archivo]) return VISTA_FALLO; abrir(archivo); return null; }
+    if (!v || v.cerrada) { if (fallidas[archivo]) return VISTA_FALLO; abrir(archivo); return null; }
     const px = ancho === 'foto' ? v.anchoFoto(pagina, pxcm || 16) : ancho;
     const clave = `${archivo}|${pagina}|${px}|${recorte ? recorte.map(x => x.toFixed(4)).join(',') : 'todo'}`;
     if (urls[clave]) return urls[clave];
     pedir(v, clave, pagina, px, recorte);
     return null;
   };
-  // «Reintentar»: se olvida lo que falló de ese archivo y se vuelve a abrir/dibujar
-  urlDe.reintentar = (archivo) => {
+  // «Reintentar»: se olvida lo que falló de ese archivo (y la imagen que el navegador no pudo mostrar, `urlMala`)
+  // y se vuelve a abrir/dibujar
+  urlDe.reintentar = (archivo, urlMala = null) => {
     setFallidas(x => { const n = { ...x }; delete n[archivo]; return n; });
-    setUrls(x => { const n = {}; for (const [k, u] of Object.entries(x)) if (!(k.startsWith(archivo + '|') && u === VISTA_FALLO)) n[k] = u; return n; });
+    setUrls(x => { const n = {}; for (const [k, u] of Object.entries(x)) if (!(k.startsWith(archivo + '|') && (u === VISTA_FALLO || (urlMala && u === urlMala)))) n[k] = u; return n; });
+    if (urlMala) { const v = vistas[archivo]; if (v && v.urls) for (const [k, u] of [...v.urls]) if (u === urlMala) v.urls.delete(k); }
     for (const k of [...pidiendo.current]) if (k.startsWith(archivo + '|')) pidiendo.current.delete(k);
   };
   return urlDe;
@@ -4236,6 +4248,7 @@ function MesasInfinito({ mesas, job, avisar }) {
     try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; }
   });
   const [editando, setEditando] = useState(null);
+  const reintentosVista = useRef({});              // mesa → cuántas veces se reintentó sola su foto
   const [cargadas, setCargadas] = useState({});   // previa de cada mesa: true = dibujada · 'error'  // key de la mesa en edición
   // el precalentado de la vista (esta computadora dibuja todas las mesas y sus recortes en alta de fondo)
   const [progVista, setProgVista] = useState({ mesas: 0, listas: 0 });
@@ -4364,7 +4377,15 @@ function MesasInfinito({ mesas, job, avisar }) {
                             servidor a 1200 px, como antes.) */}
                         <img src={urlVista(hoja.archivo, pi, 'foto', null, rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pi}&w=1200`))} alt={nombre} draggable={false} decoding="async"
                           onLoad={() => setCargadas(c => (c[key] ? c : { ...c, [key]: true }))}
-                          onError={() => setCargadas(c => ({ ...c, [key]: 'error' }))}
+                          onError={(e) => {
+                            // 🔴 SE REINTENTA SOLO (2026-10-21, «no quiero más este error»): se vuelve a dibujar hasta 4 veces
+                            // (y, si no sale, a menos calidad: `pedir`); el botón queda sólo si igual no sale
+                            const n = (reintentosVista.current[key] || 0) + 1;
+                            reintentosVista.current[key] = n;
+                            const malo = e.currentTarget.getAttribute('src');
+                            if (n <= 4) setTimeout(() => { urlVista.reintentar(hoja.archivo, malo); setCargadas(c => { const m = { ...c }; delete m[key]; return m; }); }, 800 * n);
+                            else setCargadas(c => ({ ...c, [key]: 'error' }));
+                          }}
                           style={{ width: w, height: h, display: 'block' }} />
                         {!cargadas[key] && (
                           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666', fontSize: 12, fontWeight: 700, background: 'rgba(255,255,255,0.85)' }}>
@@ -4375,14 +4396,14 @@ function MesasInfinito({ mesas, job, avisar }) {
                           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center', justifyContent: 'center', color: '#b00', fontSize: 12, fontWeight: 700, background: 'rgba(255,255,255,0.9)' }}>
                             No se pudo dibujar la vista
                             <button type="button" onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => { e.stopPropagation(); urlVista.reintentar(hoja.archivo); setCargadas(c => { const n = { ...c }; delete n[key]; return n; }); }}
+                              onClick={(e) => { e.stopPropagation(); reintentosVista.current[key] = 0; urlVista.reintentar(hoja.archivo); setCargadas(c => { const n = { ...c }; delete n[key]; return n; }); }}
                               style={{ background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 7, padding: '5px 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Reintentar</button>
                           </div>
                         )}
                       </div>
                   {/* ABAJO: tamaño ancho × alto (y, con Copia, de qué fila es y cuántas copias van) */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
-                    {(anchoCm / 100).toFixed(2)} × {(altoCm / 100).toFixed(2)} m
+                    {(anchoCm / 100).toFixed(2).replace('.', ',')} × {(altoCm / 100).toFixed(2).replace('.', ',')} m
                     {_mf && Array.isArray(_mf.talles) && _mf.copias == null && (
                       <span title={_mf.separados ? 'Talles separados en la misma mesa, con una línea punteada entre talles' : _mf.grupo ? 'Talles por mesa: esta mesa lleva sólo estos talles' : 'Talles por mesa: los talles que no pusiste en ningún grupo, juntos'}
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 999,
@@ -4402,7 +4423,7 @@ function MesasInfinito({ mesas, job, avisar }) {
                     {_mf && _mf.copias != null && (
                       <span title={Array.isArray(_mf.filas) && _mf.filas.length
                           ? `Copia mezclada: ${_mf.filas.map(f => `${f.por_mesa} de la fila ${f.fila}`).join(' + ')}; se imprime ×${_mf.copias}`
-                          : _mf.por_mesa > 1 ? `Copia: esta mesa trae ${_mf.por_mesa} copias de la fila a lo ancho; se imprime ×${_mf.copias}` : 'Copia: esta mesa es de una sola fila; se imprime esta cantidad de veces'}
+                          : _mf.por_mesa > 1 ? `Copia: esta mesa trae ${_mf.por_mesa} copias de la fila; se imprime ×${_mf.copias}` : 'Copia: esta mesa es de una sola fila; se imprime esta cantidad de veces'}
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 999,
                           background: 'rgba(250,204,21,0.14)', border: '1px solid rgba(250,204,21,0.55)', color: '#fde68a' }}>
                         <Icon name="copiaMesa" style={{ width: 12, height: 12 }} />
@@ -19134,7 +19155,7 @@ export default function App() {
                       <InterruptorIcono ancla="planilla-copia" on={cantidadCopia} onToggle={() => setCantidadCopia(v => !v)}
                         icono="copiaMesa" nombre="Copia" rgb="250,204,21"
                         title={cantidadCopia ? 'Apagar Copia: la cantidad vuelve a repetir la prenda en la tizada'
-                                             : 'Copia: una mesa por fila; la cantidad es cuántas copias se imprimen'}
+                                             : 'Copia: la cantidad es cuántas copias se imprimen; la mesa llena se repite'}
                         ayuda={<Ayuda ancho={330}>Con <b>Copia</b>, la <b>cantidad</b> son <b>copias</b>: si una prenda (o varias del mismo talle)
                           alcanza para <b>llenar una mesa</b> del largo máximo, sale <b>una</b> mesa marcada ×N en vez de repetirla. Todo lo que
                           no llena una mesa se acomoda <b>junto</b>, con los talles mezclados, como sin Copia. Separar talles es el botón
@@ -21605,7 +21626,7 @@ export default function App() {
                               }
                             }
                             const n = await descargarVarios(items, { avisar: showError });
-                            if (n > 0) showMsg(`Guardadas ${n} mesa(s) en la carpeta elegida.`);
+                            if (n > 0) showMsg(`Guardadas ${n} mesa(s).`);
                           }}>
                           <Icon name="download" style={{ width: 13, height: 13 }} /> Descargar todo ({totalMesas})
                         </button>
@@ -27847,7 +27868,7 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {_copia && (
                 <div style={{ fontSize: 12, color: '#fde68a', padding: '8px 11px', borderRadius: 9, border: '1px solid rgba(250,204,21,0.45)', background: 'rgba(250,204,21,0.08)' }}>
-                  Con <b>Copia</b> prendido cada fila ya sale en su propia mesa: esto se usa recién cuando apagues Copia.
+                  Con <b>Copia</b> prendido los grupos de talles no se usan: valen recién cuando apagues Copia.
                 </div>
               )}
               {!talles.length ? (

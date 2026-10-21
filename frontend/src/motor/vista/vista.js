@@ -176,6 +176,8 @@ class Vista {
 
   /** `recorte` = [cx0, cy0, cx1, cy1] en fracciones, o null. Devuelve una URL para un `<img>`. */
   async dibujo(pagina, ancho, recorte = null, fondo = false) {
+    // una vista cerrada no tiene hilos: el pedido quedaría esperando para siempre (quien la usa la vuelve a abrir)
+    if (this.cerrada) throw new Error('la vista está cerrada')
     const clave = this.claveDe(pagina, ancho, recorte)
     if (this.urls.has(clave)) return this.urls.get(clave)
     if (this.enCurso.has(clave)) return this.enCurso.get(clave)
@@ -196,6 +198,7 @@ class Vista {
   }
 
   cerrar() {
+    this.cerrada = true
     for (const u of this.urls.values()) { try { URL.revokeObjectURL(u) } catch { /* nada */ } }
     this.urls.clear()
     for (const o of this.obreros) { try { o.w.terminate() } catch { /* nada */ } }
@@ -363,6 +366,14 @@ export async function precalentarVista(huella, bytes, { pxcm = null, anchos = []
   } catch {
     return null
   }
+}
+
+/** Cierra UNA vista (la de quien la abrió, al dejar de mirarla). 🔴 Antes cada visor, al cerrarse, cerraba TODAS
+ * (`cerrarVistas`): pasar de la ficha a las mesas dejaba las fotos de las mesas apuntando a imágenes ya borradas
+ * y la pantalla decía «No se pudo dibujar la vista» (2026-10-21). */
+export function soltarVista(huella) {
+  const v = abiertas.get(huella)
+  if (v) { v.cerrar(); abiertas.delete(huella) }
 }
 
 /** Cierra las vistas abiertas (al salir del pedido, o al empezar uno nuevo). */

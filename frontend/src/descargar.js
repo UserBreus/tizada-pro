@@ -199,29 +199,38 @@ export async function descargarBlob(blob, nombre, opciones) {
 }
 
 /**
- * Descarga VARIOS archivos eligiendo UNA carpeta: `items` = [{url, nombre}]. Si el navegador no
- * puede elegir carpeta, cae a la descarga clásica de a uno (con una pausa, como siempre). Devuelve
- * cuántos se guardaron; -1 si el usuario canceló la carpeta.
+ * Descarga VARIOS archivos: `items` = [{url, nombre}]. Devuelve cuántos se guardaron; -1 si se canceló.
+ *   · UNO solo → el «Guardar como» de un archivo, como cualquier descarga suelta (ese diálogo deja guardar en
+ *     cualquier lado, también el Escritorio o Descargas).
+ *   · Varios → se elige UNA carpeta y van todos ahí. Si no se eligió (canceló, o Chrome no dejó usar la
+ *     carpeta), se bajan DIRECTO a la carpeta de descargas del navegador, sin preguntar nada más.
+ *   · Sin la API del navegador → la descarga clásica de a uno, como siempre.
+ *
+ * 🔴 2026-10-20: Chrome NO deja dar como CARPETA el Escritorio, Descargas, Documentos ni la carpeta del usuario
+ * («Esta carpeta no se puede abrir porque contiene archivos del sistema»; sí las carpetas de adentro) y al
+ * cerrarlo llega como una cancelación más. El usuario, con «Descargar todo (1)»: «te pedí que se descargue, no
+ * que me digas va en un zip». Por eso: con un archivo no se pide carpeta, y con varios la descarga sale igual.
  */
 export async function descargarVarios(items, { avisar, progreso } = {}) {
   if (!items || !items.length) return 0
-  if (!puedeElegirCarpeta()) {
+  if (items.length === 1) {
+    const it = items[0]
+    return (await descargarArchivo(it.url, it.nombre, { avisar })) ? 1 : (puedeElegirDonde() ? -1 : 1)
+  }
+  const directo = async () => {
     for (const it of items) {
       try { await descargaClasica(it.url, it.nombre) } catch (e) { if (avisar) avisar(`No se pudo guardar «${it.nombre}»: ${e.message || e}`) }
       await new Promise((r) => setTimeout(r, 500))
     }
     return items.length
   }
+  if (!puedeElegirCarpeta()) return directo()
   let carpeta
   try {
     carpeta = await window.showDirectoryPicker({ mode: 'readwrite' })
-  } catch (e) {
-    if (esCancelacion(e)) return -1
-    for (const it of items) {
-      try { await descargaClasica(it.url, it.nombre) } catch { /* sigue con el próximo */ }
-      await new Promise((r) => setTimeout(r, 500))
-    }
-    return items.length
+  } catch {
+    // sin carpeta (canceló o Chrome no dejó usar la elegida): se bajan igual, a Descargas
+    return directo()
   }
   let hechos = 0
   const fallas = []
