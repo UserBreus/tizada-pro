@@ -3,6 +3,8 @@
 Todo lo que hace falta para que un sistema externo (ventas, ERP, tienda online) le mande pedidos a
 TIZADA PRO y reciba los archivos de producción **asociados a SU pedido**, sin que nadie toque TIZADA.
 
+🔔 **¿Cambió algo para su sistema?** Mirá [`CAMBIOS.md`](CAMBIOS.md) en cada actualización: dice si hay que tocar algo, qué cambió de nombre (antes → ahora), qué se sacó y qué contesta distinto. La más nueva va arriba.
+
 🧵 **¿No sabés nada de ropa? Empezá acá:** [`TIZADA_PRO_Explicado_para_programadores.pdf`](TIZADA_PRO_Explicado_para_programadores.pdf)
 (13 páginas, con **lo nuevo** y los **moldes a medida explicados fácil**: las 3 formas, cómo se mide el triángulo, qué preguntarle al cliente y en qué orden): qué es un molde, una variable, una tizada o una mesa en palabras de programador, el recorrido
 completo, qué viaja en cada ruta, las plantillas y los conectores, el resultado (un PDF por mesa) y las alarmas.

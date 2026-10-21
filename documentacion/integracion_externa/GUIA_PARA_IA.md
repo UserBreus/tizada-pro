@@ -6,7 +6,8 @@
 > exacta es [`API.md`](API.md) (cada ruta) y [`FORMATO_PEDIDO.md`](FORMATO_PEDIDO.md) (cada campo).
 > Las respuestas reales de cada ruta están en [`respuestas/`](respuestas/) y los esquemas JSON en
 > [`esquemas/`](esquemas/).
-
+>
+> 🔔 **Antes de tocar su sistema por una actualización, leé [`CAMBIOS.md`](CAMBIOS.md):** dice si hay que cambiar algo y qué nombre cambió (antes → ahora).
 ---
 
 ## 0. Reglas que no se negocian

@@ -134,6 +134,32 @@ def _rama_entrega(sha):
               + (r.stderr or r.stdout).strip()[:300])
 
 
+# Lo que su sistema USA: si cambia algo de acá, un nombre puede haber cambiado para ellos.
+_CONTRATO = ["integracion_externa.py", f"{DOC}/API.md", f"{DOC}/FORMATO_PEDIDO.md", f"{DOC}/openapi.yaml",
+             f"{DOC}/esquemas"]
+_CAMBIOS = f"{DOC}/CAMBIOS.md"
+
+
+def _revisar_cambios(sha):
+    """Pedido del usuario (2026-10-21): «hay que avisar si algo que antes se llamaba de una manera ahora
+    cambió». Cada subida lleva su entrada en CAMBIOS.md (aunque sea «No»). Desde lo último compartido (el
+    commit del repo de integración dice «Al día con TIZADA PRO <sha>»), si se tocó lo que usa su sistema y
+    CAMBIOS.md no cambió, se avisa fuerte: la subida no se frena, pero queda a la vista para corregirlo."""
+    ultimo = _git(INTEG, "log", "-1", "--format=%s", check=False)
+    m = re.search(r"Al día con TIZADA PRO ([0-9a-f]{7,40})", ultimo or "")
+    if not m or _git(AQUI, "cat-file", "-t", m.group(1), check=False).strip() != "commit":
+        return
+    tocados = set(_git(AQUI, "diff", "--name-only", f"{m.group(1)}..{sha}").split())
+    contrato = sorted(t for t in tocados if any(t == c or t.startswith(c + "/") for c in _CONTRATO))
+    if _CAMBIOS in tocados:
+        print("  CAMBIOS.md al día.")
+    elif contrato:
+        print("AVISO FUERTE: se tocó lo que usa el sistema externo y CAMBIOS.md NO dice qué cambió → "
+              + ", ".join(contrato) + ". Agregar la entrada (¿cambió algún nombre?) y volver a subir.")
+    else:
+        print("AVISO: esta subida no tiene su entrada en CAMBIOS.md (aunque sea «No hay que cambiar nada»).")
+
+
 def compartir(sha="HEAD", preparar=False):
     if not preparar:
         _rama_entrega(sha)
@@ -142,6 +168,7 @@ def compartir(sha="HEAD", preparar=False):
     sha_c = _git(AQUI, "rev-parse", "--short", sha).strip()
     asunto = _git(AQUI, "log", "-1", "--format=%s", sha).strip()
     print(f"Compartiendo la integración con lo de TIZADA PRO {sha_c}…")
+    _revisar_cambios(sha)
     _poner_al_dia(sha)
     archivos, hay = _cambiados()
     if not hay:

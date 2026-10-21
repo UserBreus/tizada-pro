@@ -4147,7 +4147,8 @@
       "nombre": "Compartir la integración al subir main (repo de Santiago y useryoania)",
       "que": "El gancho pre-push de este repo, al subir `main`, corre `compartir_integracion.py`: saca `documentacion/integracion_externa/` DEL COMMIT que se sube, la copia al repo privado `UserBreus/tizada-pro-integracion` (carpeta hermana `TIZADAPRO PRUEBAEXT`, con su `actualizar_integracion.py`), revisa que no lleve llaves ni tokens y hace commit + push allá. Además adelanta la rama `entrega-programadores` de `tizada-pro` al mismo commit (de ahí toma TIZADA el servidor de ellos).",
       "archivos": [
-        "compartir_integracion.py"
+        "compartir_integracion.py",
+        "documentacion/integracion_externa/CAMBIOS.md"
       ],
       "anclas": [
         [
@@ -4165,6 +4166,14 @@
         [
           "compartir_integracion.py",
           "def _rama_entrega"
+        ],
+        [
+          "compartir_integracion.py",
+          "def _revisar_cambios"
+        ],
+        [
+          "documentacion/integracion_externa/CAMBIOS.md",
+          "¿Hay que cambiar algo en su sistema?"
         ]
       ],
       "palabras": [
@@ -4179,16 +4188,19 @@
         "Si lo que va a subir lleva una llave real (`tzp_` + 43 con variedad), un token de GitHub o una clave privada, NO sube nada. El ejemplo `tzp_xxxx…` de API.md es relleno y pasa.",
         "Compartir nunca frena la subida de TIZADA PRO: el gancho siempre sale con 0 y sólo avisa.",
         "El gancho vive en `.git/hooks` (no viaja con git): en otra PC hay que correr `py compartir_integracion.py --instalar`.",
-        "`entrega-programadores` va siempre igual a `main`, sólo hacia adelante (push sin force)."
+        "`entrega-programadores` va siempre igual a `main`, sólo hacia adelante (push sin force).",
+        "Cada subida lleva su entrada en `documentacion/integracion_externa/CAMBIOS.md` (la más nueva arriba, aunque sea «No hay que cambiar nada»): ¿hay que cambiar algo?, cambió de nombre (antes → ahora), se sacó, contesta distinto, nuevo y opcional. `_revisar_cambios` avisa al compartir si se tocó el contrato (integracion_externa.py, API.md, FORMATO_PEDIDO.md, openapi.yaml, esquemas/) sin entrada."
       ],
       "cicatrices": [
         "2026-10-12: Santiago y useryoania veían el repo de integración de hacía 4 días (08/10) mientras `main` estaba al día: compartir era un paso aparte, a mano, y se olvidaba (MAPA 690).",
-        "2026-10-12: «ven los commits y no está el de hoy»: `entrega-programadores` (la rama que les indica la portada) seguía en el 05/10 porque se subía sólo a main."
+        "2026-10-12: «ven los commits y no está el de hoy»: `entrega-programadores` (la rama que les indica la portada) seguía en el 05/10 porque se subía sólo a main.",
+        "2026-10-21: «en el git explica cambios que podrían afectar al sistema externo? si algo antes se llamaba de una manera ahora cambió»: no había un lugar fijo; sólo novedades sueltas con fecha (MAPA 743)."
       ],
       "contratos": [],
       "mapa": [
         690,
-        614
+        614,
+        743
       ],
       "memoria": "santiago-programador-github.md",
       "conexiones": [
