@@ -237,6 +237,7 @@ ALARMAS = {
     "diseno-sin-moldes":       ("datos", True,  "Un diseño no dice qué molde usa.", "Cada diseño lleva al menos un molde."),
     "molde-desconocido":       ("datos", True,  "El código de molde no existe en TIZADA PRO.", "Elegirlo de la lista que publica /moldes."),
     "molde-no-disponible":     ("datos", True,  "El molde existe pero no está listo para pedidos externos (es propio de un usuario, temporal, trae el diseño adentro o no tiene sus piezas nombradas).", "Usar un molde del catálogo marcado `listo`."),
+    "molde-archivado":         ("datos", True,  "El molde (y todas sus variables) está archivado en TIZADA PRO: no se usa en pedidos ni en plantillas.", "Elegir otra variable de las que publica /variables, o pedirle a quien administra TIZADA que lo vuelva a habilitar."),
     "molde-repetido":          ("datos", True,  "El mismo molde aparece dos veces en un diseño (dos variables de la misma prenda).", "Una variable por prenda en cada diseño."),
     "variable-ambigua":        ("datos", True,  "Ese nombre de variable existe en más de una prenda y el pedido no dice cuál.", "Mandar la `variable` por su clave (`v_…`) o agregar `molde`."),
     "arte-falta":              ("datos", True,  "Un molde de un diseño no tiene arte (ni propio ni el del diseño).", "Indicar `arte` en el diseño o en el molde."),
@@ -363,6 +364,8 @@ def _molde_listo(prod, reg):
     arte aparte (camino A). Devuelve (bool, motivo)."""
     if not prod:
         return False, "no existe"
+    if prod.get("archivado"):            # MAPA 745: ni el molde ni sus variables se usan
+        return False, "está archivado"
     if prod.get("efimero"):
         return False, "es un molde temporal de un pedido"
     if S._es_privado(prod):
@@ -824,7 +827,8 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                 reg = {}
             listo, motivo = _molde_listo(prod, reg)
             if not listo:
-                A.append(alarma("molde-no-disponible", f"«{prod.get('nombre')}»: {motivo}", campo=cm + ".molde")); continue
+                A.append(alarma("molde-archivado" if prod.get("archivado") else "molde-no-disponible",
+                                f"«{prod.get('nombre')}»: {motivo}", campo=cm + ".molde")); continue
             tpl_ids.add(prod.get("planilla_template_id"))
             # la variable (por clave o por nombre)
             variantes = [v for v in (prod.get("variantes") or []) if v.get("clave")]
@@ -1382,7 +1386,7 @@ def v1_moldes():
     cat = S._cargar_catalogo()
     return jsonify({"version": _version_catalogo(),
                     "moldes": [molde_publico(p, cat, detalle=False) for p in cat.get("productos", [])
-                               if not p.get("efimero") and not S._es_privado(p)]})
+                               if not p.get("efimero") and not S._es_privado(p) and not p.get("archivado")]})
 
 
 def _molde_de_variable(q, prods):
@@ -1451,6 +1455,8 @@ def v1_variable_foto(clave):
     pid, _amb = _molde_de_variable(clave, prods)
     prod = prods.get(pid) if pid else None
     v = next((x for x in ((prod or {}).get("variantes") or []) if x.get("clave") == clave), None)
+    if prod is not None and prod.get("archivado"):
+        return jsonify({"error": "esa variable es de un molde archivado"}), 404
     if not prod or not v or "producto_preview" not in S.app.view_functions:
         return jsonify({"error": "esa variable no existe"}), 404
     foto, resp = _silueta(pid)
@@ -1467,6 +1473,8 @@ def v1_molde(pid):
     prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
     if prod is None or prod.get("efimero") or S._es_privado(prod):
         return jsonify({"error": "ese molde no existe"}), 404
+    if prod.get("archivado"):
+        return jsonify({"error": "ese molde está archivado"}), 404
     return jsonify({"version": _version_catalogo(), "molde": molde_publico(prod, cat)})
 
 
@@ -1476,6 +1484,8 @@ def v1_molde_foto(pid):
     prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
     if prod is None or prod.get("efimero") or S._es_privado(prod):
         return jsonify({"error": "ese molde no existe"}), 404
+    if prod.get("archivado"):
+        return jsonify({"error": "ese molde está archivado"}), 404
     if "producto_preview" not in S.app.view_functions:
         return jsonify({"error": "sin foto"}), 404
     return _silueta(pid)[1]
@@ -1547,6 +1557,8 @@ def v1_a_medida_calcular():
     prod = prods.get(pid) if pid else None
     if not prod or prod.get("efimero") or S._es_privado(prod):
         return jsonify({"error": "esa variable o molde no existe"}), 404
+    if prod.get("archivado"):
+        return jsonify({"error": "ese molde está archivado"}), 404
     am = prod.get("a_medida")
     if not isinstance(am, dict) or am.get("de"):
         return jsonify({"error": "ese molde no es a medida"}), 422
@@ -2531,7 +2543,8 @@ def revisar_plantilla(body):
                 reg = {}
             listo, motivo = _molde_listo(prod, reg)
             if not listo:
-                A.append(alarma("molde-no-disponible", f"«{prod.get('nombre') or pid}»: {motivo}", campo=dv))
+                A.append(alarma("molde-archivado" if prod.get("archivado") else "molde-no-disponible",
+                                f"«{prod.get('nombre') or pid}»: {motivo}", campo=dv))
                 continue
             key = f"{nom}|{pid}|{var.get('clave')}"
             # MOLDE A MEDIDA (MAPA 623): la plantilla se arma a la medida que viene en la variable
@@ -2646,6 +2659,19 @@ def plantilla_publica(ref):
             "guia": "«guia_….ai» se abre en cualquier Illustrator, sin conector.",
             "conectores": "Los instaladores, en /api/externo/v1/conectores. Para saber si el conector está: GET "
                           "http://127.0.0.1:47850/estado (Illustrator) o http://127.0.0.1:47851/estado (CorelDRAW) desde esa computadora.",
+        }
+        # CÓMO SE CREA, en datos (2026-10-27, pedido del usuario: «que TIZADA le diga cómo debe ser la creación»):
+        # a dónde va cada archivo y qué versión del conector corresponde — la misma comparación que hace el botón de
+        # TIZADA para avisar «hay una versión nueva de la extensión». Los archivos de un programa van EN ORDEN
+        # (`parte` «1 de 2», «2 de 2»): cada uno es un .ai aparte. Código listo: `codigo/crear_en_programa.js`.
+        _vers = {k: x[2] for k, x in _conectores().items()}
+        out["conectores"] = {
+            "illustrator": {"estado": CONECTOR_LOCAL["illustrator"].replace("/plantilla", "/estado"),
+                            "crear": CONECTOR_LOCAL["illustrator"], "version": _vers.get("illustrator"),
+                            "tipo_archivo": "illustrator", "instalador": "/api/externo/v1/conectores/illustrator"},
+            "corel": {"estado": CONECTOR_LOCAL["corel"].replace("/plantilla", "/estado"),
+                      "crear": CONECTOR_LOCAL["corel"], "version": _vers.get("corel"),
+                      "tipo_archivo": "corel", "instalador": "/api/externo/v1/conectores/corel"},
         }
     return out
 

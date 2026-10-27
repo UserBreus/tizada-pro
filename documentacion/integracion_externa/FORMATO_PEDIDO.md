@@ -297,7 +297,7 @@ lo que publica cada molde:
 
 | Para no caer en… | Revisar contra… |
 |---|---|
-| `molde-desconocido`, `molde-no-disponible` | `GET /moldes` → `listo` |
+| `molde-desconocido`, `molde-no-disponible`, `molde-archivado` | `GET /moldes` → `listo` (un archivado ya no aparece: re-sincronizar) |
 | `variable-falta`, `variable-desconocida`, `variable-ambigua` | `GET /variables` (mandar la clave `v_…`) |
 | `talle-inexistente` | `talles[]` del molde |
 | `talle-sin-columna` | `planilla.con_talles` (un molde con varios talles no puede ir con una planilla sin talles: lo arregla quien administra TIZADA) |

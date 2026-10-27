@@ -24,6 +24,10 @@ PERMISOS = [
     ("molde.editar",     "molde",   "Editar moldes",               "Nombrar piezas, variables, grupos, telas."),
     ("molde.borrar",     "molde",   "Borrar moldes",               "Eliminar un molde del catálogo."),
     ("molde.ver_todos",  "molde",   "Ver los moldes de todos",     "Ver también los moldes propios que subió cada usuario."),
+    # ARCHIVAR (pedido del usuario 2026-10-23): el molde y sus variables dejan de poder usarse en un
+    # pedido y pasan a «Archivados» en Configuración, de donde se vuelven a habilitar. Lo recibe el
+    # admin solo (`sincronizar_roles`); a otro rol se lo da el usuario a mano.
+    ("molde.archivar",   "molde",   "Archivar moldes",             "Archivar un molde (no se usa en pedidos) y volver a habilitarlo."),
     ("arte.cargar",      "arte",    "Cargar arte",                 "Subir el arte de un diseño y mapearlo."),
     ("arte.editar",      "arte",    "Editar objetos editables",    "Mover/rotar/escalar los editables del arte."),
     ("config.ver",       "config",  "Ver configuración",           "Entrar al Panel de Configuración."),

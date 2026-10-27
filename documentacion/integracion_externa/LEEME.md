@@ -56,7 +56,7 @@ la puesta en marcha en el servidor de TIZADA, los diagramas de cómo se conectan
 | [`pedido_ejemplo.json`](pedido_ejemplo.json) | Un pedido completo (revisado contra el catálogo real) |
 | [`resultado_ejemplo.json`](resultado_ejemplo.json) | Lo que vuelve cuando está listo (= el cuerpo del aviso) |
 | [`respuestas/`](respuestas/) | La respuesta REAL de cada ruta (código HTTP + cuerpo; las listas largas recortadas) |
-| [`codigo/`](codigo/) | Python sin dependencias (`enviar_pedido.py`, `recibir_aviso.py`) y Node 18+ (`cliente.mjs`) |
+| [`codigo/`](codigo/) | Python sin dependencias (`enviar_pedido.py`, `recibir_aviso.py`), Node 18+ (`cliente.mjs`) y, para la página del diseñador, `crear_en_programa.js` (manda la plantilla a Illustrator / CorelDRAW) |
 
 ## Reglas que conviene saber de entrada
 

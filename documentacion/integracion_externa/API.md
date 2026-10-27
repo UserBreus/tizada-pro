@@ -135,7 +135,8 @@ sale de `px/py/pw/ph`). Si TIZADA todavía no la calculó (nadie abrió esa pren
 ### `GET /moldes` y `GET /moldes/{codigo}` — la prenda entera
 
 `/moldes` lista todas las prendas con `listo` (y `motivo` si no se puede pedir). `/moldes/{codigo}` trae
-todo lo de una prenda:
+todo lo de una prenda. Un molde **archivado** en TIZADA no aparece en `/moldes` ni en `/variables`, y
+`/moldes/{codigo}` contesta 404; un pedido o una plantilla que lo pida vuelve con `molde-archivado`:
 
 | Campo | Para qué |
 |---|---|
@@ -406,8 +407,18 @@ Contesta en el acto `202` (en cola) o `422` con alarmas (`variable-desconocida`,
    {"diseno": "JUGADOR", "tipo": "illustrator", "nombre": "JUGADOR - Illustrator.json", "bytes": 377250, "sha256": "…", "descarga": "/api/externo/v1/plantillas/PL-0001/archivos/JUGADOR%20-%20Illustrator.json"},
    {"diseno": "JUGADOR", "tipo": "corel",       "nombre": "JUGADOR - CorelDRAW.json",  "bytes": 311548, "sha256": "…", "descarga": "…"},
    {"diseno": "JUGADOR", "tipo": "guia",        "nombre": "guia_JUGADOR.ai",           "bytes": 47035,  "sha256": "…", "descarga": "…"}],
- "como_usar": {"illustrator": "…", "corel": "…", "guia": "…", "conectores": "…"}}
+ "como_usar": {"illustrator": "…", "corel": "…", "guia": "…", "conectores": "…"},
+ "conectores": {
+   "illustrator": {"estado": "http://127.0.0.1:47850/estado", "crear": "http://127.0.0.1:47850/plantilla",
+                   "version": "1.29.0", "tipo_archivo": "illustrator", "instalador": "/api/externo/v1/conectores/illustrator"},
+   "corel":       {"estado": "http://127.0.0.1:47851/estado", "crear": "http://127.0.0.1:47851/plantilla",
+                   "version": "1.7.0",  "tipo_archivo": "corel",       "instalador": "/api/externo/v1/conectores/corel"}}}
 ```
+
+`conectores` es **cómo se crea, en datos**: a dónde va cada archivo (`crear`), cómo saber si el conector está
+(`estado`), qué archivos le tocan (`tipo_archivo`) y qué **versión** del conector corresponde a este TIZADA. Si
+el `/estado` del conector de esa computadora contesta otra `version`, hay que volver a instalarlo (es la misma
+comparación que hace el botón de TIZADA para avisar «hay una versión nueva»).
 
 Estados: `en_cola` → `procesando` → `listo` (o `rechazado` / `error`). Si un diseño no entra en un
 archivo de Illustrator a esa escala, sale en varios (`"parte": "1 de 2"`). Avisos que pueden venir:
@@ -434,6 +445,29 @@ const plan = await (await fetch('/su-servidor/plantilla/PL-0001/JUGADOR - Illust
 const r = await fetch('http://127.0.0.1:47850/plantilla', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: plan })
 const d = await r.json()   // {ok: true, mesas: 15, archivo: "JUGADOR.ai"}
 ```
+
+### El código listo: lo mismo que el botón «Crear en Illustrator / CorelDRAW» de TIZADA
+
+| Dónde corre | Archivo | Qué hace |
+|---|---|---|
+| **Su servidor** (con la llave) | [`codigo/cliente.mjs`](codigo/cliente.mjs) — `pedirPlantilla`, `esperarPlantilla`, `archivoPlantilla`, `conectores`, `conector` | Pide la plantilla, espera a que esté, baja cada archivo comprobando su sha256 y baja los instaladores. La llave **nunca** va al navegador: su página le pide los archivos a su servidor. |
+| **Su página**, en la computadora del diseñador | [`codigo/crear_en_programa.js`](codigo/crear_en_programa.js) — `crearEnPrograma`, `buscarConector` | Busca el conector, compara la versión con la que dice TIZADA, manda cada archivo del programa **en orden** (`parte` 1 de N…) tal cual y junta lo que contestó: `{ok, mesas, archivos, carpeta, avisos}`. Errores con `codigo`: `no-lista`, `sin-archivos`, `sin-conector` (con `instalador`), `programa`. |
+
+```js
+import { crearEnPrograma } from './crear_en_programa.js'
+const estado = await (await fetch('/su-servidor/plantillas/PL-0001')).json()      // lo de GET /plantillas/PL-0001
+const r = await crearEnPrograma({
+  programa: 'illustrator',          // o 'corel'
+  estado, diseno: 'JUGADOR',
+  traer: (a) => fetch('/su-servidor/plantillas/PL-0001/archivos/' + encodeURIComponent(a.nombre)).then((x) => x.text()),
+  alAvanzar: (t) => console.log(t),
+})
+// {ok: true, programa: 'illustrator', mesas: 15, archivos: ['JUGADOR.ai'], carpeta: 'Documentos › USER PRO › Plantillas', avisos: []}
+```
+
+TIZADA dice **cómo** se crea (el plan: mesas con su nombre, capas, contornos y guías); esta página no calcula
+nada, sólo lleva el plan al conector. La primera vez el navegador puede preguntar si la página puede acceder a
+dispositivos de la red local: hay que permitirlo. Illustrator tiene que estar abierto; CorelDRAW se abre solo.
 
 Después el diseñador arma el arte sobre esa base y el arte va en el pedido (`POST /pedidos`).
 
@@ -464,7 +498,8 @@ Después el diseñador arma el arte sobre esa base y el arte va en el pedido (`P
 | `respuestas/*.json` | La respuesta REAL de cada ruta (HTTP + cuerpo) |
 | `codigo/enviar_pedido.py` | Armar el .zip, revisar, mandar, esperar y bajar los PDF (Python, sin dependencias) |
 | `codigo/recibir_aviso.py` | Recibir el aviso y comprobar la firma (Python, sin dependencias) |
-| `codigo/cliente.mjs` | Lo mismo en Node 18+ (revisar, mandar, estado, bajar, firma) |
+| `codigo/cliente.mjs` | Lo mismo en Node 18+ (revisar, mandar, estado, bajar, firma) + la plantilla y los conectores |
+| `codigo/crear_en_programa.js` | En la página del diseñador (navegador): manda la plantilla a Illustrator o CorelDRAW por el conector, como el botón de TIZADA |
 
 Y un sistema de ejemplo que hace TODO esto con pantalla: el **sistema de ventas de prueba**
 (repositorio aparte), que arma pedidos como en TIZADA, los manda, recibe el aviso, muestra los PDF y

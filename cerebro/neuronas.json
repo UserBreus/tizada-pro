@@ -3122,6 +3122,18 @@
         [
           "servidor.py",
           "def _editables_color_con_pedido"
+        ],
+        [
+          "integracion_externa.py",
+          "out[\"conectores\"] = {"
+        ],
+        [
+          "documentacion/integracion_externa/codigo/crear_en_programa.js",
+          "export async function crearEnPrograma"
+        ],
+        [
+          "documentacion/integracion_externa/codigo/cliente.mjs",
+          "export async function esperarPlantilla"
         ]
       ],
       "palabras": [
@@ -3177,7 +3189,8 @@
         "La revisión de los DATOS corre `_plan_del_pedido` con `_solo_reglas: True`: sólo las trabas, nunca leer el arte (eso es del robot).",
         "🔴 TODO LO QUE EL USUARIO HACE EN EL PEDIDO SE PUEDE MANDAR POR LA API (MAPA 712): una opción nueva del Panel de Pedidos va también a `revisar_datos` + `cuerpo_de` (+ robot si toca el arte), al esquema `pedido.schema.json` (additionalProperties:false), a FORMATO_PEDIDO y con su alarma en ALARMAS. Los nombres de objetos editables los resuelve `robot_arte` con el arte.",
         "Guía de NOVEDADES para el sistema externo (MAPA 734): sale del `git diff` de `documentacion/integracion_externa/` desde la última entregada; HTML con los estilos de `como_usar_cada_opcion.html` → PDF con Chrome sin cabecera.",
-        "Las guías para personas van VISUALES (MAPA 734): hojas apaisadas, un dibujo por cosa, casi sin texto; el detalle largo queda en los .md."
+        "Las guías para personas van VISUALES (MAPA 734): hojas apaisadas, un dibujo por cosa, casi sin texto; el detalle largo queda en los .md.",
+        "La plantilla para Illustrator/CorelDRAW desde el otro sistema = el MISMO cálculo que la ventana «Crear plantilla» (`motorPlantilla`); `GET /plantillas/{ref}` dice CÓMO se crea en datos (`conectores`: a dónde, versión, instalador) y la página del otro sistema la manda al conector con `codigo/crear_en_programa.js` (el plan TAL CUAL, en orden, sólo `Content-Type`). La llave nunca va al navegador."
       ],
       "cicatrices": [
         "2026-10-02: breusplanilla@gmail.com es cuenta PERSONAL con la carpeta en su Mi unidad: la cuenta de servicio del 606 no podía guardar ahí. Se agregó OAuth de la persona. Pendiente: la app de Google sigue en «Prueba» → el permiso vence a los 7 días hasta publicarla (pide página principal + política de privacidad públicas) (MAPA 607).",
@@ -3194,7 +3207,8 @@
         "2026-10-12 (MAPA 671): el robot se caía en ~la mitad de las corridas: `subirTipografias` no leía la respuesta de `fuente_resolver`. Y el contrato dependía del arte real «jugador» del usuario (cambiado ese día).",
         "2026-10-13 (MAPA 698): la actualización «reinicio» en Linux (KillMode=process) dejaba vivo al robot del servidor viejo; el de la 1.0.49 no arma la copia a medida y los pedidos «a medida» salían «la pieza de 103,6 × 103,6 cm» pida la medida que pida.",
         "2026-10-14 (MAPA 708): un pedido con datos sanos volvía RECHAZADO «no se pudo revisar el pedido: arte_personalizacion»: la revisión corría el plan entero y, si el molde ya tenía un diseño con arte guardado, llegaba a leer ese arte → 428 al «navegador» que no existe.",
-        "2026-10-14: `moldes[].reemplazos` se leía en `cuerpo_de` pero `revisar_datos` nunca lo copiaba: se perdía sin avisar (MAPA 712)."
+        "2026-10-14: `moldes[].reemplazos` se leía en `cuerpo_de` pero `revisar_datos` nunca lo copiaba: se perdía sin avisar (MAPA 712).",
+        "2026-10-27 (752): `/plantillas` y `/conectores` no tenían contrato en vivo y el otro sistema no tenía código para mandar el plan al conector; ahora sección 10 de `verificar_integracion_externa.py`."
       ],
       "contratos": [
         "verificar_integracion_externa.py",
@@ -3220,7 +3234,8 @@
         698,
         708,
         712,
-        734
+        734,
+        752
       ],
       "memoria": "integracion-pedido-externo",
       "conexiones": [
@@ -4457,6 +4472,266 @@
         744
       ],
       "memoria": "",
+      "conexiones": []
+    },
+    {
+      "id": "molde-archivado",
+      "nombre": "Archivar moldes (Configuración › Moldería › Archivados)",
+      "que": "Un molde archivado (`prod.archivado = {cuando, por, por_nombre}`) y sus variables no se usan en pedidos: no aparecen en el pedido, el plan lo frena, la API externa no los publica. En Configuración van a «Archivados» con «Habilitar». Permiso propio `molde.archivar` (admin automático).",
+      "archivos": [
+        "servidor.py",
+        "integracion_externa.py",
+        "auth.py",
+        "frontend/src/App.jsx",
+        "verificar_molde_archivado.py",
+        "documentacion/integracion_externa/CAMBIOS.md"
+      ],
+      "anclas": [
+        [
+          "servidor.py",
+          "def _archivado"
+        ],
+        [
+          "servidor.py",
+          "def archivar_producto"
+        ],
+        [
+          "servidor.py",
+          "\"/api/productos/archivar\": \"dueño\""
+        ],
+        [
+          "auth.py",
+          "\"molde.archivar\""
+        ],
+        [
+          "integracion_externa.py",
+          "\"molde-archivado\""
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const handleArchivarProducto"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "ARCHIVADOS (MAPA 745)"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _archCat"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const [verArchivados, setVerArchivados]"
+        ]
+      ],
+      "palabras": [
+        "archivado",
+        "archivar",
+        "Archivados",
+        "Habilitar",
+        "molde.archivar",
+        "molde-archivado"
+      ],
+      "reglas": [
+        "Archivar NO borra nada: habilitar devuelve el molde tal cual (piezas, variables, artes, configuración).",
+        "`GET /api/productos` manda `archivado` sin filtrar (Configuración lo muestra aparte); toda lista para USAR en un pedido lo deja afuera (pantalla: `variablesDisponibles`, `_moldeUsable`, `_moldesValidos`; servidor: plan, activar, a medida, para_bajar; API externa: `_molde_listo`).",
+        "La COPIA a medida de un pedido hereda el archivado de su plantilla (`_archivado(prod, cat)` mira `a_medida.de`).",
+        "Sólo se archivan moldes del CATÁLOGO: un «Mi artículo» o una copia de pedido → 400.",
+        "La ruta va en `_API_SIN_MOLDE` como «dueño»: pide `molde.archivar` adentro sobre el molde de `id`; si no, la guarda general le exigía `molde.editar` del molde activo.",
+        "Moldería muestra los HABILITADOS o los ARCHIVADOS (pestañas con su cantidad), nunca las dos listas a la vez."
+      ],
+      "cicatrices": [
+        "2026-10-23: la primera versión ponía «Archivados» debajo de la grilla de habilitados; el usuario: «está mal organizado, o veo los habilitados o los archivados, los dos al mismo tiempo no» → pestañas."
+      ],
+      "contratos": [
+        "verificar_molde_archivado.py"
+      ],
+      "mapa": [
+        745
+      ],
+      "memoria": "molde-archivado.md",
+      "conexiones": [
+        "integracion-externa",
+        "compartir-integracion"
+      ]
+    },
+    {
+      "id": "editar-piezas",
+      "nombre": "Cambiar piezas del molde (agregar / forma nueva / mover, guardado)",
+      "que": "Configuración › Moldería › «Cambiar piezas»: AGREGAR formas nuevas, cambiar la FORMA de una pieza o MOVERLA, en todos los talles o en los elegidos, con las formas REALES a la vista en cada talle elegido y arrastrando al instante. Se edita EN SU LUGAR del content stream (nadie se renumera, las capas no se tocan) y se verifica antes de guardar.",
+      "archivos": [
+        "frontend/src/motor/molde/editarPiezas.js",
+        "piezas_molde.py",
+        "servidor.py",
+        "frontend/src/motor/obrero.worker.js",
+        "frontend/src/motor/calculos.js",
+        "frontend/src/App.jsx",
+        "verificar_editar_piezas.py",
+        "frontend/src/motor/pruebas/editar_piezas.mjs"
+      ],
+      "anclas": [
+        [
+          "frontend/src/motor/molde/editarPiezas.js",
+          "export function editarPiezas"
+        ],
+        [
+          "frontend/src/motor/molde/editarPiezas.js",
+          "export function verificarEdicion"
+        ],
+        [
+          "frontend/src/motor/molde/editarPiezas.js",
+          "export function unidadesConCapa"
+        ],
+        [
+          "piezas_molde.py",
+          "def editar_piezas"
+        ],
+        [
+          "piezas_molde.py",
+          "def verificar_edicion"
+        ],
+        [
+          "piezas_molde.py",
+          "def _unidades_con_capa"
+        ],
+        [
+          "servidor.py",
+          "def plantilla_piezas_cambiar"
+        ],
+        [
+          "frontend/src/motor/obrero.worker.js",
+          "fn === 'editar_piezas'"
+        ],
+        [
+          "frontend/src/motor/calculos.js",
+          "'editar_piezas'"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const guardarCambiosPiezas"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "data-tour=\"pieza-cambiar\""
+        ],
+        [
+          "frontend/src/motor/molde/editarPiezas.js",
+          "export function resolverEdiciones"
+        ],
+        [
+          "frontend/src/motor/molde/editarPiezas.js",
+          "export function emparejarTrazos"
+        ],
+        [
+          "piezas_molde.py",
+          "def resolver_ediciones"
+        ],
+        [
+          "piezas_molde.py",
+          "def _emparejar_trazos"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const geomCambio"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "onMouseDownCapture={(e) => {"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _pzCambClave"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _cambioListo"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _ocultasCamb"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _puntoActual"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const abrirCambio"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const elegirPiezaCambio"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const cargarFormaCambio"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const cancelarCambio"
+        ],
+        [
+          "piezas_molde.py",
+          "def formas_por_talle"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _faltanFormas"
+        ],
+        [
+          "frontend/src/motor/molde/herramientas.js",
+          "capa: d.layer || ''"
+        ]
+      ],
+      "palabras": [
+        "cambiar forma",
+        "mover pieza",
+        "reemplazar pieza",
+        "editar_piezas",
+        "piezas_cambiar"
+      ],
+      "reglas": [
+        "🔴 ORDEN (pedido del usuario, MAPA 748 + 750 — NO DARLO VUELTA): el botón «Cambiar pieza» / «Mover» / «Agregar» ABRE el espacio del cambio con TODOS los talles; RECIÉN AHÍ se toca la pieza en el visor; RECIÉN AHÍ «Cargar forma» abre el archivo. Nunca exigir la pieza tocada antes del botón ni abrir el archivo solo.",
+        "POCOS PASOS (MAPA 749): al llegar el archivo el cambio ya se VE aplicado en todos los talles (la vieja no se dibuja, `_ocultasCamb`); «Guardar» directo, sin «preparar» ni confirmar.",
+        "El número de una pieza es su posición en el orden de dibujo de su capa: se edita EN SU LUGAR (mover = q…cm…Q; reemplazar = sus operadores de trazado con su mismo pintado). Nunca «sacar y agregar al final».",
+        "Nada se guarda sin `verificarEdicion`/`verificar_edicion`: misma cantidad de piezas por talle, ninguna no tocada cambia de número ni de lugar, las tocadas quedan donde se pidió.",
+        "Los textos se mueven por TRAMOS (un BT…ET puede llevar etiquetas de varias piezas): Tm absoluto antes del tramo movido y antes del siguiente que era relativo; los operadores originales quedan.",
+        "La pieza conserva todo (es la misma): el registro sólo actualiza w_cm/h_cm/bbox_mu y corre el ancla; variables, telas, arte y etiqueta no se tocan.",
+        "Gemelos con paridad exacta (contrato `verificar_editar_piezas.py`, punto 4). Una versión nueva (`plantilla.v<N>.ai`); el archivo del usuario no se toca.",
+        "En el talle guía se elige la pieza; en cada talle se toca su HOMÓLOGA por el registro (como duplicar).",
+        "El «dónde va» (Agregar una pieza / Cambiar piezas) lo atiende el VISOR ENTERO (`onMouseDownCapture` del contenedor), nunca el `<svg>`: el svg mide sólo el rectángulo de las piezas y tocar en un espacio vacío no le llega.",
+        "Cada pieza del talle se empareja con su trazo por SUPERPOSICIÓN (IoU, las grandes primero), todas a la vez; lo que es de otra pieza nunca es «marca» de ésta.",
+        "La PC resuelve con SU detección dónde está cada pieza (`resolverEdiciones`): el servidor manda número de pieza + corrimiento + forma centrada con su caja; no pide la detección por talle.",
+        "AGREGAR entra al final de la capa de SU talle (la OCG que ya existe), sin nombre, ubicada respecto de una pieza de ese mismo talle: ni capas nuevas, ni otro orden, ni renumerado.",
+        "Mientras hay un cambio en curso el visor muestra TODOS los talles (o los elegidos) como vienen en el archivo, con las formas reales (`geomCambio`); nunca rectángulos.",
+        "Salir sin guardar (otro molde, volver a la lista, otra herramienta, otra sección) DESCARTA lo no guardado: efecto sobre `pidCfg, activoTab, molderiaAbierta, tabAjustesMolde`. El molde no se tocó.",
+        "Arrastrar corre el cambio por DIFERENCIA desde donde está (`_puntoActual`), nunca salta al puntero; tocar OTRA pieza la elige (no arrastra).",
+        "Una pieza tiene UN solo cambio: volver a tocarla o cambiarle la forma retoma el que ya tenía.",
+        "🔴 La forma de cada talle sale de la CAPA con su nombre (las capas como vienen en el archivo): `formas_por_talle` ↔ `_formasPorTalle`; cada contorno lleva `capa`. Por tamaño SÓLO si el archivo no trae capas con los nombres de los talles. Vale para Cambiar pieza, Agregar una pieza y el aviso de la subida."
+      ],
+      "cicatrices": [
+        "2026-10-23: la primera versión movía el bloque de texto entero: en un molde con todas las etiquetas en un solo BT se perdían 137 letras (corridas fuera del recorte). Arreglado por tramos.",
+        "2026-10-26: tocar en un espacio vacío del visor no marcaba el lugar (el clic sólo llegaba sobre el rectángulo de las piezas) — también en «Agregar una pieza».",
+        "2026-10-26: una pieza chica y finita adentro de la caja de otra se movía con ella (se la tomaba por marca): emparejar por centro con tolerancia de 1 punto no alcanza para piezas finitas.",
+        "2026-10-26: los botones exigían la pieza tocada ANTES de abrir la herramienta y «Cambiar forma» abría el archivo en el acto: el usuario lo quería al revés (abrir → elegir pieza → cargar).",
+        "2026-10-26: con los cambios a medio guardar, volver a la lista de moldes y entrar de nuevo los dejaba ahí (sólo se descartaban al cambiar de molde o de sección).",
+        "2026-10-26 (750): al pedir «menos pasos» se volvió a exigir la pieza ANTES del botón y que el botón abriera el archivo — deshizo el orden que el usuario había pedido un mensaje antes (748). Con dos lecturas posibles, la que conserva lo pedido antes manda.",
+        "2026-10-26 (751): en el talle L quedó la forma de otro talle: las formas del archivo se repartían por tamaño y la capa se tiraba al leer los contornos."
+      ],
+      "contratos": [
+        "verificar_agregar_pieza.py",
+        "verificar_editar_piezas.py",
+        "verificar_formas_por_capa.py"
+      ],
+      "mapa": [
+        746,
+        747,
+        748,
+        749,
+        750,
+        751
+      ],
+      "memoria": "editar-piezas-molde.md",
       "conexiones": []
     }
   ]

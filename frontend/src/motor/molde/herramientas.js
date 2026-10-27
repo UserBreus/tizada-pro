@@ -110,7 +110,8 @@ export function contornosDePdf(mupdf, bytes) {
       for (const d of dibujosDePagina(mupdf, page).filter(esDibujo)) {
         let c = null
         try { c = contornoDeDrawing(itemsComoGetDrawings(d.items), d.rect, geo.cb, 1.0, 1, null) } catch { c = null }
-        if (c && c.segmentos && c.segmentos.some((s) => s[0] !== 'h')) conts.push(c)
+        // LA CAPA de donde salió (como viene en el archivo): su NOMBRE dice a qué talle va (`formas_por_talle`)
+        if (c && c.segmentos && c.segmentos.some((s) => s[0] !== 'h')) conts.push({ ...c, capa: d.layer || '' })
       }
       return conts.map((c, i) => [c.w * c.h, i, c]).sort((a, b) => b[0] - a[0] || a[1] - b[1]).map((x) => x[2])
     } finally { page.destroy() }
@@ -142,7 +143,7 @@ export function opsDeSegmentos(segs, dx, dy, u = 1.0) {
   return out.join('\n')
 }
 
-function ocgPorNombre(doc, nombre) {
+export function ocgPorNombre(doc, nombre) {
   const ocp = doc.getTrailer().get('Root').get('OCProperties')
   if (nulo(ocp)) return null
   const og = ocp.get('OCGs')
@@ -163,7 +164,7 @@ function recursosPropios(doc, pageObj) {
 function mismoObjeto(a, b) {
   try { return a.isIndirect() && b.isIndirect() && a.asIndirect() === b.asIndirect() } catch { return false }
 }
-function nombreEnRecursos(doc, pageObj, ocg, sugerido) {
+export function nombreEnRecursos(doc, pageObj, ocg, sugerido) {
   const res = recursosPropios(doc, pageObj)
   let props = res.get('Properties')
   if (nulo(props)) { props = doc.newDictionary(); res.put('Properties', props) }

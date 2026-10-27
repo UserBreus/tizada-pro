@@ -13,7 +13,7 @@ import { traerConCache, claveDe, urlDe } from './cache.js'
 import { registrarHilo } from './monitor.js'
 
 // operaciones que REESCRIBEN el molde: devuelven el archivo nuevo además del resultado
-const EDITAN = new Set(['agregar_pieza', 'renombrar_y_alta', 'separar_y_alta'])
+const EDITAN = new Set(['agregar_pieza', 'editar_piezas', 'renombrar_y_alta', 'separar_y_alta'])
 const TOPE_ABIERTOS = 3
 
 let _pool = null

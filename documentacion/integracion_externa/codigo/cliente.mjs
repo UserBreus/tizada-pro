@@ -6,6 +6,14 @@
 //   TIZADA_URL=... TIZADA_LLAVE=... node cliente.mjs mandar OV-2026-00123.zip
 //   TIZADA_URL=... TIZADA_LLAVE=... node cliente.mjs estado OV-2026-00123
 //   TIZADA_URL=... TIZADA_LLAVE=... node cliente.mjs bajar OV-2026-00123
+//
+// LA PLANTILLA para Illustrator / CorelDRAW (la parte de SU SERVIDOR; la de la página del diseñador, que la
+// manda al programa, es `crear_en_programa.js`):
+//   TIZADA_URL=... TIZADA_LLAVE=... node cliente.mjs plantilla pedir plantilla.json   (lo de POST /plantillas)
+//   TIZADA_URL=... TIZADA_LLAVE=... node cliente.mjs plantilla esperar PL-0001       (hasta «listo»; muestra archivos y conectores)
+//   TIZADA_URL=... TIZADA_LLAVE=... node cliente.mjs plantilla bajar PL-0001         (los .json de cada programa y la guía .ai)
+//   TIZADA_URL=... TIZADA_LLAVE=... node cliente.mjs conectores                      (los instaladores)
+//   TIZADA_URL=... TIZADA_LLAVE=... node cliente.mjs conector illustrator            (baja ese instalador)
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 
@@ -48,8 +56,38 @@ export function firmaValida (cuerpo, firma) {
   return LLAVE !== '' && esperada.length === llego.length && timingSafeEqual(esperada, llego)
 }
 
+// ── LA PLANTILLA (Illustrator / CorelDRAW / guía .ai) ──
+/** Pedirla (202 = en cola · 422 = rechazada con alarmas). `pedido` = {referencia, disenos, talles, escala}. */
+export const pedirPlantilla = (pedido) => llamar('POST', '/plantillas', { cuerpo: JSON.stringify(pedido), tipo: 'application/json' })
+export const estadoPlantilla = (ref) => llamar('GET', `/plantillas/${encodeURIComponent(ref)}`)
+
+/** Espera a que el robot la arme (segundos). → el estado «listo» (con `archivos` y `conectores`). */
+export async function esperarPlantilla (ref, { cadaMs = 2000, topeMs = 10 * 60 * 1000 } = {}) {
+  const fin = Date.now() + topeMs
+  for (;;) {
+    const [c, est] = await estadoPlantilla(ref)
+    if (c !== 200) throw new Error(`TIZADA contestó ${c}: ${est.error || ''}`)
+    if (est.estado === 'listo') return est
+    if (est.estado === 'rechazado' || est.estado === 'error') throw Object.assign(new Error(`plantilla ${est.estado}`), { alarmas: est.alarmas })
+    if (Date.now() > fin) throw new Error('la plantilla tardó demasiado')
+    await new Promise((r) => setTimeout(r, cadaMs))
+  }
+}
+
+/** El contenido de UN archivo de la plantilla (Buffer), comprobado contra su sha256. Es lo que su página le
+ *  da a `crear_en_programa.js` (su servidor hace de puente: la llave nunca va al navegador). */
+export async function archivoPlantilla (archivo) {
+  const [c, datos] = await llamar('GET', archivo.descarga.split('/api/externo/v1')[1], { crudo: true })
+  if (c !== 200) throw new Error(`no se pudo bajar «${archivo.nombre}» (${c})`)
+  if (createHash('sha256').update(datos).digest('hex') !== archivo.sha256) throw new Error(`«${archivo.nombre}» llegó incompleto`)
+  return datos
+}
+
+export const conectores = () => llamar('GET', '/conectores')
+export const conector = (clave) => llamar('GET', `/conectores/${encodeURIComponent(clave)}`, { crudo: true })
+
 // ── desde la línea de comandos ──
-const [, , que, arg] = process.argv
+const [, , que, arg, arg2] = process.argv
 if (que) {
   if (!LLAVE) { console.error('falta TIZADA_LLAVE'); process.exit(1) }
   if (que === 'revisar') console.log(await revisar(JSON.parse(await readFile(arg, 'utf8'))))
@@ -59,5 +97,23 @@ if (que) {
     const [, est] = await estado(arg)
     if (est.estado !== 'listo') console.log('todavía no está listo:', est.estado, est.etapa || '')
     else await bajar(est.resultado, arg)
+  } else if (que === 'plantilla' && arg === 'pedir') console.log(await pedirPlantilla(JSON.parse(await readFile(arg2, 'utf8'))))
+  else if (que === 'plantilla' && arg === 'esperar') {
+    const est = await esperarPlantilla(arg2)
+    for (const a of est.archivos) console.log(a.tipo.padEnd(12), a.diseno, a.parte || '', '·', a.nombre)
+    console.log('conectores:', JSON.stringify(est.conectores, null, 1))
+  } else if (que === 'plantilla' && arg === 'bajar') {
+    const est = await esperarPlantilla(arg2)
+    await mkdir(arg2, { recursive: true })
+    for (const a of est.archivos) { await writeFile(`${arg2}/${a.nombre}`, await archivoPlantilla(a)); console.log('OK ', a.tipo, a.nombre) }
+  } else if (que === 'conectores') console.log(JSON.stringify((await conectores())[1], null, 1))
+  else if (que === 'conector') {
+    const [, lista] = await conectores()
+    const c = (lista.conectores || []).find((x) => x.clave === arg)
+    if (!c) { console.error('no existe ese conector:', arg); process.exit(1) }
+    const [st, datos] = await conector(arg)
+    if (st !== 200) { console.error('TIZADA contestó', st); process.exit(1) }
+    await writeFile(c.archivo, datos)
+    console.log('OK', c.archivo, datos.length, 'bytes')
   }
 }

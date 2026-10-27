@@ -2299,6 +2299,24 @@ def _es_privado(prod):
     return bool(p.get("propio")) and bool(p.get("creado_por"))
 
 
+def _archivado(prod, cat=None):
+    """¿Este molde está ARCHIVADO? (pedido del usuario 2026-10-23, MAPA 745). Un molde archivado y sus
+    variables no se pueden usar en un pedido: no aparecen en el pedido, el plan lo frena y la API
+    externa no los publica. En Configuración van a «Archivados», de donde se vuelven a habilitar.
+
+    La COPIA a medida de un pedido (`a_medida.de`) hereda el estado de su plantilla: archivar la
+    bandera tiene que frenar también una copia que ya estaba hecha. Para eso hace falta `cat`."""
+    p = prod or {}
+    if p.get("archivado"):
+        return True
+    _am = p.get("a_medida")
+    _de = _am.get("de") if isinstance(_am, dict) else None
+    if _de and cat is not None:
+        _t = next((x for x in cat.get("productos", []) if x.get("id") == _de), None)
+        return bool(_t and _t.get("archivado"))
+    return False
+
+
 def _puede_ver_molde(prod, u=None):
     """¿Este usuario puede ver este molde? Catálogo = lo ve cualquiera. «Mi artículo» = sólo su
     dueño (o quien tenga `molde.ver_todos`, p. ej. un admin — el permiso dice literalmente
@@ -2584,6 +2602,9 @@ _API_NO_USA_EL_MOLDE = ("/preview", "/descargar_plantilla", "/motor_b", "/prenda
 # El contrato `verificar_permisos_rutas.py` falla si aparece una ruta de escritura nueva que no
 # este ni aca ni entre las que trabajan un molde: la lista no se puede quedar vieja en silencio.
 _API_SIN_MOLDE = {
+    # archivar / volver a habilitar un molde (MAPA 745): pide `molde.archivar` adentro, sobre EL molde
+    # que llega en `id` (con `_guard_id`); exigirle `molde.editar` del molde ACTIVO no tiene sentido
+    "/api/productos/archivar": "dueño",
     # configuracion del sistema (catalogo compartido)
     "/api/catalogo_piezas/agregar": "config.editar",
     "/api/catalogo_piezas/eliminar": "config.editar",
@@ -5794,7 +5815,7 @@ def plantilla_pieza_archivo():
     if not conts:
         return jsonify({"error": "el archivo no tiene ningún contorno dibujado"}), 422
     # Se avisa ACÁ si no trae todos los talles, para no dejar que marque el lugar y recién ahí fallar.
-    _n_talles = 0
+    _talles_m = []
     try:
         pl = _ruta_entrada("plantilla.ai", pid)
         if os.path.exists(pl):
@@ -5804,12 +5825,14 @@ def plantilla_pieza_archivo():
                     return MP._talles_de_plantilla(d)
                 finally:
                     d.close()
-            _n_talles = len(_calcular("talles_de_plantilla", _tl, **_id_plantilla(pid)))
+            _talles_m = list(_calcular("talles_de_plantilla", _tl, **_id_plantilla(pid)) or [])
     except Exception as e:
         _relanzar_calculo(e)
+    # completo = cada talle del molde tiene SU forma (por el nombre de la capa, o por tamaño si no hay capas)
+    _asig, _modo, _faltan = PM.formas_por_talle(conts, _talles_m, _talles_m) if _talles_m else ({}, "", [])
     c = conts[0]
-    return jsonify({"ok": True, "archivo": _nom, "contornos": len(conts), "talles": _n_talles,
-                    "completo": (not _n_talles) or len(conts) >= _n_talles,
+    return jsonify({"ok": True, "archivo": _nom, "contornos": len(conts), "talles": len(_talles_m),
+                    "completo": not _faltan, "por_capa": _modo == "capas", "faltan": _faltan,
                     "w_cm": round(c["w"] / MP.CM, 1), "h_cm": round(c["h"] / MP.CM, 1)})
 
 
@@ -5953,19 +5976,23 @@ def plantilla_pieza_agregar():
                 # 🔴 EL ARCHIVO TIENE QUE TRAER LA PIEZA EN TODOS LOS TALLES. Una pieza de moldería
                 # cambia de forma con el talle: meter la MISMA forma en los 20 sería una pieza que
                 # no escala, y saldría mal cortada en todos menos uno.
-                if len(conts) < len(talles):
-                    return jsonify({"error": f"el archivo trae {len(conts)} contorno/s y el molde tiene "
-                                             f"{len(talles)} {('talles' if len(talles) != 1 else 'talle')}. "
-                                             f"La pieza tiene que venir dibujada en todos los talles, una "
-                                             f"forma por talle (del más chico al más grande).",
+                # 🔴 CADA FORMA A SU TALLE POR EL NOMBRE DE SU CAPA (como viene en el archivo); sin capas
+                # con esos nombres, de menor a mayor área ↔ los talles en el orden del molde
+                # (`PM.formas_por_talle`, MAPA 751).
+                _asig, _modo, _faltan = PM.formas_por_talle(conts, talles, talles)
+                if _faltan:
+                    return jsonify({"error": (f"el archivo no trae la capa de {'los talles' if len(_faltan) != 1 else 'el talle'} "
+                                              f"{', '.join(_faltan)}: cada forma va en la capa con el nombre de su talle.")
+                                    if _modo == "capas" else
+                                    (f"el archivo trae {len(conts)} contorno/s y el molde tiene "
+                                     f"{len(talles)} {('talles' if len(talles) != 1 else 'talle')}. "
+                                     f"La pieza tiene que venir dibujada en todos los talles, una "
+                                     f"forma por talle (en la capa con el nombre de cada talle)."),
                                     "contornos": len(conts), "talles": len(talles)}), 422
-                # De menor a mayor área ↔ los talles en el orden del molde (que va del más chico al
-                # más grande). Si sobran contornos se usan los N más grandes.
-                _orden = sorted(conts[:len(talles)], key=lambda c: c["w"] * c["h"])
                 _ref = (antes.get(guia) or [{}])[0].get("bbox_raw") if antes.get(guia) else None
-                _base0 = _orden[0]["bbox_raw"]
-                for _i, t in enumerate(talles):
-                    _c = _orden[_i]
+                _base0 = _asig[talles[0]]["bbox_raw"]
+                for t in talles:
+                    _c = _asig[t]
                     # cada talle conserva su posición RELATIVA dentro del archivo; el conjunto se
                     # lleva al lugar marcado.
                     _dx = dx - _base0[0] + (_ref[0] if _ref else 0)
@@ -6018,6 +6045,214 @@ def plantilla_pieza_agregar():
         _relanzar_calculo(e)
         traceback.print_exc()
         return jsonify({"error": f"no se pudo guardar la pieza: {e}"}), 422
+
+
+@app.post("/api/plantilla/piezas_cambiar")
+def plantilla_piezas_cambiar():
+    """CAMBIAR PIEZAS DEL MOLDE: forma nueva, mover o AGREGAR formas nuevas, guardado (MAPA 746 y 747).
+
+    Cuerpo: `{pid?, cambios: [...]}`, cada cambio:
+      · `{tipo: "mover"|"reemplazar", pieza_idx, talles: null|[...], dx, dy, archivo?}` — `pieza_idx` = la
+        pieza en el talle GUÍA (la que se tocó); en cada talle se toca su HOMÓLOGA por el registro.
+      · `{tipo: "agregar", archivo, talles: null|[...], por_talle: {talle: {ref, dx, dy}}}` — una forma NUEVA
+        por talle, ubicada respecto de una pieza de referencia de ESE talle (`ref` = su número), así no
+        depende del sistema de coordenadas de la pantalla. Entra al final de la capa de su talle: no
+        renumera a nadie y queda sin nombre (se nombra como cualquier otra).
+      `talles` = en cuáles (null = TODOS; el usuario pidió poder elegir 1, 2, 5…). `dx`/`dy` en MILÍMETROS del
+      visor (Y hacia abajo). `archivo` = el de `/api/plantilla/pieza_archivo`: una forma por talle, del más
+      chico al más grande (todas las del molde, o justo las de los talles elegidos).
+
+    🔴 LA PIEZA CONSERVA TODO (nombre, variables, telas, etiqueta, arte) y LAS CAPAS NO SE TOCAN: se edita EN SU
+    LUGAR del archivo (`editarPiezas.js` ↔ `piezas_molde.editar_piezas`), lo nuevo entra en la capa que ya
+    existe, y nada se guarda si al volver a leer el molde algo que no se tocó cambió (`verificar_edicion`).
+    ⚡ UNA ida y vuelta: la PC que guarda resuelve dónde está cada pieza con SU detección del molde (antes el
+    servidor le pedía tres cálculos seguidos y recién después la edición)."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = _pid_de_request() or _get_active_producto_id()
+    _no = _guard_molde(pid, "molde.editar")
+    if _no: return _no
+    cambios = cuerpo.get("cambios")
+    if not isinstance(cambios, list) or not cambios:
+        return jsonify({"error": "no hay ningún cambio para guardar"}), 400
+    if _es_camino_b(pid):
+        return jsonify({"error": "En un molde con el diseño adentro las piezas no se cambian: re-subí el archivo."}), 409
+    pl_base = _ruta_entrada("plantilla.ai", pid, original=True)
+    pl = OA.ruta_vigente(pl_base)
+    if not os.path.exists(pl):
+        return jsonify({"error": "primero subí el molde"}), 409
+    reg = _cargar("registro_producto.json", pid) or {}
+    try:
+        def _tl():
+            doc = MP._abrir(pl)
+            try:
+                return MP._talles_de_plantilla(doc)
+            finally:
+                doc.close()
+        _tr = (_prod_de(pid) or {}).get("variante_guia") or None
+        # los dos cálculos que hacen falta, JUNTOS (si faltan, un solo 428 con los dos; casi siempre ya
+        # están: son los mismos que pidió el visor al abrir el molde)
+        g._juntar = []
+        try:
+            talles = _calcular("talles_de_plantilla", _tl, _vacio=None, **_id_plantilla(pid))
+            det = _calcular("detectar_piezas", lambda: MP.detectar_piezas(pl, talle_ref=_tr), _vacio=None,
+                            **_id_plantilla(pid), talle_ref=_tr, capas_candidatas=False)
+        finally:
+            _faltan, g._juntar = g._juntar, None
+        if _faltan:
+            return _resp_calcular({"calcular": _faltan[0], "calculos": _faltan, "reenviar": "post"})
+        if not talles:
+            return jsonify({"error": "el molde no tiene talles"}), 422
+        mesa, guia = det["mesa"], det["talle_ref"]
+
+        def _homologas(i):
+            nom = next((n for n, por_t in (reg or {}).items()
+                        if ((por_t or {}).get(guia) or {}).get("pieza_idx") == i), None)
+            if not nom:
+                return {t: i for t in talles}, None
+            return {t: (int(((reg.get(nom) or {}).get(t) or {}).get("pieza_idx"))
+                        if ((reg.get(nom) or {}).get(t) or {}).get("pieza_idx") is not None else None)
+                    for t in talles}, nom
+
+        def _formas(c, objetivo):
+            """`{talle: (forma centrada en (0,0), caja)}` del archivo subido: la de la CAPA con el nombre de cada
+            talle (como viene en el archivo); sin esas capas, una por talle de menor a mayor (`PM.formas_por_talle`)."""
+            _nombre_arch = str(c.get("archivo") or "")
+            if not _nombre_arch or "/" in _nombre_arch or "\\" in _nombre_arch or not _nombre_arch.endswith(".ai"):
+                raise _PlanInvalido(jsonify({"error": "falta el archivo con la forma nueva"}), 400)
+            try:
+                with open(_ruta_entrada(_nombre_arch, pid, original=True) + ".json", encoding="utf-8") as _fh:
+                    conts = json.load(_fh)
+            except Exception:
+                raise _PlanInvalido(jsonify({"error": "volvé a subir el archivo con la forma"}), 409)
+            asig, _modo, _faltan = PM.formas_por_talle(conts, talles, objetivo)
+            if _faltan:
+                if _modo == "capas":
+                    raise _PlanInvalido(jsonify({"error": f"el archivo no trae la capa de {'los talles' if len(_faltan) != 1 else 'el talle'} "
+                                                          f"{', '.join(_faltan)}: cada forma va en la capa con el nombre de su talle."}), 422)
+                raise _PlanInvalido(jsonify({"error": f"el archivo trae {len(conts)} forma/s y elegiste {len(objetivo)} "
+                                                      f"{'talles' if len(objetivo) != 1 else 'talle'}: tiene que venir una "
+                                                      f"forma por talle (en la capa con el nombre de cada talle)."}), 422)
+            out = {}
+            for t, nf in asig.items():
+                b = nf["bbox_raw"]
+                cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+                out[t] = (PM.trasladar_segs(nf["segmentos"], -cx, -cy), [b[0] - cx, b[1] - cy, b[2] - cx, b[3] - cy])
+            return out
+
+        pedidos, tocadas, avisos, n_nuevas = [], set(), [], 0
+        for c in cambios:
+            tipo = str(c.get("tipo") or "")
+            if tipo not in ("reemplazar", "mover", "agregar"):
+                return jsonify({"error": f"cambio desconocido: «{tipo}»"}), 400
+            _pedidos = c.get("talles")
+            objetivo = [t for t in talles if (not _pedidos) or t in set(map(str, _pedidos))]
+            if not objetivo:
+                return jsonify({"error": "ninguno de los talles elegidos está en el molde"}), 400
+            if tipo == "agregar":
+                pt = c.get("por_talle") or {}
+                formas = _formas(c, objetivo)
+                for t in objetivo:
+                    r = pt.get(t)
+                    if not isinstance(r, dict) or r.get("ref") is None:
+                        return jsonify({"error": f"falta dónde va la forma nueva en el talle {t}"}), 400
+                    f_, caja = formas[t]
+                    pedidos.append({"talle": t, "tipo": "agregar", "ref": int(r["ref"]), "forma": f_, "caja": caja,
+                                    "dx": float(r.get("dx") or 0) * (MP.CM / 10.0),
+                                    "dy": -float(r.get("dy") or 0) * (MP.CM / 10.0)})
+                    n_nuevas += 1
+                continue
+            if c.get("pieza_idx") is None:
+                return jsonify({"error": "falta indicar qué pieza"}), 400
+            i = int(c["pieza_idx"])
+            hom, nom = _homologas(i)
+            if nom is None and len(objetivo) > 1:
+                avisos.append(f"la pieza #{i + 1} todavía no tiene nombre: se tomó la del mismo número en cada talle")
+            dx = float(c.get("dx") or 0) * (MP.CM / 10.0)
+            dy = -float(c.get("dy") or 0) * (MP.CM / 10.0)        # el visor manda mm con la Y para ABAJO
+            formas = _formas(c, objetivo) if tipo == "reemplazar" else {}
+            for t in objetivo:
+                j = hom.get(t)
+                if j is None:
+                    return jsonify({"error": f"la pieza no está en el talle {t}"}), 422
+                if (t, j) in tocadas:
+                    return jsonify({"error": f"la pieza {j + 1} del talle {t} tiene dos cambios: dejá uno solo"}), 409
+                tocadas.add((t, j))
+                p = {"talle": t, "tipo": tipo, "idx": j, "dx": dx, "dy": dy}
+                if tipo == "reemplazar":
+                    p["forma"], p["caja"] = formas[t]
+                pedidos.append(p)
+
+        # ── SE ESCRIBE: lo hace la PC (resuelve, edita y verifica antes de devolver); con «el servidor no
+        # calcula» apagado, el gemelo de Python sobre un temporal que recién pasa a versión si verifica ──
+        def _local():
+            import uuid as _uuid
+            antes = PM.detectar_por_talle(pl, mesa, talles)
+            eds, esperado = PM.resolver_ediciones(antes, pedidos)
+            tmp = os.path.join(ENTRADA, pid, f"calc_{_uuid.uuid4().hex[:10]}.pdf")
+            PM.editar_piezas(pl_base, eds, mesa=mesa, destino=tmp)
+            despues = PM.detectar_por_talle(tmp, mesa, talles)
+            mal = PM.verificar_edicion(antes, despues, esperado)
+            if mal:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise ValueError("no se guardó nada: " + "; ".join(mal[:3]))
+            dest = _version_plantilla_desde(pid, tmp)
+            out = []
+            for x in esperado:
+                d_ = despues[x["talle"]][x["idx"]]
+                a_ = (antes.get(x["talle"]) or [None] * (x["idx"] + 1))[x["idx"]] if not x.get("nueva") else None
+                out.append({"talle": x["talle"], "idx": x["idx"], "nueva": bool(x.get("nueva")), "w": d_["w"], "h": d_["h"],
+                            "bbox_mu": d_["bbox_mu"], "bbox_raw": d_["bbox_raw"],
+                            "antes_mu": (a_ or {}).get("bbox_mu"), "antes_raw": (a_ or {}).get("bbox_raw")})
+            return {"tocadas": out, "__destino__": dest}
+        _r = _calcular("editar_piezas", _local, **_id_plantilla(pid), pedidos=pedidos, mesa=mesa, talles=talles)
+        destino = _r.get("__destino__") or _version_plantilla_desde(pid, _r.get("__archivo__"))
+
+        # ── EL REGISTRO: la pieza es la misma (mismo número): cambian su tamaño y su caja, y si se corrió, el
+        # ancla del texto que traía el molde. Variables, telas, arte y etiqueta van por nombre/id: no se tocan.
+        # Una forma NUEVA entra sin nombre (como al agregar una pieza). ──
+        reg2 = copy.deepcopy(reg)
+        _por = {(p["talle"], p.get("idx")): p for p in pedidos if p["tipo"] != "agregar"}
+        for x in (_r.get("tocadas") or []):
+            if x.get("nueva"):
+                continue
+            t, j = x["talle"], int(x["idx"])
+            p = _por.get((t, j)) or {}
+            am, ar = x.get("antes_mu"), x.get("antes_raw")
+            for _nom, por_t in reg2.items():
+                inf = (por_t or {}).get(t)
+                if not isinstance(inf, dict) or inf.get("pieza_idx") is None or int(inf["pieza_idx"]) != j:
+                    continue
+                if x.get("w"):
+                    inf["w_cm"] = round(float(x["w"]) / MP.CM, 1)
+                    inf["h_cm"] = round(float(x["h"]) / MP.CM, 1)
+                if x.get("bbox_mu"):
+                    inf["bbox_mu"] = [round(float(v), 2) for v in x["bbox_mu"]]
+                if isinstance(inf.get("ancla"), dict) and am and ar and (p.get("dx") or p.get("dy")):
+                    _u = (am[2] - am[0]) / ((ar[2] - ar[0]) or 1)       # unidades del visor por unidad cruda
+                    inf["ancla"]["x"] = round(float(inf["ancla"].get("x", 0)) + float(p.get("dx") or 0) * _u, 1)
+                    inf["ancla"]["y"] = round(float(inf["ancla"].get("y", 0)) - float(p.get("dy") or 0) * _u, 1)
+        if reg2 != reg:
+            _guardar_registro(pid, reg2)
+        if n_nuevas:
+            try:
+                _regenerar_piezas_index(pid)
+            except Exception as e:
+                print(f"[piezas_cambiar] no se pudo refrescar piezas.json: {e}")
+        _invalidar_cache_molde(pid)
+        LOG.info("molde", f"Piezas del molde: {len(cambios)} cambio/s, {len(pedidos)} pieza/s en total",
+                 molde=pid, version=os.path.basename(destino))
+        return jsonify({"ok": True, "cambios": len(cambios), "piezas": len(pedidos), "nuevas": n_nuevas,
+                        "talles": len({p["talle"] for p in pedidos}), "version": os.path.basename(destino),
+                        "sello": _sello_archivo(destino), "avisos": avisos[:10]})
+    except _PlanInvalido as e:
+        return e.resp, e.code
+    except Exception as e:
+        _relanzar_calculo(e)
+        traceback.print_exc()
+        return jsonify({"error": f"no se pudieron guardar los cambios: {e}"}), 422
 
 
 def _migrar_nombres_pieza(pid, ren):
@@ -11726,6 +11961,15 @@ def _plan_del_pedido(cuerpo):
     _cruz = _talles_cruzados([str(x) for x in pids], prendas, cat)
     if _cruz:
         raise _PlanInvalido(jsonify(_cruz), 409)
+    # 🔴 UN MOLDE ARCHIVADO NO SE USA (MAPA 745). La pantalla ya no lo ofrece; esto frena un pedido que
+    # quedó abierto desde antes de archivarlo, al robot y a quien pegue a la API directo.
+    _arch = [p for p in cat.get("productos", []) if p.get("id") in {str(x) for x in pids} and _archivado(p, cat)]
+    if _arch:
+        raise _PlanInvalido(jsonify({
+            "error": f"El molde «{_arch[0].get('nombre')}» está archivado: no se puede usar en un pedido. "
+                     f"Sacalo del pedido, o pedile a quien tenga el permiso que lo vuelva a habilitar "
+                     f"(Configuración › Moldería › Archivados).",
+            "archivados": [p.get("id") for p in _arch]}), 409)
     grupos_cfg = cat.get("grupos_tizada", [])
     def _grupo_de(_pid):
         for gr in grupos_cfg:
@@ -14878,6 +15122,10 @@ def get_productos():
             # `efimero` = se subió para UN pedido y no queda guardado (ver MOLDE_CON_DISENO.md).
             "origen": p.get("origen") or "molde",
             "efimero": bool(p.get("efimero")),
+            # ARCHIVADO (MAPA 745): `{cuando, por, por_nombre}` o None. NO se filtra acá: Configuración lo
+            # necesita para la sección «Archivados»; el pedido lo saca de sus listas y el plan lo frena.
+            # La copia a medida de un pedido hereda el de su plantilla (`_archivado`).
+            "archivado": (p.get("archivado") or ({"de_plantilla": True} if _archivado(p, cat) else None)),
             # MOLDE A MEDIDA (MAPA 623): `{pieza, margen, ancho_m, alto_m, variable[, de]}` — con `de`
             # es la copia de un pedido; sin `de`, la plantilla del catálogo. None = molde normal.
             "a_medida": _a_medida_publico(p, cat),
@@ -14966,6 +15214,9 @@ def productos_diagnostico():
                       if _prop else
                       "Es el «Mi artículo» de OTRO: lo ves por «molde.ver_todos», pero no va ni en "
                       "Configuración ni en tu catálogo.")
+        elif _archivado(p, cat):
+            motivo = ("ARCHIVADO: no aparece en el pedido ni se puede usar; está en Configuración › Moldería › "
+                      "Archivados, de donde se vuelve a habilitar.")
         else:
             motivo = "Del sistema: se ve en Configuración y su variable en el catálogo del pedido."
         out.append({
@@ -14975,6 +15226,7 @@ def productos_diagnostico():
             "personal": _priv, "propio": _prop, "de_otro": _deotro,
             "lo_ves": _ver,
             "aparece_en_configuracion": _ver and not _priv,
+            "archivado": _archivado(p, cat),
             "aparece_en_mis_articulos": _ver and _prop,
             "variables_con_piezas": sum(1 for v in (p.get("variantes") or [])
                                         if any(x.get("pieza_idx") is not None for x in (v.get("valores") or []))),
@@ -15013,7 +15265,7 @@ _AM_MIN_M, _AM_MAX_M = 0.05, 50.0
 _AM_NO_COPIAR = {"id", "nombre", "creado", "creado_por", "alta_por", "propio", "efimero", "efimero_visto",
                  "variantes", "grupos", "conjuntos", "variante_guia", "disenos", "mapeo_arte", "editables",
                  "origen", "paginas_navegador", "a_medida", "talles", "piezas_registradas",
-                 "piezas_nombradas", "plantilla"}
+                 "piezas_nombradas", "plantilla", "archivado"}
 
 
 def _clave_var_a_medida(pid):
@@ -15186,6 +15438,8 @@ def _a_medida_crear(cuerpo, cat, pid_nuevo):
         tpl = next((p for p in cat.get("productos", []) if p.get("id") == de), None)
         if not tpl or not isinstance(tpl.get("a_medida"), dict) or tpl["a_medida"].get("de"):
             return None, None, ("Ese molde no es un molde a medida.", 400)
+        if tpl.get("archivado"):          # MAPA 745: archivado no se usa (pantalla y robot pasan por acá)
+            return None, None, (f"«{tpl.get('nombre')}» está archivado: no se puede usar en un pedido.", 409)
         if not cuerpo.get("efimero"):
             return None, None, ("La copia a medida es del pedido (efímera).", 400)
         an, al = _metros(cuerpo.get("ancho_m")), _metros(cuerpo.get("alto_m"))
@@ -15743,6 +15997,15 @@ def activar_producto():
     # del catálogo para trabajar. Alcanza con que lo pueda VER.
     _no = _guard_id(cuerpo, permiso=None)
     if _no: return _no          # molde de otro usuario
+    # un molde ARCHIVADO no se trabaja (MAPA 745): primero se vuelve a habilitar
+    try:
+        _cat_a = _cargar_catalogo()
+        _pa = next((p for p in _cat_a.get("productos", []) if p.get("id") == pid), None)
+        if _pa is not None and _archivado(_pa, _cat_a):
+            return jsonify({"error": f"«{_pa.get('nombre')}» está archivado: volvé a habilitarlo en "
+                                     f"Configuración › Moldería › Archivados para usarlo."}), 409
+    except Exception:
+        pass
     # ⚡ YA ESTÁ ACTIVO → NO SE ESCRIBE NADA (MAPA 664). La pantalla lo pide varias veces seguidas (4 en 2 s al
     # cambiar de diseño) y cada una tomaba el candado del catálogo y lo guardaba ENTERO en la base: el alta de la
     # copia a medida esperaba su turno («catálogo 2,9 s» de un guardado que tarda 0,2). Sólo se anota la sesión.
@@ -15890,6 +16153,43 @@ def eliminar_producto():
     # Fuera del candado: los archivos y la base (lo que tarda).
     _borrar_archivos_y_base(pid)
     return jsonify({"ok": True})
+
+
+@app.post("/api/productos/archivar")
+def archivar_producto():
+    """ARCHIVAR o VOLVER A HABILITAR un molde (pedido del usuario 2026-10-23, MAPA 745): `{id, archivar}`.
+
+    Archivado, ni el molde ni sus variables se usan en un pedido: no aparecen en el pedido, el plan lo
+    frena (`_archivado` en `_plan_del_pedido`) y la API externa no los publica. En Configuración pasan a
+    «Archivados». NO SE BORRA NADA: volver a habilitarlo lo deja exactamente como estaba (piezas,
+    variables, artes, configuración). Va con su propio permiso, `molde.archivar`: lo tiene el admin y a
+    otro rol se lo da el usuario a mano. Sólo moldes del CATÁLOGO: un «Mi artículo» o la copia de un
+    pedido no se archivan (no están en Configuración)."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = str(cuerpo.get("id") or "")
+    if not pid:
+        return jsonify({"error": "Falta el molde."}), 400
+    _no = _guard_id(cuerpo, permiso="molde.archivar")
+    if _no: return _no          # molde de otro usuario / sin permiso
+    archivar = bool(cuerpo.get("archivar", True))
+    _u = _usuario_actual() or {}
+    cat = _cargar_catalogo_para_editar()
+    prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
+    if prod is None:
+        return jsonify({"error": "Ese molde ya no existe."}), 404
+    _am = prod.get("a_medida")
+    if _es_privado(prod) or prod.get("efimero") or (isinstance(_am, dict) and _am.get("de")):
+        return jsonify({"error": "Sólo se archivan los moldes del catálogo (Configuración › Moldería)."}), 400
+    if archivar:
+        if not prod.get("archivado"):
+            prod["archivado"] = {"cuando": time.time(), "por": _u.get("id"),
+                                 "por_nombre": _u.get("nombre") or _u.get("usuario")}
+    else:
+        prod.pop("archivado", None)
+    _guardar_catalogo(cat)
+    LOG.info("molde", ("Molde archivado" if archivar else "Molde habilitado de nuevo") + f": {prod.get('nombre')}",
+             molde=pid, por=_u.get("usuario"))
+    return jsonify({"ok": True, "id": pid, "archivado": prod.get("archivado")})
 
 
 @app.post("/api/productos/renombrar")
@@ -16681,9 +16981,10 @@ def moldes_para_bajar():
     except Exception:
         _u = None
     moldes = []
-    for p in _cargar_catalogo().get("productos", []):
-        if not _puede_ver_molde(p, _u):
-            continue
+    _cat_b = _cargar_catalogo()
+    for p in _cat_b.get("productos", []):
+        if not _puede_ver_molde(p, _u) or _archivado(p, _cat_b):
+            continue                     # (un archivado no se usa: no hace falta tenerlo en la PC)
         pid = p["id"]
         # sin `_ruta_entrada` para mirar si existe: ésa hace makedirs y esto es un GET
         if not os.path.exists(os.path.join(ENTRADA, pid, "plantilla.ai")):

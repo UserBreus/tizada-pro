@@ -718,6 +718,132 @@ def main():
         ok("molde-repetido" in cods, f"dos variables de la misma prenda en un diseño: frena ({cods})")
         c, cods, r = codigos(_dis({"variable": "v_no_existe", "tela": "44"}))
         ok("variable-desconocida" in cods, f"una variable que no existe: variable-desconocida ({cods})")
+
+        # ── 10 · «CREAR EN ILLUSTRATOR / CORELDRAW» DESDE EL OTRO SISTEMA + LOS CONECTORES (2026-10-27) ──
+        # El usuario preguntó si la API entregada sirve para el botón de mandar a crear la plantilla en
+        # Illustrator o Corel y si deja bajar la extensión: se recorre de punta a punta, como lo haría el otro sistema.
+        print("\n10 · PLANTILLA PARA ILLUSTRATOR / CORELDRAW + LOS CONECTORES (la extensión)")
+        def _bajar(ruta):
+            rq = urllib.request.Request(base + ruta, headers={"X-Api-Key": llave})
+            try:
+                with urllib.request.urlopen(rq, timeout=120) as rr:
+                    return rr.status, rr.read(), rr.headers.get("Content-Disposition") or ""
+            except urllib.error.HTTPError as e:
+                return e.code, b"", ""
+        c, d = _http("POST", api + "/plantillas", llave=llave, tipo="application/json", cuerpo=json.dumps({
+            "referencia": "PL-PRUEBA", "disenos": [{"nombre": "JUGADOR", "variables": ["v_redondo"]}],
+            "talles": {"modo": "todos"}, "escala": 100}).encode())
+        ok(c == 202, f"POST /plantillas la pone en cola ({c} {d.get('alarmas') or ''})")
+        c, _ = _http("POST", api + "/plantillas", tipo="application/json", cuerpo=b"{}")
+        ok(c == 401, f"/plantillas pide la llave ({c})")
+        rr = _correr_robot(base)
+        c, est = _http("GET", api + "/plantillas/PL-PRUEBA", llave=llave)
+        tipos = {a.get("tipo"): a for a in est.get("archivos") or []}
+        ok(c == 200 and est.get("estado") == "listo" and {"illustrator", "corel", "guia"} <= set(tipos),
+           f"el robot la arma: archivos de Illustrator, CorelDRAW y la guía .ai ({est.get('estado')}, {sorted(tipos)}"
+           f"{'' if est.get('estado') == 'listo' else ' · ' + (rr.stdout or '')[-400:] + (rr.stderr or '')[-400:]})")
+        _dir_pl = os.path.join(_TMP, "plantilla_bajada")
+        os.makedirs(_dir_pl, exist_ok=True)
+        for tp in ("illustrator", "corel"):
+            a = tipos.get(tp) or {}
+            c, cuerpo, _ = _bajar(a.get("descarga") or "/x")
+            try:
+                plan = json.loads(cuerpo.decode("utf-8"))
+            except Exception:
+                plan = None
+            ok(c == 200 and isinstance(plan, dict) and hashlib.sha256(cuerpo).hexdigest() == a.get("sha256"),
+               f"el archivo de {tp} se baja entero (el JSON que va tal cual a POST http://127.0.0.1:{47850 if tp == 'illustrator' else 47851}/plantilla) ({c})")
+            if c == 200:
+                with open(os.path.join(_dir_pl, a["nombre"]), "wb") as fh:
+                    fh.write(cuerpo)
+        _vc = {x["clave"]: x["version"] for x in (_http("GET", api + "/conectores", llave=llave)[1].get("conectores") or [])}
+        _ce = est.get("conectores") or {}
+        ok(all((_ce.get(p) or {}).get("version") == _vc.get(p) and (_ce.get(p) or {}).get("crear", "").startswith("http://127.0.0.1:")
+               and (_ce.get(p) or {}).get("tipo_archivo") == p for p in ("illustrator", "corel")),
+           f"TIZADA dice CÓMO se crea: a dónde va cada archivo y qué versión de conector corresponde ({ {p: (_ce.get(p) or {}).get('version') for p in _ce} })")
+
+        # EL CÓDIGO QUE SE LE ENTREGA (`codigo/crear_en_programa.js`) corrido de verdad contra un conector DE PRUEBA
+        # (otro puerto: nunca el Illustrator o el Corel de esta computadora). Tiene que llegarle el plan TAL CUAL.
+        class _ConectorFalso(http.server.BaseHTTPRequestHandler):
+            recibidos, previos, programa = [], [], "illustrator"
+            def log_message(self, *a):
+                pass
+            def _resp(self, codigo, obj):
+                b = json.dumps(obj).encode()
+                self.send_response(codigo)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+            def do_OPTIONS(self):
+                type(self).previos.append(self.path)
+                self._resp(204, {})
+            def do_GET(self):
+                if self.path.startswith("/estado"):
+                    d = {"app": "TIZADA PRO", "version": "0.0.1"}
+                    if type(self).programa == "corel":
+                        d["programa"] = "corel"
+                    return self._resp(200, d)
+                self._resp(404, {"ok": False, "error": "no existe"})
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                cuerpo = self.rfile.read(n)
+                type(self).recibidos.append((self.path, self.headers.get("Content-Type"), cuerpo))
+                self._resp(200, {"ok": True, "mesas": 7, "archivo": f"prueba_{len(type(self).recibidos)}.ai"})
+        _est_json = os.path.join(_TMP, "estado_plantilla.json")
+        with open(_est_json, "w", encoding="utf-8") as fh:
+            json.dump(est, fh)
+        for tp in ("illustrator", "corel"):
+            _ConectorFalso.recibidos, _ConectorFalso.previos, _ConectorFalso.programa = [], [], tp
+            _pc = _puerto()
+            _sv = http.server.ThreadingHTTPServer(("127.0.0.1", _pc), _ConectorFalso)
+            threading.Thread(target=_sv.serve_forever, daemon=True).start()
+            _sal = os.path.join(_TMP, f"crear_{tp}.json")
+            try:
+                _rn = subprocess.run(["node", os.path.join(AQUI, "frontend", "src", "motor", "pruebas", "crear_en_programa.mjs"),
+                                      _est_json, _dir_pl, f"http://127.0.0.1:{_pc}", tp, "JUGADOR", _sal],
+                                     cwd=AQUI, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+            finally:
+                _sv.shutdown()
+            try:
+                res = json.load(open(_sal, encoding="utf-8"))
+            except Exception:
+                res = {"error": (_rn.stderr or "")[-500:]}
+            _esperados = sorted((x for x in est["archivos"] if x["tipo"] == tp and x["diseno"] == "JUGADOR"),
+                                key=lambda x: int(str(x.get("parte") or "1").split()[0]))
+            _bytes_esp = [open(os.path.join(_dir_pl, x["nombre"]), "rb").read() for x in _esperados]
+            ok(res.get("ok") and [r_[2] for r_ in _ConectorFalso.recibidos] == _bytes_esp
+               and all(r_[0] == "/plantilla" and r_[1] == "application/json" for r_ in _ConectorFalso.recibidos),
+               f"crear_en_programa.js le manda al conector de {tp} el plan de TIZADA TAL CUAL, en orden "
+               f"({len(_ConectorFalso.recibidos)} archivo/s, {res.get('mesas')} mesas{'' if res.get('ok') else ' · ' + str(res.get('error'))})")
+            ok(any("versión nueva del conector" in x for x in res.get("avisos") or []),
+               f"avisa que hay una versión nueva del conector, como el botón de TIZADA ({res.get('avisos')})")
+            ok(res.get("sinConector") is None, "sin conector en esa computadora, `buscarConector` da null")
+        c, cuerpo, _ = _bajar((tipos.get("guia") or {}).get("descarga") or "/x")
+        ok(c == 200 and cuerpo[:4] in (b"%PDF", b"%!PS"), f"la guía .ai se baja y es un archivo de Illustrator ({c}, {cuerpo[:12]!r})")
+        ok(all(k in (est.get("como_usar") or {}) for k in ("illustrator", "corel", "guia", "conectores")),
+           "la respuesta dice cómo usar cada archivo y dónde están los conectores")
+
+        c, d = _http("GET", api + "/conectores", llave=llave)
+        cons = {x["clave"]: x for x in d.get("conectores") or []}
+        ok(c == 200 and {"illustrator", "illustrator-mac", "corel"} <= set(cons),
+           f"GET /conectores lista los instaladores: Illustrator (Windows y Mac) y CorelDRAW ({sorted(cons)})")
+        c, _ = _http("GET", api + "/conectores")
+        ok(c == 401, f"/conectores pide la llave ({c})")
+        for k, firma, que in (("illustrator", b"MZ", "un .exe de Windows"), ("corel", b"MZ", "un .exe de Windows"),
+                              ("illustrator-mac", b"PK", "un .zip con la extensión")):
+            c, cuerpo, disp = _bajar((cons.get(k) or {}).get("descarga") or "/x")
+            ok(c == 200 and cuerpo[:2] == firma and (cons.get(k) or {}).get("archivo", "") in disp,
+               f"el conector «{k}» se baja ({que}, {len(cuerpo) // 1024} KB, {(cons.get(k) or {}).get('archivo')})")
+        if cons.get("illustrator-mac"):
+            c, cuerpo, _ = _bajar(cons["illustrator-mac"]["descarga"])
+            with zipfile.ZipFile(io.BytesIO(cuerpo)) as z:
+                nombres = z.namelist()
+            ok(any(n.endswith("CSXS/manifest.xml") for n in nombres) and any(n.endswith("INSTALAR-MAC.command") for n in nombres),
+               "el .zip de Mac trae la extensión (manifiesto) y su instalador")
+        c, _ = _http("GET", api + "/conectores/no-existe", llave=llave)
+        ok(c == 404, f"un conector que no existe: 404 ({c})")
     finally:
         VT._DOCS["catalogo"] = cat0
 

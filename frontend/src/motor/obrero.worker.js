@@ -291,6 +291,30 @@ const TAREAS = {
         const r = H.agregarPieza(mupdf, bytes, args.colocaciones || {}, args.mesa || 1)
         return { valor: { bytes: r.bytes, resultado_json: CA.aTextoJSON({ puestos: r.puestos }) }, transfer: [r.bytes.buffer] }
       }
+      if (fn === 'editar_piezas') {
+        // REEMPLAZAR / MOVER piezas EN SU LUGAR (MAPA 746) y VERIFICAR antes de devolver nada: si alguna
+        // pieza que no se tocó cambió de número o de lugar, se rechaza y el molde queda como estaba
+        const E = await import('./molde/editarPiezas.js')
+        const mesa = args.mesa || 1, talles = args.talles || []
+        const orig = abrirTemp(bytes.slice())
+        let antes
+        try { antes = H.detectarPorTalle(orig, mesa, talles) } finally { orig.destroy() }
+        // lo pedido (pieza por su número en cada talle) → ediciones con las cajas de ESTA detección
+        const { ediciones, esperado } = E.resolverEdiciones(antes, args.pedidos || [])
+        const r = E.editarPiezas(mupdf, bytes, ediciones, mesa)
+        const nuevo = abrirTemp(r.bytes.slice())
+        let despues
+        try { despues = H.detectarPorTalle(nuevo, mesa, talles) } finally { nuevo.destroy() }
+        const mal = E.verificarEdicion(antes, despues, esperado)
+        if (mal.length) throw new Error('no se guardó nada: ' + mal.slice(0, 3).join('; '))
+        const tocadas = esperado.map((x) => {
+          const c = (despues[x.talle] || [])[x.idx] || {}
+          const a = (antes[x.talle] || [])[x.idx] || {}
+          return { talle: x.talle, idx: x.idx, nueva: !!x.nueva, w: c.w, h: c.h, bbox_mu: c.bbox_mu, bbox_raw: c.bbox_raw,
+                   antes_mu: a.bbox_mu || null, antes_raw: a.bbox_raw || null }
+        })
+        return { valor: { bytes: r.bytes, resultado_json: CA.aTextoJSON({ tocadas }) }, transfer: [r.bytes.buffer] }
+      }
       if (fn === 'renombrar_y_alta') {
         const r = H.renombrarCapas(mupdf, bytes, args.mapa || {})
         const nuevo = abrirTemp(r.bytes.slice())

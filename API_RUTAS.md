@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **189 endpoints**. Generado automáticamente del código.
+Total: **191 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -138,6 +138,7 @@ Total: **189 endpoints**. Generado automáticamente del código.
 | GET | `/api/productos/<pid>/editables_datos` | Los DATOS de los editables de un diseño para que el navegador arme la lista del editor (`motor/arte/editablesVista.js`, 2026-09-22 «el servidor sólo s | q: diseno, variante |
 | POST | `/api/productos/a_medida` | Cambia la configuración de un molde a medida: el margen (plantilla), o la MEDIDA (antes de rehacer su archivo). Al cambiar la medida cambia el nombre  | body: alto_m, ancho_m, id, margen |
 | POST | `/api/productos/acomodo_illustrator` | Guarda cómo acomodó el usuario A MANO las mesas de trabajo del talle guía para «Crear en Illustrator» (pedido del usuario 2026-09-23: «acomodar 1 para | body: acomodo, clave, id |
+| POST | `/api/productos/archivar` | ARCHIVAR o VOLVER A HABILITAR un molde (pedido del usuario 2026-10-23, MAPA 745): `{id, archivar}`. Archivado, ni el molde ni sus variables se usan en | body: archivar, id |
 
 ## Plantilla (molde)
 
@@ -166,6 +167,7 @@ Total: **189 endpoints**. Generado automáticamente del código.
 | POST | `/api/plantilla/paginas` | FASE B del molde que prepara el navegador: las páginas por talle, la decisión de la etiqueta y los JSON completos, sobre el molde que ya se guardó en  | file: paquete |
 | POST | `/api/plantilla/paginas/latido` | La pestaña que prepara la FASE B avisa que sigue viva (cada 15 s). Sólo toca la fecha de la marca de pendientes: si no hay marca (ya terminó, o el mol | body: pid |
 | POST | `/api/plantilla/pdf_guia` | PDF imprimible con el molde de guía + el recuadro de medida y el nombre de cada pieza, según el modo elegido en el visor (default / rango / talle). | q: capas, config, datos, editables, formato, guia, limpio, piezas, rango, talle, talles |
+| POST | `/api/plantilla/piezas_cambiar` | REEMPLAZAR LA FORMA de piezas o MOVERLAS, guardado (pedido del usuario 2026-10-23, MAPA 746). Cuerpo: `{pid?, cambios: [{tipo: "reemplazar"|"mover", p | body: cambios |
 
 ## Variables / Modelos / Grupos
 

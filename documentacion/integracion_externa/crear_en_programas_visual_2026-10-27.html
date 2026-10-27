@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Crear la plantilla en Illustrator o CorelDRAW</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --cian: #00b8d4; --mag: #d6007e; --ama: #f5b800; --ver: #10a36b; --roj: #e0443a; --tin: #16202a; --gris: #5b6875; --cla: #eef3f6;
+          --ilu: #ff9a00; --ilu-f: #330000; --cor: #10a36b; }
+  @page { size: A4 landscape; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Inter', 'Segoe UI', sans-serif; color: var(--tin); }
+  .pag { width: 297mm; height: 210mm; padding: 14mm 16mm; position: relative; overflow: hidden; break-after: page; background: #fff; }
+  .pag:last-child { break-after: auto; }
+  h1 { font-size: 28pt; font-weight: 900; margin: 0 0 2.5mm; letter-spacing: -0.5px; }
+  h1 .n { display: inline-flex; width: 13mm; height: 13mm; border-radius: 4mm; align-items: center; justify-content: center; color: #fff; font-size: 20pt; margin-right: 4mm; vertical-align: 3px; }
+  .sub { font-size: 13pt; color: var(--gris); margin: 0 0 7mm; }
+  code { font-variant-ligatures: none; white-space: nowrap; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 10pt; background: var(--cla); padding: 1px 6px; border-radius: 6px; color: #0b5d6b; font-weight: 700; }
+  pre { font-variant-ligatures: none; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 9.6pt; line-height: 1.5; background: #0f1720; color: #d7e3ee; border-radius: 5mm; padding: 5mm 6mm; margin: 0; white-space: pre; }
+  pre .k { color: #ff7ab8; } pre .s { color: #8ee6a8; } pre .c { color: #6f8296; } pre .f { color: #4fe0ff; }
+  .pie { position: absolute; bottom: 7mm; left: 16mm; right: 16mm; font-size: 8.5pt; color: #9aa7b3; display: flex; justify-content: space-between; }
+  /* portada */
+  .portada { background: radial-gradient(circle at 85% 15%, rgba(255,154,0,.55), transparent 40%), radial-gradient(circle at 10% 95%, rgba(16,163,107,.55), transparent 45%), linear-gradient(160deg, #0b1118, #111b26 60%, #0b1118); color: #fff; padding: 26mm 24mm; }
+  .portada h1 { font-size: 44pt; line-height: 1.06; margin-top: 16mm; }
+  .portada h1 .i { color: #ffb23f; } .portada h1 .c { color: #47e0a0; }
+  .portada .sub { color: #c9d6e2; font-size: 16pt; }
+  .portada .marca { letter-spacing: .3em; font-weight: 800; opacity: .85; }
+  .portada .marca span { color: #3fe3ff; }
+  .big { display: flex; gap: 8mm; margin-top: 14mm; }
+  .big div { border: 1px solid rgba(255,255,255,.3); border-radius: 6mm; padding: 6mm 8mm; }
+  .big b { display: block; font-size: 30pt; color: #3fe3ff; }
+  .big span { color: #c9d6e2; font-size: 11pt; }
+  /* tarjetas */
+  .fila { display: grid; gap: 6mm; }
+  .f2 { grid-template-columns: 1fr 1fr; } .f3 { grid-template-columns: repeat(3, 1fr); } .f4 { grid-template-columns: repeat(4, 1fr); }
+  .vis { border-radius: 5mm; background: #f6f9fb; border: 1.5px solid #e1e8ee; padding: 5mm; display: flex; flex-direction: column; align-items: center; gap: 3mm; text-align: center; }
+  .vis svg { width: 100%; height: 40mm; }
+  .vis .t { font-size: 13pt; font-weight: 800; }
+  .vis .d { font-size: 10pt; color: var(--gris); line-height: 1.35; }
+  .chips { display: flex; flex-wrap: wrap; gap: 3mm; }
+  .chip { border-radius: 99px; padding: 2.2mm 4.5mm; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; font-weight: 700; border: 1.5px solid; }
+  .chip.r { background: #fdeceb; color: #b3261e; border-color: #f4b9b4; }
+  .chip.v { background: #e7f7f0; color: #0b6b45; border-color: #b0e2cb; }
+  .chip.a { background: #fff7dc; color: #7a5a00; border-color: #f4e09a; }
+  .lado { display: grid; grid-template-columns: 1fr 1.25fr; gap: 8mm; align-items: start; }
+  .paso { display: flex; gap: 4mm; align-items: flex-start; margin-bottom: 5mm; }
+  .paso .b { flex: none; width: 10mm; height: 10mm; border-radius: 3mm; color: #fff; font-weight: 900; display: flex; align-items: center; justify-content: center; font-size: 14pt; }
+  .paso .x { font-size: 12pt; line-height: 1.35; padding-top: 1.5mm; }
+  .paso .x small { display: block; color: var(--gris); font-size: 10pt; margin-top: 1mm; }
+  .check { display: flex; gap: 4mm; align-items: center; border-radius: 5mm; border: 1.5px solid #e1e8ee; padding: 4.5mm 5mm; font-size: 12pt; }
+  .check .ok { flex: none; width: 9mm; height: 9mm; border-radius: 99px; background: var(--ver); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 900; }
+  .check .no { flex: none; width: 9mm; height: 9mm; border-radius: 99px; background: var(--roj); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 900; }
+</style>
+</head>
+<body>
+
+<!-- 1 · PORTADA -->
+<div class="pag portada">
+  <div class="marca">TIZADA <span>PRO</span></div>
+  <h1>Crear la plantilla en<br><span class="i">Illustrator</span> o <span class="c">CorelDRAW</span><br>desde su sistema</h1>
+  <div class="sub">Lo mismo que el botón «Crear en Illustrator / CorelDRAW» de TIZADA, ordenado por ustedes.</div>
+  <div class="big">
+    <div><b>3</b><span>pasos</span></div>
+    <div><b>2</b><span>rutas en su servidor + 1 botón en su página</span></div>
+    <div><b>0</b><span>cambios en lo que ya mandan</span></div>
+  </div>
+  <div class="pie" style="color:#7d8e9e"><span>Integración · 27/10/2026</span><span>Detalle: API.md §6.b · código: codigo/crear_en_programa.js y codigo/cliente.mjs</span></div>
+</div>
+
+<!-- 2 · EL MAPA -->
+<div class="pag">
+  <h1><span class="n" style="background:var(--cian)">◎</span>Cómo se une</h1>
+  <div class="sub">TIZADA dice <b>cómo</b> se crea. Su sistema sólo lo lleva hasta el programa.</div>
+  <svg viewBox="0 0 1000 470" style="width:100%;height:132mm">
+    <defs>
+      <marker id="fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#16202a"/></marker>
+      <marker id="fl2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#00b8d4"/></marker>
+    </defs>
+    <!-- nube: internet / servidores -->
+    <rect x="10" y="10" width="980" height="190" rx="22" fill="#f6f9fb" stroke="#e1e8ee" stroke-width="2"/>
+    <text x="30" y="40" font-size="15" font-weight="800" fill="#9aa7b3" letter-spacing="2">INTERNET</text>
+    <!-- TIZADA -->
+    <rect x="60" y="60" width="280" height="120" rx="18" fill="#0f1720"/>
+    <text x="200" y="102" text-anchor="middle" font-size="22" font-weight="900" fill="#fff">TIZADA <tspan fill="#3fe3ff">PRO</tspan></text>
+    <text x="200" y="132" text-anchor="middle" font-size="14" fill="#c9d6e2">arma el plan de la plantilla</text>
+    <text x="200" y="156" text-anchor="middle" font-size="12.5" fill="#7d8e9e" font-family="JetBrains Mono">/api/externo/v1</text>
+    <!-- SU SERVIDOR -->
+    <rect x="640" y="60" width="300" height="120" rx="18" fill="#fff" stroke="#00b8d4" stroke-width="3"/>
+    <text x="790" y="100" text-anchor="middle" font-size="21" font-weight="900" fill="#16202a">SU SERVIDOR</text>
+    <text x="790" y="130" text-anchor="middle" font-size="14" fill="#5b6875">guarda la llave 🔑</text>
+    <text x="790" y="155" text-anchor="middle" font-size="12.5" fill="#0b5d6b" font-family="JetBrains Mono">cliente.mjs</text>
+    <!-- flechas tizada <-> servidor -->
+    <path d="M630 100 H350" stroke="#16202a" stroke-width="3" marker-end="url(#fl)"/>
+    <path d="M350 140 H630" stroke="#16202a" stroke-width="3" marker-end="url(#fl)"/>
+    <circle cx="490" cy="100" r="17" fill="#00b8d4"/><text x="490" y="106" text-anchor="middle" font-size="17" font-weight="900" fill="#fff">1</text>
+    <text x="490" y="78" text-anchor="middle" font-size="13" fill="#0b5d6b" font-family="JetBrains Mono" font-weight="700">POST /plantillas</text>
+    <circle cx="490" cy="140" r="17" fill="#00b8d4"/><text x="490" y="146" text-anchor="middle" font-size="17" font-weight="900" fill="#fff">2</text>
+    <text x="490" y="176" text-anchor="middle" font-size="13" fill="#0b5d6b" font-family="JetBrains Mono" font-weight="700">GET /plantillas/{ref} → plan</text>
+
+    <!-- PC del diseñador -->
+    <rect x="10" y="230" width="980" height="230" rx="22" fill="#fff" stroke="#16202a" stroke-width="2.5" stroke-dasharray="10 7"/>
+    <text x="30" y="262" font-size="15" font-weight="800" fill="#16202a" letter-spacing="2">LA COMPUTADORA DEL DISEÑADOR</text>
+    <!-- su página -->
+    <rect x="640" y="285" width="300" height="140" rx="18" fill="#e8fafd" stroke="#00b8d4" stroke-width="3"/>
+    <rect x="640" y="285" width="300" height="30" rx="14" fill="#00b8d4"/>
+    <circle cx="660" cy="300" r="5" fill="#fff"/><circle cx="676" cy="300" r="5" fill="#fff"/><circle cx="692" cy="300" r="5" fill="#fff"/>
+    <text x="790" y="350" text-anchor="middle" font-size="20" font-weight="900" fill="#16202a">SU PÁGINA</text>
+    <rect x="715" y="365" width="150" height="38" rx="10" fill="#16202a"/>
+    <text x="790" y="390" text-anchor="middle" font-size="14" font-weight="800" fill="#fff">Crear en Illustrator</text>
+    <!-- conector -->
+    <rect x="360" y="300" width="200" height="110" rx="18" fill="#f6f9fb" stroke="#9aa7b3" stroke-width="2.5"/>
+    <text x="460" y="340" text-anchor="middle" font-size="18" font-weight="900" fill="#16202a">CONECTOR</text>
+    <text x="460" y="366" text-anchor="middle" font-size="12.5" fill="#5b6875" font-family="JetBrains Mono">127.0.0.1:47850</text>
+    <text x="460" y="388" text-anchor="middle" font-size="12.5" fill="#5b6875" font-family="JetBrains Mono">127.0.0.1:47851</text>
+    <!-- programas -->
+    <rect x="60" y="290" width="92" height="92" rx="16" fill="#330000"/><text x="106" y="350" text-anchor="middle" font-size="40" font-weight="900" fill="#ff9a00">Ai</text>
+    <rect x="170" y="290" width="92" height="92" rx="16" fill="#10a36b"/><text x="216" y="350" text-anchor="middle" font-size="36" font-weight="900" fill="#fff">Cr</text>
+    <text x="161" y="412" text-anchor="middle" font-size="13" fill="#5b6875">se arma solo · .ai guardado</text>
+    <!-- flechas servidor -> pagina -> conector -> programas -->
+    <path d="M790 190 V275" stroke="#16202a" stroke-width="3" marker-end="url(#fl)"/>
+    <circle cx="790" cy="232" r="17" fill="#00b8d4"/><text x="790" y="238" text-anchor="middle" font-size="17" font-weight="900" fill="#fff">3</text>
+    <path d="M630 355 H570" stroke="#00b8d4" stroke-width="4" marker-end="url(#fl2)"/>
+    <circle cx="600" cy="330" r="17" fill="#00b8d4"/><text x="600" y="336" text-anchor="middle" font-size="17" font-weight="900" fill="#fff">4</text>
+    <path d="M350 340 H275" stroke="#16202a" stroke-width="3" marker-end="url(#fl)"/>
+  </svg>
+  <div class="fila f4" style="margin-top:2mm;font-size:10.5pt;color:var(--gris)">
+    <div><b style="color:var(--tin)">1</b> su servidor pide la plantilla</div>
+    <div><b style="color:var(--tin)">2</b> TIZADA la arma y devuelve el plan</div>
+    <div><b style="color:var(--tin)">3</b> su página lo pide a SU servidor</div>
+    <div><b style="color:var(--tin)">4</b> su página se lo da al conector → el programa</div>
+  </div>
+  <div class="pie"><span>La llave nunca sale de su servidor · el conector sólo escucha en esa computadora</span><span>2 / 6</span></div>
+</div>
+
+<!-- 3 · PASO 0: EL CONECTOR -->
+<div class="pag">
+  <h1><span class="n" style="background:var(--ama)">0</span>Instalar el conector, una vez</h1>
+  <div class="sub">En cada computadora donde se diseña. Doble clic → «Instalar».</div>
+  <div class="fila f3">
+    <div class="vis">
+      <svg viewBox="0 0 200 120"><rect x="55" y="10" width="90" height="90" rx="18" fill="#330000"/><text x="100" y="72" text-anchor="middle" font-size="40" font-weight="900" fill="#ff9a00">Ai</text><rect x="40" y="96" width="120" height="22" rx="11" fill="#e8fafd" stroke="#00b8d4"/><text x="100" y="112" text-anchor="middle" font-size="11" font-weight="700" fill="#0b5d6b">Windows · .exe</text></svg>
+      <div class="t">Illustrator</div><code>GET /conectores/illustrator</code>
+    </div>
+    <div class="vis">
+      <svg viewBox="0 0 200 120"><rect x="55" y="10" width="90" height="90" rx="18" fill="#330000"/><text x="100" y="72" text-anchor="middle" font-size="40" font-weight="900" fill="#ff9a00">Ai</text><rect x="40" y="96" width="120" height="22" rx="11" fill="#e8fafd" stroke="#00b8d4"/><text x="100" y="112" text-anchor="middle" font-size="11" font-weight="700" fill="#0b5d6b">Mac · .zip</text></svg>
+      <div class="t">Illustrator (Mac)</div><code>GET /conectores/illustrator-mac</code>
+    </div>
+    <div class="vis">
+      <svg viewBox="0 0 200 120"><rect x="55" y="10" width="90" height="90" rx="18" fill="#10a36b"/><text x="100" y="70" text-anchor="middle" font-size="36" font-weight="900" fill="#fff">Cr</text><rect x="40" y="96" width="120" height="22" rx="11" fill="#e8fafd" stroke="#00b8d4"/><text x="100" y="112" text-anchor="middle" font-size="11" font-weight="700" fill="#0b5d6b">Windows · 2022+</text></svg>
+      <div class="t">CorelDRAW</div><code>GET /conectores/corel</code>
+    </div>
+  </div>
+  <div class="fila f2" style="margin-top:8mm">
+    <div class="check"><span class="ok">?</span><div>¿Ya está? Desde esa computadora: <code>GET http://127.0.0.1:47850/estado</code> (Illustrator) · <code>:47851/estado</code> (CorelDRAW)</div></div>
+    <div class="check"><span class="ok">↻</span><div>Si su <code>version</code> no es la que dice TIZADA → volver a instalar. <b>El código ya lo avisa.</b></div></div>
+  </div>
+  <div class="pie"><span>La lista con versión y nombre de archivo: GET /api/externo/v1/conectores</span><span>3 / 6</span></div>
+</div>
+
+<!-- 4 · PASO 1-2: SU SERVIDOR -->
+<div class="pag">
+  <h1><span class="n" style="background:var(--cian)">1</span>Su servidor: pedir y servir</h1>
+  <div class="sub">Con la llave. Usa <code>codigo/cliente.mjs</code> (Node 18+, sin dependencias).</div>
+  <div class="lado">
+    <div>
+      <div class="paso"><span class="b" style="background:var(--cian)">1</span><div class="x">Pedir la plantilla<small>los diseños y sus variables, como en el pedido</small></div></div>
+      <div class="paso"><span class="b" style="background:var(--cian)">2</span><div class="x">Esperar «listo»<small>el robot de TIZADA la arma en segundos</small></div></div>
+      <div class="paso"><span class="b" style="background:var(--mag)">A</span><div class="x">Ruta para su página: el estado<small><code>GET /plantillas/:ref</code> (en su servidor)</small></div></div>
+      <div class="paso"><span class="b" style="background:var(--mag)">B</span><div class="x">Ruta para su página: cada archivo<small><code>GET /plantillas/:ref/archivos/:nombre</code> (en su servidor)</small></div></div>
+      <div class="chips" style="margin-top:6mm"><span class="chip v">archivos: illustrator · corel · guia</span><span class="chip v">conectores: a dónde · versión</span></div>
+    </div>
+<pre><span class="k">import</span> { pedirPlantilla, esperarPlantilla, archivoPlantilla }
+  <span class="k">from</span> <span class="s">'./cliente.mjs'</span>
+
+<span class="c">// 1 · pedir</span>
+<span class="k">await</span> <span class="f">pedirPlantilla</span>({
+  referencia: <span class="s">'PL-0001'</span>,
+  disenos: [{ nombre: <span class="s">'JUGADOR'</span>, variables: [<span class="s">'v_redondo'</span>] }],
+  talles: { modo: <span class="s">'todos'</span> },
+  escala: <span class="n">100</span>
+})
+
+<span class="c">// 2 · esperar → {estado:'listo', archivos, conectores}</span>
+<span class="k">const</span> est = <span class="k">await</span> <span class="f">esperarPlantilla</span>(<span class="s">'PL-0001'</span>)
+
+<span class="c">// A · a su página: el estado tal cual</span>
+app.get(<span class="s">'/plantillas/:ref'</span>, … res.json(est))
+
+<span class="c">// B · a su página: el archivo (comprobado con sha256)</span>
+app.get(<span class="s">'/plantillas/:ref/archivos/:nombre'</span>, …
+  res.send(<span class="k">await</span> <span class="f">archivoPlantilla</span>(archivo)))</pre>
+  </div>
+  <div class="pie"><span>La llave X-Api-Key va SÓLO acá: el navegador nunca la ve</span><span>4 / 6</span></div>
+</div>
+
+<!-- 5 · PASO 3: SU PÁGINA -->
+<div class="pag">
+  <h1><span class="n" style="background:var(--ilu)">2</span>Su página: un botón</h1>
+  <div class="sub">En la computadora del diseñador. Usa <code>codigo/crear_en_programa.js</code> (navegador, sin dependencias).</div>
+  <div class="lado">
+<pre><span class="k">import</span> { crearEnPrograma } <span class="k">from</span> <span class="s">'./crear_en_programa.js'</span>
+
+boton.onclick = <span class="k">async</span> () => {
+  <span class="k">const</span> estado = <span class="k">await</span> (<span class="k">await</span> fetch(<span class="s">'/plantillas/PL-0001'</span>)).json()
+  <span class="k">const</span> r = <span class="k">await</span> <span class="f">crearEnPrograma</span>({
+    programa: <span class="s">'illustrator'</span>,   <span class="c">// o 'corel'</span>
+    estado,
+    diseno: <span class="s">'JUGADOR'</span>,
+    traer: (a) => fetch(<span class="s">'/plantillas/PL-0001/archivos/'</span>
+                  + encodeURIComponent(a.nombre)).then(x => x.text()),
+    alAvanzar: (texto) => cartel(texto)
+  })
+  <span class="c">// r.mesas · r.archivos · r.avisos</span>
+}</pre>
+    <div>
+      <div class="vis" style="margin-bottom:5mm">
+        <svg viewBox="0 0 300 110"><rect x="10" y="20" width="120" height="44" rx="12" fill="#16202a"/><text x="70" y="48" text-anchor="middle" font-size="14" font-weight="800" fill="#fff">Crear en Ai</text><path d="M140 42 H178" stroke="#16202a" stroke-width="3"/><path d="M178 42 l-8 -6 v12z" fill="#16202a"/><rect x="186" y="6" width="104" height="72" rx="10" fill="#330000"/><g stroke="#ff9a00" stroke-width="2" fill="none"><rect x="196" y="16" width="24" height="24"/><rect x="226" y="16" width="24" height="24"/><rect x="256" y="16" width="24" height="24"/><rect x="196" y="46" width="24" height="24"/><rect x="226" y="46" width="24" height="24"/></g><text x="150" y="100" text-anchor="middle" font-size="12" fill="#5b6875">una mesa por pieza, con capas y contornos</text></svg>
+        <div class="t">Devuelve</div>
+        <div class="chips" style="justify-content:center"><span class="chip v">ok: true</span><span class="chip v">mesas: 15</span><span class="chip v">archivos: ['JUGADOR.ai']</span></div>
+      </div>
+      <div class="t" style="font-weight:800;font-size:12pt;margin-bottom:3mm">Si algo falla, <code>error.codigo</code>:</div>
+      <div class="chips"><span class="chip a">no-lista</span><span class="chip a">sin-archivos</span><span class="chip r">sin-conector → instalador</span><span class="chip r">programa</span></div>
+    </div>
+  </div>
+  <div class="pie"><span>Guardado en Documentos › USER PRO › Plantillas · varios archivos de un diseño → se mandan todos, en orden</span><span>5 / 6</span></div>
+</div>
+
+<!-- 6 · LO QUE HAY QUE SABER -->
+<div class="pag">
+  <h1><span class="n" style="background:var(--ver)">✓</span>Lo que hay que saber</h1>
+  <div class="sub">Seis reglas. Con esto alcanza.</div>
+  <div class="fila f2">
+    <div class="check"><span class="ok">✓</span><div><b>Illustrator abierto.</b> CorelDRAW (2022+) se abre solo.</div></div>
+    <div class="check"><span class="ok">✓</span><div><b>Permitir la red local</b> la primera vez que el navegador lo pregunte.</div></div>
+    <div class="check"><span class="ok">✓</span><div><b>El plan va tal cual.</b> No se toca ni se rearma: TIZADA ya dice cómo es.</div></div>
+    <div class="check"><span class="ok">✓</span><div><b>Sin conector:</b> la <code>guia</code> .ai se abre en cualquier Illustrator.</div></div>
+    <div class="check"><span class="no">✕</span><div><b>La llave nunca en el navegador.</b> Sólo en su servidor.</div></div>
+    <div class="check"><span class="no">✕</span><div><b>Sin cabeceras propias</b> hacia el conector: sólo <code>Content-Type</code>.</div></div>
+  </div>
+  <div class="vis" style="margin-top:9mm;flex-direction:row;justify-content:space-around;padding:6mm">
+    <div><div class="t">Probado</div><div class="d">de punta a punta, con un conector de prueba</div></div>
+    <div><div class="t">Nada se rompe</div><div class="d">lo que ya mandan sigue igual</div></div>
+    <div><div class="t">Detalle</div><div class="d"><code>API.md §6.b</code> · <code>CAMBIOS.md</code> 27/10</div></div>
+  </div>
+  <div class="pie"><span>TIZADA PRO · integración con otro sistema</span><span>6 / 6</span></div>
+</div>
+
+</body>
+</html>

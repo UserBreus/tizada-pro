@@ -373,7 +373,7 @@ paths:
       summary: Estado de la plantilla y sus archivos (con como_usar)
       parameters: [ { name: referencia, in: path, required: true, schema: { type: string } } ]
       responses:
-        '200': { description: 'OK: {referencia, estado, etapa, alarmas, archivos: [{diseno, tipo: illustrator|corel|guia, nombre, bytes, sha256, parte?, descarga}], como_usar}' }
+        '200': { description: 'OK: {referencia, estado, etapa, alarmas, archivos: [{diseno, tipo: illustrator|corel|guia, nombre, bytes, sha256, parte?, descarga}], como_usar, conectores: {illustrator|corel: {estado, crear, version, tipo_archivo, instalador}}}' }
         '404': { $ref: '#/components/responses/NoExiste' }
   /plantillas/{referencia}/archivos/{nombre}:
     get:

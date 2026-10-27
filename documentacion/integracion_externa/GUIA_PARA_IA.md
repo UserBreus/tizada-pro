@@ -104,6 +104,7 @@
    `{"variable": "v_…", "forma": "triangulo", "orientacion": "abajo", "terminacion": "dobladillo", "medida": {"ancho_m": 1.0, "alto_m": 0.6}}`.
 2. `GET /plantillas/{referencia}` hasta `listo` → `archivos[]`: por diseño un `illustrator` (.json), un `corel` (.json) y una `guia` (.ai).
 3. En la PC del diseñador, la página del sistema externo hace `POST http://127.0.0.1:47850/plantilla` (Illustrator) o `:47851` (CorelDRAW) con el contenido del .json tal cual. Para saber si el conector está: `GET http://127.0.0.1:47850/estado`. Sin conector: bajar la `guia` .ai. Instaladores: `GET /conectores`.
+   **Código listo:** [`codigo/crear_en_programa.js`](codigo/crear_en_programa.js) (`crearEnPrograma`) hace todo eso como el botón de TIZADA; el estado trae `conectores.{illustrator|corel}` con a dónde mandar (`crear`), la `version` que corresponde y el `instalador`. La llave queda en su servidor ([`codigo/cliente.mjs`](codigo/cliente.mjs): `esperarPlantilla`, `archivoPlantilla`).
 
 ### 4.4 Seguir y recibir
 1. `GET /pedidos/{ref}` cada 5–10 s hasta `listo` / `rechazado` / `error` / `cancelado`. Mostrar `etapa` (si trae `(NN %)`, es el avance).
@@ -256,7 +257,7 @@ Forma: `{codigo, frena, etapa, mensaje, donde: {campo, fila}}`. `frena: true` re
 
 | Grupo | Códigos | Acción del sistema externo |
 |---|---|---|
-| Catálogo | `variable-desconocida`, `variable-ambigua`, `molde-no-disponible`, `planillas-distintas` | Re-sincronizar el catálogo; mandar la `clave` |
+| Catálogo | `variable-desconocida`, `variable-ambigua`, `molde-no-disponible`, `molde-archivado`, `planillas-distintas` | Re-sincronizar el catálogo; mandar la `clave` (`molde-archivado`: esa prenda ya no se ofrece) |
 | Tela | `tela-falta`, `tela-desconocida`, `tela-no-usable`, `tela-no-permitida`, `tela-no-entra` | Ofrecer sólo telas del molde, usables y donde entra (`calcular`) |
 | Planilla | `talle-inexistente`, `opcion-inexistente`, `opcion-sin-piezas`, `columna-obligatoria-vacia`, `cantidad-invalida`, `fila-diseno-desconocido` | Validar los campos contra `GET /moldes/{codigo}` |
 | A medida | `medida-falta`, `medida-invalida`, `forma-invalida`, `terminacion-invalida`, `tiras-invalidas`, `tiras-sin-margen`, `tiras-no-a-medida` | Seguir §5; probar con `calcular` |
@@ -288,4 +289,5 @@ Forma: `{codigo, frena, etapa, mensaje, donde: {campo, fila}}`. `frena: true` re
 5. Bajar cada PDF y comparar `sha256`.
 
 Código de referencia (sin dependencias): [`codigo/enviar_pedido.py`](codigo/enviar_pedido.py),
-[`codigo/recibir_aviso.py`](codigo/recibir_aviso.py), [`codigo/cliente.mjs`](codigo/cliente.mjs).
+[`codigo/recibir_aviso.py`](codigo/recibir_aviso.py), [`codigo/cliente.mjs`](codigo/cliente.mjs),
+[`codigo/crear_en_programa.js`](codigo/crear_en_programa.js) (página del diseñador → Illustrator / CorelDRAW).

@@ -124,6 +124,13 @@ function Icon({ name, className = "", style }) {
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
       </svg>
     ),
+    archivar: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+        <rect x="2" y="3" width="20" height="5" rx="1"/>
+        <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/>
+        <line x1="10" y1="12" x2="14" y2="12"/>
+      </svg>
+    ),
     trash: (
       <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
         <polyline points="3 6 5 6 21 6"/>
@@ -8166,6 +8173,10 @@ export default function App() {
   const [etqNombreInput, setEtqNombreInput] = useState('');
   // AGREGAR UNA PIEZA AL MOLDE: {origen:'duplicar'|'archivo', idx, punto:{x,y}, medidas} | null
   const [pzNueva, setPzNueva] = useState(null);
+  // CAMBIAR PIEZAS (MAPA 746): el cambio en curso (`{tipo: 'reemplazar'|'mover', idx, talles, punto?, archivo…}`)
+  // y los PREPARADOS, que recién se escriben al tocar «Guardar» (como «Agregar una pieza»)
+  const [pzCamb, setPzCamb] = useState(null);
+  const [pzCambPend, setPzCambPend] = useState([]);
   const [pzNuevaCargando, setPzNuevaCargando] = useState(false);
   // 🔴 PREPARADAS, NO GUARDADAS (regla del usuario 2026-08-21): las piezas nuevas viven ACÁ hasta
   // que se toca «Guardar». Mientras tanto no se tocó el molde: se pueden sacar o rehacer sin
@@ -8184,6 +8195,9 @@ export default function App() {
   const telasPickerLista = telaPickerRef.current.lista;
   const telaPickerAplicar = (id) => { telaPickerRef.current.aplicar(id); setTelaPicker(null); };
   const fileInputPiezaRef = useRef(null);
+  const fileInputFormaRef = useRef(null);
+  // el cambio que espera su archivo: se arma recién cuando el archivo llegó (cancelar el selector no deja nada a medias)
+  const pzCambIntento = useRef(null);
   const [modoAcomodar, setModoAcomodar] = useState(false);
   const [pzOffsets, setPzOffsets] = useState({});
   const [varPickerRow, setVarPickerRow] = useState(null);
@@ -8458,6 +8472,8 @@ export default function App() {
   const [pedidoTabMoldes, setPedidoTabMoldes] = useState('catalogo'); // 'catalogo' | 'mios'
   const [buscarVariable, setBuscarVariable] = useState('');   // buscador del paso Moldes del pedido (variables, o el molde → todas sus variables)
   const [buscarMolderia, setBuscarMolderia] = useState('');   // buscador de Configuración › Moldería (moldes, o una variable → su molde)
+  // Moldería: se ven los HABILITADOS o los ARCHIVADOS, nunca los dos a la vez (pedido del usuario 2026-10-23, MAPA 745)
+  const [verArchivados, setVerArchivados] = useState(false);
   // Modal "Subir mi propio molde" (nombre + archivo).
   const [subirMoldeOpen, setSubirMoldeOpen] = useState(false);
   const [borrarArt, setBorrarArt] = useState(null);   // artículo propio a eliminar (modal de confirmación)
@@ -8938,6 +8954,14 @@ export default function App() {
   // molde (registro) se suman a "Prenda Superior". Así siempre se ven aunque
   // el catálogo falle.
 
+  // CAMBIAR PIEZAS (MAPA 747-749): mientras haya cambios sin guardar, el visor muestra los talles ELEGIDOS
+  // juntos (los de todos los cambios; ninguno elegido todavía = todos), con los cambios ya aplicados
+  const _pzCambClave = (() => {
+    const cs = [...pzCambPend, ...(pzCamb ? [pzCamb] : [])];
+    if (!cs.length) return '';
+    if (cs.some(c => c.talles === 'todos')) return '*';
+    return [...new Set(cs.flatMap(c => c.talles || []))].join('|') || '*';
+  })();
   const canvasLayout = React.useMemo(() => {
     // AGRUPAR con todas las variantes juntas: el visor dibuja las piezas de TODOS los talles
     // (mismo lienzo, mismas coordenadas en mm). Es la MISMA lista de siempre — cada pieza trae
@@ -8957,12 +8981,18 @@ export default function App() {
     // talle), el mismo gesto que Moldería. Para la etiqueta (`etqPickB`) se vuelve al talle guía.
     const _todasB_on = activoTab === 'pedidos' && pedidoPaso === 'arte' && !etqPickB
       && !!todasB?.piezas?.length && todasB.pid === etqPid;
+    // CAMBIAR PIEZAS: el lienzo de TODOS los talles, tal cual vienen en el archivo (anidados o separados),
+    // con sólo los talles elegidos (ninguno elegido todavía = todos)
+    const _camb = !!_pzCambClave && !!empTodasData?.piezas?.length;
     const src = _todasB_on ? todasB
-      : ((((empModo && empTodas) || _etqPorPieza || _varAbierta) && empTodasData?.piezas?.length) ? empTodasData : etqData);
+      : (_camb ? empTodasData
+      : ((((empModo && empTodas) || _etqPorPieza || _varAbierta) && empTodasData?.piezas?.length) ? empTodasData : etqData));
     if (!src?.piezas) return { layout: [], dibujo: [], zTalle: new Map(), width: 850, height: 400, vb: '0 0 850 400' };
+    const _tSel = _camb && _pzCambClave !== '*' ? new Set(_pzCambClave.split('|').filter(Boolean)) : null;
+    const _piezas = _tSel && _tSel.size ? src.piezas.filter(p => _tSel.has(p.talle)) : src.piezas;
 
     // Siempre usar las posiciones originales del PDF
-    const layout = src.piezas.map((p) => ({
+    const layout = _piezas.map((p) => ({
       ...p,
       tx: 0,
       ty: 0,
@@ -8975,7 +9005,7 @@ export default function App() {
     // img_w/img_h (el pixmap se recorta al borde de la página, las coords no) →
     // si no, las piezas del borde derecho/inferior se ven CORTADAS.
     let minX = 0, minY = 0, maxX = W, maxY = H;
-    src.piezas.forEach(p => {
+    _piezas.forEach(p => {
       minX = Math.min(minX, p.px); minY = Math.min(minY, p.py);
       maxX = Math.max(maxX, p.px + p.pw); maxY = Math.max(maxY, p.py + p.ph);
     });
@@ -8986,7 +9016,7 @@ export default function App() {
     // Escala real: cm por unidad de viewBox (promedio de las piezas con medida).
     // Sirve para mostrar el zoom relativo al TAMAÑO REAL (100% = 1:1), no al "ver todo".
     let sumCm = 0, nCm = 0;
-    src.piezas.forEach(p => {
+    _piezas.forEach(p => {
       if (p.pw > 2 && p.w_cm > 0) { sumCm += p.w_cm / p.pw; nCm++; }
       if (p.ph > 2 && p.h_cm > 0) { sumCm += p.h_cm / p.ph; nCm++; }
     });
@@ -9046,7 +9076,7 @@ export default function App() {
 
     return { layout, dibujo, zTalle, width: W, height: H, vb, vbW, vbH, cmPerUnit, sep, clusters };
   }, [etqData, empModo, empTodas, empTodasData, tabAjustesMolde, etqPiezaSel, varStep, grupoAislado, asignandoTipo, vinculandoJuntas,
-      activoTab, pedidoPaso, etqPickB, todasB, etqPid]);
+      activoTab, pedidoPaso, etqPickB, todasB, etqPid, _pzCambClave]);
 
   // Las variantes del MOLDE. `etqData.talles` es de la DETECCIÓN que se está mostrando: en la
   // vista «asignar variantes por piezas» son las capas del archivo original (una sola, «Capa 1»).
@@ -9996,6 +10026,33 @@ export default function App() {
     }
   };
 
+  // ── ARCHIVAR / VOLVER A HABILITAR (pedido del usuario 2026-10-23, MAPA 745) ──────────────────────
+  // Archivado, ni el molde ni sus variables se usan en un pedido; en Moldería pasa a «Archivados». No se
+  // borra nada: al habilitarlo vuelve tal cual estaba. Permiso propio: `molde.archivar`.
+  const handleArchivarProducto = (id, archivar) => {
+    const nom = (productosCat.productos.find(p => p.id === id) || {}).nombre || 'este molde';
+    if (!archivar) { _archivarProducto(id, false); return; }
+    abrirConfirmar({
+      titulo: `Archivar «${nom}»`, ok: 'Archivar',
+      texto: 'El molde y sus variables dejan de aparecer en el pedido y no se pueden usar. No se borra nada: queda en «Archivados» y se puede volver a habilitar cuando quieras.',
+      onOk: () => _archivarProducto(id, true),
+    });
+  };
+  const _archivarProducto = async (id, archivar) => {
+    try {
+      const res = await fetch('/api/productos/archivar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, archivar }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `No se pudo (${res.status})`);
+      await fetchProductos();
+      showMsg(archivar ? 'Molde archivado ✓' : 'Molde habilitado de nuevo ✓');
+    } catch (err) {
+      showError(err.message);
+    }
+  };
+
   const handleRenombrarProducto = (id, nombreActual) => abrirPedirTexto({
     titulo: 'Renombrar moldería', etiqueta: 'Nombre', valor: nombreActual, ok: 'Renombrar',
     onOk: (v) => _renombrarProducto(id, v),
@@ -10064,10 +10121,12 @@ export default function App() {
       const d = await leerJson(r);
       if (!r.ok) throw new Error(d.error || 'No se pudo leer el archivo');
       setPzNueva(p => ({ ...(p || {}), origen: 'archivo', archivo: file.name, archivoId: d.archivo,
-                         medidas: `${d.w_cm} × ${d.h_cm} cm`,
+                         medidas: `${String(d.w_cm).replace(".", ",")} × ${String(d.h_cm).replace(".", ",")} cm`,
                          contornos: d.contornos, tallesMolde: d.talles, completo: d.completo }));
-      if (d.completo) showMsg(`Pieza leída: ${d.w_cm} × ${d.h_cm} cm ✓`);
-      else showWarn(`El archivo trae ${d.contornos} contorno/s y el molde tiene ${d.talles} talles. La pieza tiene que venir dibujada en todos los talles.`);
+      if (d.completo) showMsg(`Pieza leída: ${String(d.w_cm).replace(".", ",")} × ${String(d.h_cm).replace(".", ",")} cm ✓`);
+      else showWarn(d.por_capa
+        ? `Al archivo le falta la capa de ${(d.faltan || []).join(', ')}: cada forma va en la capa con el nombre de su talle.`
+        : `El archivo trae ${d.contornos} contorno/s y el molde tiene ${d.talles} talles. La pieza tiene que venir dibujada en todos los talles.`);
     } catch (err) { showError(err.message); }
     finally { setPzNuevaCargando(false); }
   };
@@ -12361,6 +12420,8 @@ export default function App() {
   // recargas al pedo; pero sin ninguna dep del catálogo, un efecto que corrió ANTES de que
   // llegaran los productos no se entera nunca (el paso Arte quedaba vacío hasta recargar).
   const _idsCat = React.useMemo(() => productosCat.productos.map(p => p.id).join(','), [productosCat.productos]);
+  // los ARCHIVADOS (MAPA 745), aparte: archivar no cambia los ids y la limpieza del pedido tiene que enterarse
+  const _archCat = React.useMemo(() => productosCat.productos.filter(p => p.archivado).map(p => p.id).join(','), [productosCat.productos]);
 
   // TODOS LOS MOLDES EN ESTA PC (pedido del usuario 2026-09-23): apenas hay sesión y catálogo, se
   // bajan de fondo (`motor/bajarMoldes.js`) y quedan guardados por versión. Se revisa de nuevo
@@ -14075,7 +14136,8 @@ export default function App() {
   const totalPrendas = (filas || []).reduce((n, f) => n + cantidadDeFila(f), 0);
   // VARIABLE-FIRST: TODAS las variables (con piezas) de TODOS los moldes, cada una con su
   // molde detrás. Es lo que se elige directamente en el pedido (ya no se elige el molde).
-  const variablesDisponibles = productosCat.productos.flatMap(p =>
+  // (un molde ARCHIVADO no aporta ninguna: ni el molde ni sus variables se usan en un pedido, MAPA 745)
+  const variablesDisponibles = productosCat.productos.filter(p => !p.archivado).flatMap(p =>
     (p.variantes || []).filter(v => (v.valores || []).some(x => x.pieza_idx != null))
       .map(v => ({ ...v, moldeId: p.id, moldeNombre: p.nombre, planilla: p.planilla_template_id })));
   // Grilla del paso "Diseños": en «Catálogo» van las variables de los moldes COMPARTIDOS; los
@@ -14092,7 +14154,7 @@ export default function App() {
   // se terminan de configurar.
   const _moldeUsable = (mid) => {
     const p = productosCat.productos.find(x => x.id === mid);
-    return !!p && !!p.plantilla && (p.piezas_nombradas || 0) > 0;
+    return !!p && !p.archivado && !!p.plantilla && (p.piezas_nombradas || 0) > 0;
   };
   // MOLDE A MEDIDA (MAPA 623): `{pieza, margen, ancho_m, alto_m, borde_mm, nesting, de?}` o null.
   // Con `de` es la COPIA de este pedido (ya tiene medida); sin `de`, la plantilla del catálogo, que
@@ -14306,7 +14368,7 @@ export default function App() {
   // Diseños que todavía NO tienen ningún molde VÁLIDO asignado. No se puede avanzar
   // a Arte hasta que CADA diseño tenga al menos un molde existente (no alcanza con que
   // uno lo tenga; un id viejo/borrado en el estado tampoco cuenta).
-  const _moldesValidos = new Set(productosCat.productos.map(p => p.id));
+  const _moldesValidos = new Set(productosCat.productos.filter(p => !p.archivado).map(p => p.id));
   const disenosSinMolde = disenosPedido.filter(d => !(disenoMoldes[d.id] || []).some(m => _moldesValidos.has(m)));
   const puedeIrAArte = disenosPedido.length > 0 && disenosSinMolde.length === 0;
   // Tareas de arte: un (diseño, molde) por cada asignación.
@@ -15547,6 +15609,290 @@ export default function App() {
     }
   };
 
+  // (CAMBIAR PIEZAS va ACÁ, debajo de `showMsg`/`showError`/`showWarn`, del caché de detección y del
+  //  nido: leer una `const` antes de su declaración deja la app en «No se pudo cargar», `verificar_tdz.mjs`)
+  // ── CAMBIAR PIEZAS (MAPA 746-747): FORMA nueva, MOVER o AGREGAR formas nuevas, guardado ─────────────
+  // La pieza conserva todo (nombre, variables, telas, etiqueta, arte). Lo preparado no se escribe hasta
+  // «Guardar», en UNA versión. 🔴 Pedido del usuario (2026-10-26): que trabaje con las FORMAS REALES (nada de
+  // rectángulos), que mientras se cambia se vean los talles elegidos (todos, o 1, 2, 5…), que sea al
+  // instante (arrastrar) y que también se puedan AGREGAR formas nuevas.
+  const _MM_POR_PT = 10 / 28.3465;                       // unidades crudas del molde (pt) → mm del visor
+  const _guiaT = () => etqData?.talle_ref || tallesMolde[0];
+  const _tallesCamb = (c) => (c.talles === 'todos' ? tallesMolde : tallesMolde.filter(t => (c.talles || []).includes(t)));
+  const _formasQueHacen = (c) => _tallesCamb(c).length;
+  // la forma del archivo para cada talle: MISMA regla que el servidor (`piezas_molde.formas_por_talle`, MAPA 751).
+  // 🔴 POR EL NOMBRE DE LA CAPA (las capas como vienen en el archivo; pedido del usuario: «no está leyendo las
+  // capas»): cada talle toma la forma más grande de la capa que se llama como él. Sin capas con esos nombres, una
+  // por talle de menor a mayor (si trae todas las del molde, la de cada talle elegido; si justo las elegidas, en orden).
+  const _normCapa = (s) => String(s || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  const _formasPorTalle = (c) => {
+    const conts = c.formas || [], obj = _tallesCamb(c), out = {};
+    const porCapa = new Map();
+    for (const f of conts) { const k = _normCapa(f.capa); if (k && !porCapa.has(k)) porCapa.set(k, f); }   // vienen de mayor a menor
+    if (obj.some(t => porCapa.has(_normCapa(t)))) {
+      obj.forEach(t => { if (porCapa.has(_normCapa(t))) out[t] = porCapa.get(_normCapa(t)); });
+      return out;
+    }
+    const area = (x) => x.w * x.h;
+    if (conts.length >= tallesMolde.length) {
+      const o = conts.slice(0, tallesMolde.length).sort((a, b) => area(a) - area(b));
+      tallesMolde.forEach((t, k) => { if (obj.includes(t)) out[t] = o[k]; });
+    } else if (conts.length >= obj.length) {
+      const o = conts.slice(0, obj.length).sort((a, b) => area(a) - area(b));
+      obj.forEach((t, k) => { out[t] = o[k]; });
+    }
+    return out;
+  };
+  // los talles elegidos que se quedaron SIN forma, y cómo decirlo (por capa o por cantidad, según cómo vino el archivo)
+  const _faltanFormas = (c) => { const f = _formasPorTalle(c); return _tallesCamb(c).filter(t => !f[t]); };
+  const _avisoFaltan = (c, faltan) => ((c.formas || []).some(f => _tallesCamb(c).some(t => _normCapa(t) === _normCapa(f.capa)))
+    ? `Al archivo le falta la capa de ${faltan.join(', ')}: cada forma va en la capa con el nombre de su talle.`
+    : `El archivo trae ${c.contornos} forma/s y hacen falta ${_formasQueHacen(c)}: una por talle (en la capa con el nombre de cada talle).`);
+  // un contorno del archivo → el trazado del visor (mm, Y para abajo) CENTRADO en (0, 0): la forma real
+  const _pathForma = (f) => {
+    if (!f) return null;
+    const b = f.bbox_raw, cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, k = _MM_POR_PT;
+    const P = (x, y) => `${((x - cx) * k).toFixed(2)} ${(-(y - cy) * k).toFixed(2)}`;
+    return (f.segmentos || []).map(sg => sg[0] === 'm' ? `M ${P(sg[1], sg[2])}` : sg[0] === 'l' ? `L ${P(sg[1], sg[2])}`
+      : sg[0] === 'c' ? `C ${P(sg[1], sg[2])} ${P(sg[3], sg[4])} ${P(sg[5], sg[6])}`
+      : sg[0] === 're' ? `M ${P(sg[1], sg[2])} L ${P(sg[1] + sg[3], sg[2])} L ${P(sg[1] + sg[3], sg[2] + sg[4])} L ${P(sg[1], sg[2] + sg[4])} Z`
+      : sg[0] === 'h' ? 'Z' : '').join(' ');
+  };
+  const _centroPz = (p) => ({ x: p.px + p.pw / 2, y: p.py + p.ph / 2 });
+  // la HOMÓLOGA de la pieza elegida en el talle `t`, en el lienzo que se está viendo (todos los talles, o
+  // sólo la guía en un molde de un talle): por su nombre, o por su número si todavía no tiene
+  const _homEnLienzo = (c, t) => {
+    const L = canvasLayout.layout || [];
+    if (!L.some(p => p.talle != null)) return t === _guiaT() ? (L.find(p => p.idx === c.idx) || null) : null;
+    const nom = nombreDePieza(c.idx);
+    return L.find(p => p.talle === t && (nom ? (p.name || '') === nom : p.t_idx === c.idx)) || null;
+  };
+  // DÓNDE VA EN CADA TALLE: `{talle: {viejo, d, x, y, dx, dy}}` — `viejo` = la pieza de hoy, `d` = la forma
+  // nueva centrada en (0, 0) que va en (x, y). Es lo que se DIBUJA y lo que se GUARDA (así lo que se ve es
+  // lo que queda).
+  const _pzDeTalle = (t, i) => {
+    const L = canvasLayout.layout || [];
+    if (!L.some(p => p.talle != null)) return t === _guiaT() ? (L.find(p => p.idx === i) || null) : null;
+    return L.find(p => p.talle === t && p.t_idx === i) || null;
+  };
+  // el talle que hace de REFERENCIA en el lienzo: la guía si se está viendo, si no el primero de los elegidos
+  const _tRefCamb = (c) => {
+    const L = canvasLayout.layout || [], ts = _tallesCamb(c);
+    return (!L.some(p => p.talle != null) || L.some(p => p.talle === _guiaT())) ? _guiaT() : (ts[0] || _guiaT());
+  };
+  // AGREGAR sin tocar dónde: la forma aparece en el medio del talle de referencia (se ve al instante y se arrastra)
+  const _puntoInicialAgregar = (c) => {
+    const L = canvasLayout.layout || [], tr = _tRefCamb(c);
+    const cg = (canvasLayout.clusters || []).find(b => b.talle === tr);
+    if (cg) return { x: (cg.x0 + cg.x1) / 2, y: (cg.y0 + cg.y1) / 2 };
+    const deT = L.some(p => p.talle != null) ? L.filter(p => p.talle === tr) : L;
+    if (!deT.length) return null;
+    const x0 = Math.min(...deT.map(p => p.px)), x1 = Math.max(...deT.map(p => p.px + p.pw));
+    const y0 = Math.min(...deT.map(p => p.py)), y1 = Math.max(...deT.map(p => p.py + p.ph));
+    return { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
+  };
+  // DÓNDE ESTÁ HOY el centro del cambio en el talle de referencia (lo que se arrastra)
+  const _puntoActual = (c) => {
+    if (c.punto) return c.punto;
+    if (c.tipo === 'agregar') return _puntoInicialAgregar(c);
+    const g = _homEnLienzo(c, _tRefCamb(c));
+    if (!g) return null;
+    const cc = _centroPz(g);
+    return { x: cc.x + (c.dx || 0), y: cc.y + (c.dy || 0) };
+  };
+  const geomCambio = (c) => {
+    const out = {};
+    const ts = _tallesCamb(c).length ? _tallesCamb(c) : [_guiaT()];
+    const formas = c.tipo === 'mover' ? {} : _formasPorTalle(c);
+    if (c.tipo === 'agregar' && !c.punto && c.por_talle) {
+      Object.entries(c.por_talle).forEach(([t, r]) => {
+        const p = _pzDeTalle(t, r.ref);
+        if (!p) return;
+        const cc = _centroPz(p);
+        out[t] = { viejo: null, d: _pathForma(formas[t]), x: cc.x + r.dx, y: cc.y + r.dy };
+      });
+      return out;
+    }
+    if (c.tipo === 'agregar') {
+      const pt = _puntoActual(c);
+      if (!pt) return out;
+      // con los talles SEPARADOS en el archivo, cada talle tiene su bloque: la forma va en el MISMO
+      // lugar relativo de cada bloque; con los talles anidados (uno encima del otro), en el mismo punto
+      const cl = canvasLayout.clusters || null, cg = cl && cl.find(b => b.talle === _tRefCamb(c));
+      ts.forEach(t => {
+        const ct = cl && cl.find(b => b.talle === t);
+        if (cl && !ct) return;                                  // ese talle no se está viendo
+        const ox = cg && ct ? ((ct.x0 + ct.x1) - (cg.x0 + cg.x1)) / 2 : 0, oy = cg && ct ? ((ct.y0 + ct.y1) - (cg.y0 + cg.y1)) / 2 : 0;
+        out[t] = { viejo: null, d: _pathForma(formas[t]), x: pt.x + ox, y: pt.y + oy };
+      });
+      return out;
+    }
+    const g = _homEnLienzo(c, _tRefCamb(c));
+    const pt = _puntoActual(c);
+    const dx = pt && g ? pt.x - _centroPz(g).x : 0;
+    const dy = pt && g ? pt.y - _centroPz(g).y : 0;
+    ts.forEach(t => {
+      const h = _homEnLienzo(c, t);
+      if (!h) return;
+      const cc = _centroPz(h);
+      out[t] = { viejo: h, d: c.tipo === 'mover' ? null : _pathForma(formas[t]), x: cc.x + dx, y: cc.y + dy, dx, dy };
+    });
+    return out;
+  };
+  // al empezar un cambio, el visor pasa a mostrar TODOS los talles juntos (o los elegidos): se carga el lienzo
+  useEffect(() => {
+    if (_pzCambClave && !empTodasData && (tallesMolde || []).length > 1) cargarTodasVariantes(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!_pzCambClave]);
+  // 🔴 SALIR SIN GUARDAR = VUELVE A COMO ESTABA (pedido del usuario 2026-10-26): lo que no se guardó vive
+  // sólo en la pantalla; al cambiar de molde, volver a la lista, pasar a otra herramienta del molde o salir de
+  // la sección se descarta (el molde nunca se tocó)
+  useEffect(() => {
+    setPzCamb(null); setPzCambPend([]); pzCambIntento.current = null;
+  }, [pidCfg, activoTab, molderiaAbierta, tabAjustesMolde]);
+  // las piezas que tienen un cambio (forma nueva o movida): en el visor se ve SÓLO cómo quedan
+  const _ocultasCamb = new Set();
+  [...pzCambPend, ...(pzCamb ? [pzCamb] : [])].forEach(c => {
+    if (c.tipo === 'agregar' || c.idx == null || (c.tipo === 'reemplazar' && !c.archivoId)) return;
+    Object.values(geomCambio(c)).forEach(g => { if (g.viejo) _ocultasCamb.add(g.viejo.idx); });
+  });
+  // un cambio listo para guardar: `{ok}` (con lo que necesita el servidor), `{vacio}` (no cambia nada) o `{error}`
+  const _cambioListo = (c) => {
+    if (c.talles !== 'todos' && !(c.talles || []).length) return { error: 'Elegí al menos un talle.' };
+    if (c.tipo !== 'agregar' && c.idx == null) return { vacio: true };            // el espacio abierto, sin pieza todavía
+    if (c.tipo === 'mover' && !c.punto) return { vacio: true };
+    if (c.tipo !== 'mover') {
+      if (!c.archivoId) return { vacio: true };
+      const _f = _faltanFormas(c);
+      if (_f.length) return { error: _avisoFaltan(c, _f) };
+    }
+    const geo = geomCambio(c);
+    const ts = Object.keys(geo);
+    if (!ts.length) return { error: 'No se pudo ubicar la pieza en los talles elegidos: esperá a que cargue el visor.' };
+    if (c.tipo === 'agregar') {
+      // cada talle se ubica respecto de una pieza SUYA (la más cercana): no depende de cómo dibuja la pantalla
+      const L = canvasLayout.layout || [];
+      const por = {};
+      for (const t of ts) {
+        const g = geo[t];
+        const deT = L.some(p => p.talle != null) ? L.filter(p => p.talle === t) : L;
+        let mejor = null;
+        for (const p of deT) {
+          const cc = _centroPz(p), d = Math.hypot(cc.x - g.x, cc.y - g.y);
+          if (!mejor || d < mejor[0]) mejor = [d, p, cc];
+        }
+        if (!mejor) return { error: `No hay piezas en el talle ${t} para ubicar la forma nueva.` };
+        por[t] = { ref: mejor[1].t_idx != null ? mejor[1].t_idx : mejor[1].idx, dx: g.x - mejor[2].x, dy: g.y - mejor[2].y };
+      }
+      return { ok: { ...c, punto: _puntoActual(c), por_talle: por } };
+    }
+    const g0 = geo[ts[0]];
+    return { ok: { ...c, dx: g0.dx || 0, dy: g0.dy || 0 } };
+  };
+  // el cambio en curso pasa a la lista (sigue viéndose aplicado); false si no se puede
+  const _fijarCambio = () => {
+    if (!pzCamb) return true;
+    const r = _cambioListo(pzCamb);
+    if (r.error) { showError(r.error); return false; }
+    if (r.ok) setPzCambPend(prev => [...prev, r.ok]);
+    setPzCamb(null);
+    return true;
+  };
+  // «CAMBIAR PIEZA» (pedido del usuario 2026-10-26, MAPA 748 + 750 — 🔴 NO VOLVER A DARLO VUELTA): el botón ABRE el
+  // espacio del cambio con sus herramientas y TODOS los talles; RECIÉN AHÍ se toca la pieza; RECIÉN AHÍ «Cargar forma»
+  // abre el archivo, y el cambio queda a la vista al instante. Pocos pasos (MAPA 749): sin «preparar» ni confirmar,
+  // «Guardar» y listo; salir sin guardar lo descarta.
+  const abrirCambio = (tipo) => {
+    if (!_fijarCambio()) return;
+    setPzCamb({ tipo, idx: null, talles: 'todos' });
+  };
+  // tocar la pieza en el espacio del cambio: la elige. Una pieza tiene UN solo cambio: si ya tenía uno se retoma
+  // (cambiarle la forma a una movida conserva el corrimiento) y «Cancelar» se lo devuelve tal cual estaba.
+  const elegirPiezaCambio = (gi) => {
+    const v = pzCamb;
+    if (!v) return;
+    const previo = pzCambPend.find(p => p.tipo !== 'agregar' && p.idx === gi) || null;
+    // si se estaba retomando el cambio de OTRA pieza y se eligió ésta, aquél vuelve a la lista sin tocarse
+    const devolver = v._previo && v._previo !== previo ? v._previo : null;
+    if (previo || devolver) setPzCambPend(prev => [...prev.filter(p => p !== previo), ...(devolver ? [devolver] : [])]);
+    setPzCamb(previo
+      ? { ...previo, tipo: v.tipo === 'reemplazar' || previo.tipo === 'reemplazar' ? 'reemplazar' : 'mover', _previo: previo }
+      : { tipo: v.tipo, idx: gi, talles: v.talles });
+  };
+  const cargarFormaCambio = () => {
+    pzCambIntento.current = pzCamb;
+    fileInputFormaRef.current?.click();
+  };
+  const cancelarCambio = () => {
+    if (pzCamb?._previo) setPzCambPend(prev => [...prev, pzCamb._previo]);
+    setPzCamb(null);
+    pzCambIntento.current = null;
+  };
+  const subirFormaPieza = async (file) => {
+    if (!file) return;
+    const base = pzCambIntento.current || pzCamb || { tipo: 'agregar', idx: null, talles: 'todos' };
+    pzCambIntento.current = null;
+    setPzNuevaCargando(true);
+    try {
+      // los contornos se leen EN ESTA COMPUTADORA: con ellos se dibujan las formas reales al instante
+      const _b = new Uint8Array(await file.arrayBuffer());
+      const contornosJson = await enHiloSuelto('contornos_de_pdf', { bytes: _b.slice() }, [], 'pieza');
+      const fd = new FormData();
+      fd.append('archivo', file);
+      fd.append('contornos_json', contornosJson);
+      if (pidCfg) fd.append('pid', pidCfg);
+      const r = await fetch('/api/plantilla/pieza_archivo', { method: 'POST', body: fd });
+      const d = await leerJson(r);
+      if (!r.ok) throw new Error(d.error || 'No se pudo leer el archivo');
+      let formas = [];
+      try { formas = JSON.parse(contornosJson) || []; } catch { formas = []; }
+      // el cambio queda APLICADO a la vista en el acto (la forma nueva en cada talle, la vieja se va)
+      setPzCamb({ ...base, archivo: file.name, archivoId: d.archivo, medidas: `${String(d.w_cm).replace(".", ",")} × ${String(d.h_cm).replace(".", ",")} cm`,
+                  contornos: d.contornos, formas });
+    } catch (err) { showError(err.message); }
+    finally { setPzNuevaCargando(false); }
+  };
+  const guardarCambiosPiezas = async () => {
+    // lo que está a la vista es lo que se guarda: la lista + el cambio en curso
+    const lista = [...pzCambPend];
+    if (pzCamb) {
+      const r = _cambioListo(pzCamb);
+      if (r.error) { showError(r.error); return; }
+      if (r.ok) lista.push(r.ok);
+    }
+    if (!lista.length) { showError('No hay ningún cambio para guardar.'); return; }
+    setPzNuevaCargando(true);
+    const t0 = performance.now();
+    try {
+      const cambios = lista.map(p => p.tipo === 'agregar'
+        ? { tipo: 'agregar', archivo: p.archivoId, talles: p.talles === 'todos' ? null : p.talles, por_talle: p.por_talle }
+        : { tipo: p.tipo, pieza_idx: p.idx, talles: p.talles === 'todos' ? null : p.talles, dx: p.dx || 0, dy: p.dy || 0,
+            ...(p.tipo === 'reemplazar' ? { archivo: p.archivoId } : {}) });
+      const r = await fetch('/api/plantilla/piezas_cambiar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: pidCfg, cambios })
+      });
+      const d = await leerJson(r);
+      if (!r.ok) throw new Error(d.error || 'No se pudieron guardar los cambios');
+      setPzCambPend([]); setPzCamb(null);
+      // el molde es OTRO archivo (una versión nueva): se recarga la detección y se tira lo derivado
+      _talleDetCache.current = {};
+      setEmpTodasData(null);
+      invalidarNido();
+      setSembrarGen(v => v + 1);
+      const _rd = await fetch(`/api/plantilla/deteccion${qPid()}`);
+      if (_rd.ok) { const _dd = await _rd.json(); setEtqData(_dd); setEtqNombres(_dd.nombres_existentes || {}); }
+      fetchEstado();
+      const seg = ((performance.now() - t0) / 1000).toFixed(1).replace('.', ',');
+      // `piezas` = todas las tocadas (también las nuevas): el mensaje dice las dos cosas cuando se guardan juntas
+      const _camb = (d.piezas || 0) - (d.nuevas || 0);
+      const _partes = [_camb ? (_camb === 1 ? 'Pieza cambiada' : `${_camb} piezas cambiadas`) : '',
+                       d.nuevas ? `${d.nuevas} forma${d.nuevas === 1 ? '' : 's'} nueva${d.nuevas === 1 ? '' : 's'}` : ''].filter(Boolean);
+      showMsg(`${_partes.join(' y ')} en ${d.talles} talle${d.talles === 1 ? '' : 's'} ✓ (${seg} s)`);
+      if (d.avisos && d.avisos.length) showWarn(d.avisos[0]);
+    } catch (err) { showError(err.message); }
+    finally { setPzNuevaCargando(false); }
+  };
+
   // ── UN MOLDE DEL PEDIDO QUE YA NO EXISTE SE SACA, NO SE ESPERA ──────────────────────────────
   // 🔴 El pedido vive en el navegador (`localStorage`) y los moldes con el diseño adentro son
   // EFÍMEROS: si se subió el archivo de nuevo, o se cerró el pedido en otra pestaña, o pasó el
@@ -15556,10 +15902,14 @@ export default function App() {
   const _limpiezaAviso = useRef(false);
   useEffect(() => {
     if (!productosCat.productos.length) return;          // el catálogo todavía no llegó
-    const vivos = new Set(productosCat.productos.map(p => p.id));
+    // un molde ARCHIVADO (MAPA 745) cuenta como «ya no está»: no se puede usar en un pedido
+    const vivos = new Set(productosCat.productos.filter(p => !p.archivado).map(p => p.id));
     const _faltan = [...new Set(Object.values(disenoMoldes).flat())].filter(id => !vivos.has(id));
     if (!_faltan.length) { _limpiezaAviso.current = false; return; }
     const _nom = _faltan.map(id => (moldesEfimeros || {})[id]?.nombre).filter(Boolean);
+    const _arch = _faltan.map(id => productosCat.productos.find(p => p.id === id)).filter(p => p && p.archivado)
+      .map(p => (p.archivado && p.archivado.de_plantilla && p.a_medida && p.a_medida.de
+        ? ((productosCat.productos.find(x => x.id === p.a_medida.de) || {}).nombre || p.nombre) : p.nombre));
     setDisenoMoldes(prev => {
       const n = {};
       Object.entries(prev).forEach(([did, ids]) => { n[did] = (ids || []).filter(id => vivos.has(id)); });
@@ -15580,11 +15930,12 @@ export default function App() {
     setMoldesBDiseno(prev => Object.fromEntries(Object.entries(prev || {}).filter(([id]) => vivos.has(id))));
     if (!_limpiezaAviso.current) {
       _limpiezaAviso.current = true;
-      showWarn(_nom.length
+      if (_arch.length) showWarn(`${_arch.length === 1 ? 'El molde' : 'Los moldes'} ${[...new Set(_arch)].map(n => `«${n}»`).join(', ')} se ${_arch.length === 1 ? 'archivó' : 'archivaron'}: ya no se ${_arch.length === 1 ? 'puede' : 'pueden'} usar en un pedido y se ${_arch.length === 1 ? 'sacó' : 'sacaron'} de este. Si lo necesitás, pedí que lo vuelvan a habilitar.`);
+      else showWarn(_nom.length
         ? `${_nom.length === 1 ? 'El molde' : 'Los moldes'} ${_nom.map(n => `«${n}»`).join(', ')} ya no ${_nom.length === 1 ? 'está' : 'están'} en el servidor (se sube para un pedido y no queda guardado). Volvé a cargarlo si lo necesitás.`
         : 'Un molde de este pedido ya no está en el servidor y se sacó del pedido.');
     }
-  }, [_idsCat, disenoMoldes]);
+  }, [_idsCat, _archCat, disenoMoldes]);
 
   // ── CAMINO B: elegir piezas y nombrarlas, como en la pantalla de edición ────────────────────
   // En el lienzo de TODOS los talles, una pieza es la MISMA en cada talle (misma mesa, mismo
@@ -21951,7 +22302,26 @@ export default function App() {
                     <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
                       <div>
                         <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>Moldería
-                          <Ayuda ancho={300}>Tus molderías registradas. Hacé clic en una para configurar molde, diseño y planilla.</Ayuda></h2>
+                          <Ayuda ancho={300}>Tus molderías registradas. Hacé clic en una para configurar molde, diseño y planilla. En «Archivados» están las que no se usan en pedidos.</Ayuda></h2>
+                        {(() => {
+                          const _cat = productosCat.productos.filter(p => !p.personal);
+                          const nHab = _cat.filter(p => !p.archivado).length;
+                          const nArch = _cat.filter(p => p.archivado && !p.archivado.de_plantilla).length;
+                          const pill = (on, txt, n, onClick) => (
+                            <button type="button" onClick={onClick}
+                              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+                                border: on ? '1px solid var(--accent)' : '1px solid var(--border-light)',
+                                background: on ? 'rgba(0,216,245,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                              {txt}<span style={{ fontSize: 11, opacity: 0.8 }}>{n}</span>
+                            </button>
+                          );
+                          return (
+                            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                              {pill(!verArchivados, 'Habilitados', nHab, () => setVerArchivados(false))}
+                              {pill(verArchivados, 'Archivados', nArch, () => setVerArchivados(true))}
+                            </div>
+                          );
+                        })()}
                       </div>
                       {/* BUSCADOR (pedido del usuario 2026-09-21): por nombre del molde o de una de sus
                           VARIABLES — si se busca una variable, se ve el molde que la tiene. Cuanto más
@@ -21985,11 +22355,13 @@ export default function App() {
                     {/* `molde-grilla`: la ayuda marca TODA la grilla para decir «abrí la moldería
                         con la que vas a trabajar». Antes marcaba la 1ª tarjeta (`molde-tarjeta`) y
                         mandaba a abrir la equivocada. */}
+                    {!verArchivados && (
                     <div className="product-crm-grid" data-tour="molde-grilla" style={{ marginBottom: 24 }}>
-                      {buscarMolderia.trim() && !filtrarBusqueda(buscarMolderia, productosCat.productos.filter(p => !p.personal), p => [p.nombre, ...(p.variantes || []).map(v => v.label)]).length && (
+                      {buscarMolderia.trim() && !filtrarBusqueda(buscarMolderia, productosCat.productos.filter(p => !p.personal && !p.archivado), p => [p.nombre, ...(p.variantes || []).map(v => v.label)]).length && (
                         <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '8px 0' }}>Ningún molde ni variable coincide con «{buscarMolderia.trim()}».</div>
                       )}
-                      {filtrarBusqueda(buscarMolderia, productosCat.productos.filter(p => !p.personal), p => [p.nombre, ...(p.variantes || []).map(v => v.label)]).map(({ item: p, cual }, _i) => {
+                      {/* (los ARCHIVADOS van aparte, abajo: MAPA 745) */}
+                      {filtrarBusqueda(buscarMolderia, productosCat.productos.filter(p => !p.personal && !p.archivado), p => [p.nombre, ...(p.variantes || []).map(v => v.label)]).map(({ item: p, cual }, _i) => {
                         const esActivo = p.id === productosCat.activo;
                         // si lo que coincidió fue una VARIABLE (no el nombre del molde), se muestra cuál
                         const _varHallada = cual > 0 ? ((p.variantes || [])[cual - 1] || {}).label : null;
@@ -22039,6 +22411,27 @@ export default function App() {
                               >
                                 <Icon name="edit" style={{ width: 11, height: 11 }} />
                               </button>
+                              {/* ARCHIVAR (MAPA 745): con su propio permiso; apagado y diciendo por qué si falta. */}
+                              {!(p.a_medida && p.a_medida.de) && !p.efimero && (() => {
+                                const sinPermiso = !puedo('molde.archivar');
+                                return (
+                                  <button
+                                    className="btn ghost"
+                                    disabled={sinPermiso}
+                                    title={sinPermiso
+                                      ? 'Tu usuario no tiene el permiso «molde.archivar». Se da por ROL en Configuración › Usuarios y permisos.'
+                                      : 'Archivar: no se usa en pedidos y pasa a «Archivados»'}
+                                    style={{ padding: '4px 8px', fontSize: 11, opacity: sinPermiso ? 0.35 : 1, cursor: sinPermiso ? 'not-allowed' : 'pointer' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (sinPermiso) { showWarn('Tu usuario no tiene permiso para archivar molderías («molde.archivar»). Se asigna por rol en Configuración › Usuarios y permisos.'); return; }
+                                      handleArchivarProducto(p.id, true);
+                                    }}
+                                  >
+                                    <Icon name="archivar" style={{ width: 11, height: 11 }} />
+                                  </button>
+                                );
+                              })()}
                               {/* Borrar una moldería del catálogo borra sus archivos y afecta a
                                   TODOS: va con su propio permiso, aparte de `molde.editar`.
                                   ⚠️ NO se esconde el botón: se muestra APAGADO y diciendo por qué.
@@ -22069,6 +22462,55 @@ export default function App() {
                         );
                       })}
                     </div>
+                    )}
+
+                    {/* ── ARCHIVADOS (MAPA 745) ─────────────────────────────────────────────────
+                        Su propia pestaña: no se abren ni se activan desde acá (archivado no se
+                        trabaja), sólo se ven y se vuelven a habilitar. El buscador también los filtra. */}
+                    {verArchivados && (() => {
+                      const _todos = productosCat.productos.filter(p => !p.personal && p.archivado && !p.archivado.de_plantilla);
+                      const _arch = filtrarBusqueda(buscarMolderia, _todos, p => [p.nombre, ...(p.variantes || []).map(v => v.label)]);
+                      const sinPermiso = !puedo('molde.archivar');
+                      return (
+                        <div style={{ marginBottom: 24 }}>
+                          {!_todos.length && (
+                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '8px 0' }}>No hay molderías archivadas.</div>
+                          )}
+                          {!!_todos.length && !_arch.length && (
+                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '8px 0' }}>Ningún archivado coincide con «{buscarMolderia.trim()}».</div>
+                          )}
+                          <div className="product-crm-grid">
+                            {_arch.map(({ item: p }) => {
+                              const _a = p.archivado || {};
+                              const _cuando = _a.cuando ? new Date(_a.cuando * 1000).toLocaleDateString('es-UY') : null;
+                              const _nv = (p.variantes || []).length;
+                              return (
+                                <div key={p.id} className="product-card" style={{ opacity: 0.75, cursor: 'default' }}>
+                                  <div className="product-card-header">
+                                    <div className="product-card-title">{p.nombre}</div>
+                                    <div className="badge neutral" style={{ fontSize: 9 }}>Archivado</div>
+                                  </div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: -4 }}>
+                                    {_nv} variable{_nv === 1 ? '' : 's'}{_cuando ? ` · desde el ${_cuando}` : ''}{_a.por_nombre ? ` · ${_a.por_nombre}` : ''}
+                                  </div>
+                                  <div className="product-card-actions">
+                                    <button className="btn ghost" disabled={sinPermiso}
+                                      title={sinPermiso ? 'Tu usuario no tiene el permiso «molde.archivar». Se da por ROL en Configuración › Usuarios y permisos.' : 'Vuelve a usarse en pedidos, tal cual estaba'}
+                                      style={{ padding: '4px 10px', fontSize: 11.5, opacity: sinPermiso ? 0.35 : 1, cursor: sinPermiso ? 'not-allowed' : 'pointer' }}
+                                      onClick={() => {
+                                        if (sinPermiso) { showWarn('Tu usuario no tiene permiso para habilitar molderías archivadas («molde.archivar»). Se asigna por rol en Configuración › Usuarios y permisos.'); return; }
+                                        handleArchivarProducto(p.id, false);
+                                      }}>
+                                      Habilitar
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </>
                 ) : prodCfg && (
                   <>
@@ -23307,6 +23749,120 @@ export default function App() {
                               onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; if (f) subirArchivoPieza(f); else setPzNueva(null); }} />
                           </div>
                           )}
+
+                          {/* CAMBIAR PIEZAS (MAPA 746-749): forma nueva, mover o agregar formas en UN toque (pedido del
+                              usuario 2026-10-26): se elige la pieza en el visor, «Cambiar forma» abre el archivo y el cambio
+                              ya se VE aplicado en todos los talles. «Guardar» lo escribe (una versión nueva, conserva todo lo
+                              configurado: es la misma pieza); salir sin guardar lo descarta y queda como estaba. */}
+                          {etqData && !_esConDiseno(pidCfg) && (() => {
+                            const _enCurso = pzCamb && !(pzCamb.tipo === 'reemplazar' && !pzCamb.archivoId);
+                            const _nCamb = pzCambPend.length + (_enCurso ? 1 : 0);
+                            const _rotulo = (c) => (c.tipo === 'agregar' ? `Agregada${c.archivo ? ` · ${c.archivo}` : ''}`
+                              : `${c.tipo === 'reemplazar' ? (c.archivoId ? 'Forma nueva' : 'Cambiar') : 'Movida'} · ${nombreDePieza(c.idx) || `pieza ${c.idx + 1}`}`);
+                            const _sinPiezaAun = pzCamb && pzCamb.tipo !== 'agregar' && pzCamb.idx == null;
+                            const _talles = (c) => (c.talles === 'todos' ? 'todos los talles' : `${c.talles.length} talle${c.talles.length === 1 ? '' : 's'}`);
+                            return (
+                          <div data-tour="pieza-cambiar" style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 10, display: 'flex', flexDirection: 'column', gap: 9 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', flex: 1 }}>Cambiar piezas</span>
+                              <Ayuda ancho={340}>Tocá <b>Cambiar pieza</b>: se abre el espacio para cambiarla, con todos los talles en el visor. Tocá la pieza, después <b>Cargar forma</b> (la forma dibujada una vez por talle, del más chico al más grande) y el cambio ya se ve en todos los talles; si la querés correr, arrastrala. <b>Mover</b>: abrís, tocás la pieza y la arrastrás. <b>Agregar</b>: una forma nueva sin tocar ninguna pieza. En <b>todos los talles</b> o en los que elijas. La pieza conserva su nombre, variables, telas, etiqueta y diseño. <b>Guardar</b> lo deja en el molde (una versión nueva: tu archivo original y sus capas no se tocan); si salís sin guardar, queda como estaba.</Ayuda>
+                            </div>
+                            {/* 🔴 el botón ABRE el espacio; la pieza se elige DESPUÉS, en el visor (pedido del usuario, MAPA 748/750) */}
+                            {/* con un cambio hecho, tocar otra herramienta lo deja en la lista (a la vista) y abre otro */}
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              {[['reemplazar', 'Cambiar pieza'], ['mover', 'Mover'], ['agregar', 'Agregar']].map(([tipo, txt]) => {
+                                const on = pzCamb && pzCamb.tipo === tipo;
+                                return (
+                                  <button key={tipo} type="button" className="btn ghost"
+                                    style={{ flex: 1, fontSize: 11.5, padding: '6px 6px', ...(on ? { border: '1px solid var(--accent)', color: 'var(--accent)', background: 'rgba(0,216,245,0.12)' } : {}) }}
+                                    disabled={!!pzNueva || pzNuevaCargando}
+                                    onClick={() => abrirCambio(tipo)}>{txt}</button>
+                                );
+                              })}
+                            </div>
+                            {pzCamb && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                                <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                                  {_sinPiezaAun
+                                    ? <><b>{pzCamb.tipo === 'reemplazar' ? 'Cambiar pieza' : 'Mover'}</b> · 👆 tocá la pieza en el visor</>
+                                    : <><b>{pzCamb.tipo === 'agregar' && !pzCamb.archivo ? 'Agregar' : _rotulo(pzCamb)}</b>{pzCamb.tipo !== 'mover' && pzCamb.medidas ? ` · ${pzCamb.medidas}` : ''}</>}
+                                  {(tallesMolde || []).length > 1 && !empTodasData && <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Abriendo los talles en el visor…</div>}
+                                </div>
+                                {pzCamb.tipo !== 'mover' && !_sinPiezaAun && (
+                                  <button type="button" className={`btn ${pzCamb.archivoId ? 'ghost' : 'primary'}`} style={{ fontSize: 11.5, padding: '6px 8px' }}
+                                    disabled={pzNuevaCargando} onClick={cargarFormaCambio}>
+                                    <Icon name="upload" style={{ width: 11, height: 11, marginRight: 4 }} />
+                                    {pzNuevaCargando ? 'Leyendo…' : pzCamb.archivoId ? 'Otro archivo' : 'Cargar forma'}
+                                  </button>
+                                )}
+                                {/* EN QUÉ TALLES (decisión del usuario: «las 2 opciones») */}
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  {[['todos', 'Todos los talles'], ['elegir', 'Elegir']].map(([k, txt]) => {
+                                    const on = k === 'todos' ? pzCamb.talles === 'todos' : pzCamb.talles !== 'todos';
+                                    return (
+                                      <button key={k} type="button" onClick={() => setPzCamb(v => ({ ...v, talles: k === 'todos' ? 'todos' : [] }))}
+                                        style={{ flex: 1, fontSize: 11, padding: '5px 8px', borderRadius: 8, cursor: 'pointer', fontWeight: 700,
+                                          border: on ? '1px solid var(--accent)' : '1px solid var(--border-light)',
+                                          background: on ? 'rgba(0,216,245,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>{txt}</button>
+                                    );
+                                  })}
+                                </div>
+                                {pzCamb.talles !== 'todos' && (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                    {tallesMolde.map(t => {
+                                      const on = (pzCamb.talles || []).includes(t);
+                                      return (
+                                        <button key={t} type="button"
+                                          onClick={() => setPzCamb(v => ({ ...v, talles: on ? v.talles.filter(x => x !== t) : tallesMolde.filter(x => x === t || v.talles.includes(x)) }))}
+                                          style={{ fontSize: 10.5, padding: '3px 8px', borderRadius: 999, cursor: 'pointer', fontWeight: 700,
+                                            border: on ? '1px solid var(--accent)' : '1px solid var(--border-light)',
+                                            background: on ? 'rgba(0,216,245,0.14)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>{t}</button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {pzCamb.tipo !== 'mover' && pzCamb.archivoId && _faltanFormas(pzCamb).length > 0 && (
+                                  <div style={{ fontSize: 11.5, fontWeight: 700, padding: '7px 9px', borderRadius: 8, lineHeight: 1.4, background: 'rgba(255,90,90,0.12)', color: '#ff8a8a' }}>
+                                    ⚠ {_avisoFaltan(pzCamb, _faltanFormas(pzCamb))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {pzCambPend.length > 0 && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                {pzCambPend.map((c, i) => (
+                                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
+                                      {_rotulo(c)} · {_talles(c)}
+                                    </span>
+                                    <button title="Deshacer este cambio" onClick={() => setPzCambPend(prev => prev.filter((_, k) => k !== i))} disabled={pzNuevaCargando}
+                                      style={{ border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {(pzCamb || _nCamb > 0) && (
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                {pzCamb ? (
+                                  <button type="button" className="btn ghost" style={{ flex: 1, fontSize: 11.5, padding: '6px 8px' }} disabled={pzNuevaCargando}
+                                    onClick={cancelarCambio}>Cancelar</button>
+                                ) : (
+                                  <button type="button" className="btn ghost" style={{ flex: 1, fontSize: 11.5, padding: '6px 8px' }} disabled={pzNuevaCargando}
+                                    onClick={() => { setPzCamb(null); setPzCambPend([]); pzCambIntento.current = null; }}>Descartar</button>
+                                )}
+                                {_nCamb > 0 && (
+                                  <button type="button" className="btn primary" style={{ flex: 1, fontSize: 11.5, padding: '6px 8px' }} disabled={pzNuevaCargando}
+                                    onClick={guardarCambiosPiezas}>
+                                    {pzNuevaCargando ? 'Guardando…' : `Guardar${_nCamb > 1 ? ` (${_nCamb})` : ''}`}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            <input type="file" ref={fileInputFormaRef} accept=".ai,.pdf" hidden
+                              onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; if (f) subirFormaPieza(f); else pzCambIntento.current = null; }} />
+                          </div>
+                            );
+                          })()}
 
                           {etqData ? (
                             <>
@@ -24695,6 +25251,92 @@ export default function App() {
                         position: 'relative'
                       }}
                         ref={setVisorEl}
+                        onMouseDownCapture={(e) => {
+                          // «DÓNDE VA» (Agregar una pieza / Cambiar piezas, MAPA 747): tocar o ARRASTRAR en
+                          // CUALQUIER lugar del visor —también fuera del rectángulo de las piezas, que es donde
+                          // antes no llegaba el clic— y la forma sigue al puntero al instante.
+                          const _hayCamb = !!(pzCamb || pzCambPend.length);
+                          if (e.button !== 0 || !(_hayCamb || (pzNueva && !pzNueva.punto2))) return;
+                          if (e.target.closest && e.target.closest('button, input, select, a')) return;
+                          const svg = visorSvgRef.current;
+                          if (!svg) return;
+                          if (_hayCamb) {
+                            // CAMBIAR PIEZAS (MAPA 749): tocar OTRA pieza la elige (en el lienzo de todos los talles se
+                            // pasa a su homóloga del talle guía, que es como la guarda el molde; si ya tenía un cambio,
+                            // vuelve a ser el que se arrastra); apretar sobre el cambio en curso —o en un lugar vacío—
+                            // y ARRASTRAR lo corre al instante en todos los talles juntos.
+                            if ((tallesMolde || []).length > 1 && !empTodasData) return;   // el lienzo de los talles todavía no llegó
+                            const q0 = _puntoSvg(svg, e.clientX, e.clientY);
+                            if (!q0) return;
+                            const L = canvasLayout.layout || [];
+                            const _deGuia = (p) => {
+                              if (p.talle == null) return p.idx;
+                              const g = p.name ? L.find(q => q.talle === _guiaT() && q.name === p.name) : null;
+                              return g ? g.t_idx : p.t_idx;
+                            };
+                            const _sobreCambio = (c) => Object.values(geomCambio(c)).some(g => {
+                              const f = g.viejo || null;
+                              let w = f ? f.pw : 0, h = f ? f.ph : 0;
+                              if (c.tipo !== 'mover') {
+                                const fx = (_formasPorTalle(c) || {});
+                                const ff = Object.values(fx)[0];
+                                if (ff) { w = (ff.bbox_raw[2] - ff.bbox_raw[0]) * _MM_POR_PT; h = (ff.bbox_raw[3] - ff.bbox_raw[1]) * _MM_POR_PT; }
+                              }
+                              return Math.abs(q0.x - g.x) <= w / 2 + 3 && Math.abs(q0.y - g.y) <= h / 2 + 3;
+                            });
+                            const el = e.target.closest && e.target.closest('[data-piece]');
+                            const p = el ? L.find(q => String(q.idx) === el.getAttribute('data-piece')) : null;
+                            // ELEGIR LA PIEZA (MAPA 750): con el espacio de «Cambiar pieza» / «Mover» abierto y la pieza
+                            // todavía sin elegir —o elegida pero sin nada hecho— tocar una pieza la elige
+                            if (pzCamb && pzCamb.tipo !== 'agregar' && p) {
+                              const gi = _deGuia(p);
+                              const vacio = pzCamb.tipo === 'mover' ? !pzCamb.punto : !pzCamb.archivoId;
+                              if (pzCamb.idx == null || (vacio && gi !== pzCamb.idx)) {
+                                e.stopPropagation(); e.preventDefault();
+                                setEtqSeleccion(gi);
+                                elegirPiezaCambio(gi);
+                                return;
+                              }
+                            }
+                            if (pzCamb && pzCamb.tipo !== 'agregar' && pzCamb.idx == null) { e.stopPropagation(); e.preventDefault(); return; }
+                            if (!(pzCamb && _sobreCambio(pzCamb)) && p) {
+                              e.stopPropagation(); e.preventDefault();
+                              const gi = _deGuia(p);
+                              setEtqSeleccion(gi);
+                              const ya = pzCambPend.find(c => c.tipo !== 'agregar' && c.idx === gi);
+                              if (ya && !(pzCamb && pzCamb.idx === gi && pzCamb.tipo !== 'agregar')) {
+                                if (!_fijarCambio()) return;
+                                setPzCambPend(prev => prev.filter(c => c !== ya));
+                                setPzCamb(ya);
+                              }
+                              return;
+                            }
+                            if (!pzCamb) return;
+                            e.stopPropagation(); e.preventDefault();
+                            const ini = _puntoActual(pzCamb);
+                            if (!ini) return;
+                            const mv = (ev) => {
+                              if (!(ev.buttons & 1)) return;
+                              const q = _puntoSvg(svg, ev.clientX, ev.clientY);
+                              if (q) setPzCamb(v => (v ? { ...v, punto: { x: ini.x + q.x - q0.x, y: ini.y + q.y - q0.y } } : v));
+                            };
+                            const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+                            window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+                            return;
+                          }
+                          const poner = (ev) => {
+                            const p = _puntoSvg(svg, ev.clientX, ev.clientY);
+                            if (!p) return;
+                            const o = pzNueva.origen === 'duplicar' ? (canvasLayout.layout || []).find(q => q.idx === pzNueva.idx) : null;
+                            const ox = o ? o.px + o.pw / 2 : 0, oy = o ? o.py + o.ph / 2 : 0;
+                            setPzNueva(v => (v ? { ...v, punto: { x: p.x, y: p.y, dx: p.x - ox, dy: p.y - oy } } : v));
+                          };
+                          poner(e);
+                          e.stopPropagation(); e.preventDefault();
+                          const mv = (ev) => { if (ev.buttons & 1) poner(ev); };
+                          const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+                          window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+                        }}
                         onMouseDown={(e) => {
                           if (e.button === 2 && etqData && tabAjustesMolde !== 'planilla') { panVisor(e); return; }
                           // `empModo` va acá o el recuadro NO se dibuja al agrupar piezas: este panel
@@ -25555,21 +26197,9 @@ export default function App() {
                                 }
                               }}
                               onMouseDown={(e) => {
-                                // MARCAR EL LUGAR de la pieza nueva: el clic da el punto en unidades
-                                // del viewBox, que acá son MILÍMETROS (el svg se dibuja a px = mm).
-                                if (pzNueva && !pzNueva.punto2) {
-                                  const p = _puntoSvg(e.currentTarget, e.clientX, e.clientY);
-                                  if (p) {
-                                    // El server coloca RELATIVO a la pieza de origen (o a la 1ª del
-                                    // molde, si la pieza viene de un archivo).
-                                    const o = pzNueva.origen === 'duplicar'
-                                      ? (canvasLayout.layout || []).find(q => q.idx === pzNueva.idx) : null;
-                                    const ox = o ? o.px + o.pw / 2 : 0, oy = o ? o.py + o.ph / 2 : 0;
-                                    setPzNueva(v => ({ ...v, punto: { x: p.x, y: p.y, dx: p.x - ox, dy: p.y - oy } }));
-                                  }
-                                  e.preventDefault();
-                                  return;
-                                }
+                                // («dónde va» de Agregar / Cambiar piezas lo atiende el VISOR ENTERO, en
+                                //  `onMouseDownCapture`: el svg sólo cubre el rectángulo de las piezas y
+                                //  tocar en un espacio vacío —justo donde se quiere poner algo— no llegaba)
                                 // Con una variable abierta: apretar el izquierdo en un espacio VACÍO
                                 // arranca el recuadro de selección (sobre una pieza no llega acá:
                                 // su `<g>` corta el evento con stopPropagation).
@@ -25596,6 +26226,33 @@ export default function App() {
                                     )}
                                     <line x1={p.punto.x - r} y1={p.punto.y} x2={p.punto.x + r} y2={p.punto.y} stroke="#f59e0b" strokeWidth={2 / k2} />
                                     <line x1={p.punto.x} y1={p.punto.y - r} x2={p.punto.x} y2={p.punto.y + r} stroke="#f59e0b" strokeWidth={2 / k2} />
+                                  </g>
+                                );
+                              })}
+                              {[...pzCambPend.map(c => [c, '#34d399', 'rgba(16,185,129,0.14)']), ...(pzCamb ? [[pzCamb, '#10b981', 'rgba(16,185,129,0.24)']] : [])].map(([c, col, fondo], i) => {
+                                // CAMBIAR PIEZAS: el cambio YA APLICADO a la vista, con la FORMA REAL en cada talle elegido
+                                // (pedido del usuario: nada de rectángulos; «cargo el archivo y ya se ve el cambio»). La pieza
+                                // de antes no se dibuja (`_ocultasCamb`); el que se está arrastrando, más marcado.
+                                const k2 = visorView.k || 1, r = 14 / k2;
+                                if (c.tipo === 'reemplazar' && !c.archivoId) return null;
+                                const geo = geomCambio(c);
+                                return (
+                                  <g key={'pzc' + i} style={{ pointerEvents: 'none' }}>
+                                    {Object.entries(geo).map(([t, g]) => (
+                                      <g key={t}>
+                                        {c.tipo === 'mover' && g.viejo && (
+                                          <path d={g.viejo.path_svg} transform={`translate(${g.dx} ${g.dy})`} fill={fondo} stroke={col} strokeWidth={1.6 / k2} />
+                                        )}
+                                        {c.tipo !== 'mover' && g.d && (
+                                          <path d={g.d} transform={`translate(${g.x} ${g.y})`} fill={fondo} stroke={col} strokeWidth={1.6 / k2} />
+                                        )}
+                                        {c.tipo !== 'mover' && !g.d && (
+                                          <g stroke={col} strokeWidth={2 / k2}>
+                                            <line x1={g.x - r} y1={g.y} x2={g.x + r} y2={g.y} /><line x1={g.x} y1={g.y - r} x2={g.x} y2={g.y + r} />
+                                          </g>
+                                        )}
+                                      </g>
+                                    ))}
                                   </g>
                                 );
                               })}
@@ -25781,10 +26438,17 @@ export default function App() {
                                 if (aisladoSet && !aisladoSet.has(p.idx)) return null;
                                 if (empTodasInfo && p.talle && tallesOcultos.has(p.talle)) return null;   // capa oculta por su ojito
                                 if (empModo && piezasOcultas.size && piezasOcultas.has(nombreGenerico((((p.name || etqNombres[p.idx]) || '').trim())))) return null;   // pieza con el ojo cerrado (sección Piezas de la barra)
-                                const esSeleccionado = etqSeleccion === p.idx;
+                                if (_ocultasCamb.has(p.idx)) return null;   // CAMBIAR PIEZAS: se ve sólo cómo queda (la forma nueva la dibuja el cambio)
+                                // en el lienzo de los talles de «Cambiar piezas» la elegida es la del talle guía: se marca en TODOS sus talles
+                                const esSeleccionado = (_pzCambClave && p.talle != null && typeof etqSeleccion === 'number')
+                                  ? (nombreDePieza(etqSeleccion) ? p.name === nombreDePieza(etqSeleccion) : p.t_idx === etqSeleccion)
+                                  : etqSeleccion === p.idx;
                                 // En la vista junta el nombre NO puede salir de `etqNombres` (es el de UN
                                 // talle): cada pieza trae el suyo, el de su propia variante.
-                                const nombrePz = empTodasInfo ? (empTodasInfo.nom[`${p.talle}|${p.t_idx}`] || '') : (etqNombres[p.idx] || '');
+                                // (en el lienzo de TODOS los talles sin agrupar —«Cambiar piezas», MAPA 747— cada pieza
+                                //  trae su nombre: el de `etqNombres` es el del talle guía y por número no corresponde)
+                                const nombrePz = empTodasInfo ? (empTodasInfo.nom[`${p.talle}|${p.t_idx}`] || '')
+                                  : (p.talle != null ? (p.name || '') : (etqNombres[p.idx] || ''));
                                 // Coloreo por estado según el paso de Variables.
                                 const enVar = tabAjustesMolde === 'variables';
                                 const enNombrar = enVar && varStep === 'nombrar';
@@ -25931,7 +26595,7 @@ export default function App() {
                                     onMouseDown={(e) => startDrag(e, p.idx)}
                                     onMouseEnter={() => pintarTelaPieza(p.idx)}   /* respaldo del pintado (el principal va por onMouseMove del svg) */
                                   >
-                                    <title>{empTodasInfo
+                                    <title>{(empTodasInfo || p.talle != null)
                                       ? `${p.talle} · pieza #${p.t_idx + 1}${nombrePz ? ` — ${nombrePz}` : ' (sin agrupar)'}`
                                       : (nombrePz ? `${nombrePz} (Pieza #${p.idx + 1})` : `Pieza #${p.idx + 1} (sin asignar)`)}</title>
 
@@ -25988,7 +26652,7 @@ export default function App() {
                                         {/* mientras el lienzo TODAS carga, las piezas vienen de la
                                             detección suelta (sin t_idx) pero empTodasInfo ya existe:
                                             sin el fallback el rótulo mostraba NaN */}
-                                        {((empTodasInfo ? (p.t_idx ?? p.idx) : p.idx) ?? 0) + 1}
+                                        {(((empTodasInfo || p.talle != null) ? (p.t_idx ?? p.idx) : p.idx) ?? 0) + 1}
                                       </text>
                                       {/* De qué variante es esta pieza. En la vista junta el nombre de la
                                           variante ya va UNA vez por bloque: acá sólo se repite si sobra
@@ -27031,6 +27695,8 @@ export default function App() {
                                   boxShadow: on ? '0 0 16px rgba(0,216,245,0.16)' : 'none' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 8 }}>
                                   <span style={{ fontWeight: 700, fontSize: 13.5, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</span>
+                                  {/* archivado (MAPA 745): se puede dejar en el grupo, pero no entra en ningún pedido */}
+                                  {p.archivado && <span className="badge neutral" style={{ fontSize: 9, flexShrink: 0 }} title="Archivado: no se usa en pedidos">Archivado</span>}
                                   <span style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0, border: on ? 'none' : '1.5px solid var(--border-light)', background: on ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                     {on && <Icon name="check" style={{ width: 12, height: 12, color: '#000', strokeWidth: 3 }} />}
                                   </span>
