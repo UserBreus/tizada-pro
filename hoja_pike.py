@@ -381,7 +381,7 @@ def svgs_de_bases(bases, docs_base, procesos=None):
             faltan = [p for p in faltan if p[0] not in svgs]
             if not faltan:
                 break
-            print(f"[preview] {len(faltan)} base(s) sin SVG en el intento {intento} (tope {tope:.0f} s)", flush=True)
+            print(f"[preview] {len(faltan)} {'base' if len(faltan) == 1 else 'bases'} sin SVG en el intento {intento} (tope {tope:.0f} s)", flush=True)
             if propio is not None:
                 _PR.descartar(propio)        # uno trabado no se destraba: se mata
                 propio = ejecutor = None

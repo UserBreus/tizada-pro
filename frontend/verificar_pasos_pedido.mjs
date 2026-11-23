@@ -121,7 +121,7 @@ ok(/_n !== guiaSeq\.current/.test(cg),
    'y si se toca otro talle, la respuesta vieja se descarta (manda el ultimo clic)');
 // 🔴 La deteccion devuelve como guia la GUARDADA: si el guardado fallo y no dijeramos nada, la
 // pantalla volveria sola al talle anterior y pareceria que el clic no funciono.
-ok(/No se pudo guardar el/.test(cg), 'si el guardado falla, se DICE');
+ok(/No se pudo guardar (el|\$\{generoTerm)/.test(cg), 'si el guardado falla, se DICE');   // (con el género del término: MAPA 776)
 ok(/guiaFallo\.current === _n \? _antes : talleRef/.test(cg),
    'y el dibujo, que llega despues, no vuelve a poner un talle que no se guardo');
 ok(APP.includes('dibujando'), 'mientras llega el dibujo se avisa, para que no parezca colgado');

@@ -46,6 +46,8 @@ FORMATO = "tizadapro.pedido/1"
 FORMATO_RESULTADO = "tizadapro.resultado/1"
 PROCESOS = ("sublimado", "tpu", "bordado", "dtf")       # lo que puede llevar un objeto editable
 EXT_ARTE = (".ai", ".pdf")
+# TIZADA PARA CORTE (MAPA 816): los formatos de cada mesa (gemelo de `frontend/src/motor/corte/formatos.js`)
+FORMATOS_CORTE = ("pdf", "dxf", "ai", "plt", "svg", "eps")
 EXT_FUENTE = (".ttf", ".otf")
 MAX_ZIP_MB = 600                  # el paquete entero
 MAX_ARCHIVOS = 400
@@ -280,10 +282,18 @@ ALARMAS = {
     "tiras-sin-margen":        ("datos", True,  "Se pidieron tiras en lados que no tienen margen: la marca va del borde a la guía del diseño y sin margen no hay guía.", "Pedirlas en lados con margen (ver `a_medida.margen_cm` del molde) o no pedir tiras."),
     "tiras-no-a-medida":       ("datos", False, "Se mandaron tiras en un molde que no es a medida: se ignoran.", "Las tiras son sólo de los moldes a medida (`a_medida` en /variables)."),
     "talle-sin-columna":       ("datos", True,"La planilla del molde no tiene columna de talle, pero el molde tiene varios talles: no se sabe de cuál es cada fila.", "Avisar al que administra TIZADA: ese molde necesita una planilla con columna de talle."),
+    # MAPA 755: la misma regla que la pantalla — en un diseño, cada columna de talle va con un solo molde
+    "misma-columna-de-talle":  ("datos", True,  "Un diseño lleva dos moldes (o dos variables del mismo molde) que toman el talle de la misma columna: no se sabe de cuál es cada fila.", "Mandar cada uno en su propio diseño, o usar moldes que lean columnas de talle distintas (p. ej. «Talle» y «Talle short»)."),
     "opcion-inexistente":      ("datos", True,  "Una fila trae un valor que no está entre las opciones de esa columna.", "Usar una de las opciones publicadas."),
     "opcion-sin-piezas":       ("datos", True,  "Una fila pide una opción (p. ej. manga larga) que el molde no tiene.", "Elegir una opción que el molde sí tenga."),
     "cantidad-invalida":       ("datos", True,  "La cantidad tiene que ser un número entero de 1 en adelante.", "Corregir la cantidad."),
     "mesas-invalido":          ("datos", True,  "La forma de repartir las mesas no se entiende o nombra un talle que no existe.", "Ver `mesas` en el formato."),
+    # ── TIZADA PARA CORTE (MAPA 816): `modo: "corte"` = sin arte; sale la línea de corte de cada pieza ──
+    "modo-invalido":           ("datos", True,  "`modo` no se entiende.", "`modo`: \"sublimado\" (lo de siempre) o \"corte\" (tizada para corte, sin arte)."),
+    "molde-no-corte":          ("datos", True,  "Un molde a medida no entra en una tizada para corte.", "La tizada para corte usa los moldes base de la moldería."),
+    "corte-ignora-arte":       ("datos", False, "En una tizada para corte no se usa el arte: lo que vino del arte (arte, tipografías, editables, ajustes, colores, mapeo, reemplazos) se ignora.", "No mandarlo en un pedido de corte."),
+    "formatos-invalidos":      ("datos", True,  "`opciones.formatos` trae un formato que no existe.", "Formatos: pdf, dxf (DXF 2000), ai (Illustrator 3), plt (HPGL), svg, eps."),
+    "formatos-sin-corte":      ("datos", False, "`opciones.formatos` sólo vale en una tizada para corte: se ignora.", "Mandar `modo: \"corte\"` o sacar `formatos`."),
     "largo-mesa-invalido":     ("datos", True,  "`mesas.largo_max_m` no es un largo de mesa válido (va de 0,10 a 50 m).", "Mandar el largo máximo de cada mesa en metros, o no mandarlo (rige el del nesting del molde)."),
     "pedido-rechazado-por-reglas": ("datos", True, "Las reglas del pedido (las mismas de la pantalla) lo rechazaron.", "Leer el mensaje: dice qué fila o qué pieza."),
     "aviso-url-no-permitida":  ("datos", False, "La dirección de aviso del pedido no es del mismo sitio que la configurada: se usa la configurada.", "Configurarla en Integraciones."),
@@ -723,6 +733,11 @@ def revisar_datos(pedido, archivos, estado_previo=None):
     for k, tipo in (("pedido_externo", dict), ("opciones", dict), ("mesas", dict), ("cliente", str)):
         if pedido.get(k) is not None and not isinstance(pedido.get(k), tipo):
             A.append(alarma("campo-tipo", f"`{k}` vino con un tipo que no corresponde", campo=k))
+    # TIZADA PARA CORTE (MAPA 816): el tercer camino de la pantalla, por la API (paridad con el pedido)
+    modo_ped = str(pedido.get("modo") or "sublimado").strip().lower()
+    if modo_ped not in ("sublimado", "corte"):
+        A.append(alarma("modo-invalido", f"«{pedido.get('modo')}»", campo="modo"))
+    corte = modo_ped == "corte"
     disenos = pedido.get("disenos")
     if not isinstance(disenos, list) or not disenos:
         A.append(alarma("disenos-vacio", campo="disenos"))
@@ -941,6 +956,15 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                 if _norm(fte) not in _cat_f and not (m.get("tipografias") or d.get("tipografias")):
                     A.append(alarma("tipografia-desconocida", f"«{fte}»", campo=f"{cm}.tipografia_por_campo.{campo}")); continue
                 tpc_m[str(campo)] = _cat_f.get(_norm(fte), str(fte))
+            # TIZADA PARA CORTE (MAPA 816): sin arte; el molde a medida no entra (igual que en la pantalla)
+            if corte and isinstance(prod.get("a_medida"), dict):
+                A.append(alarma("molde-no-corte", f"«{prod.get('nombre')}» en «{nom}»", campo=cm + ".molde")); continue
+            if corte:
+                _del_arte = [k for k in ("arte", "tipografias", "editables", "ajustes", "colores", "mapeo_arte", "reemplazos", "tipografia_por_campo")
+                             if m.get(k)] + [f"diseño.{k}" for k in ("arte", "tipografias", "tipografia_por_campo") if d.get(k) and j == 0]
+                if _del_arte:
+                    A.append(alarma("corte-ignora-arte", f"«{prod.get('nombre')}» en «{nom}»: " + ", ".join(_del_arte), campo=cm))
+                marcas, sin_marca, declarados, ajustes, colores, mapeo_m, reempl_m, tpc_m = {}, {}, [], {}, {}, {}, {}, {}
             # MOLDE A MEDIDA (MAPA 623): un rectángulo de una pieza; la medida viene en el pedido
             medida, tiras_p = None, None
             if isinstance(prod.get("a_medida"), dict):
@@ -949,8 +973,8 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                                             (medida or {}).get("terminacion") or "dobladillo")   # MAPA 644-645, 652
             elif m.get("tiras") is not None:
                 A.append(alarma("tiras-no-a-medida", f"«{prod.get('nombre')}»", campo=cm + ".tiras"))
-            arte = _archivo(m.get("arte"), cm + ".arte", EXT_ARTE, "arte-formato") if m.get("arte") else arte_d
-            if not arte and not (m.get("arte") or d.get("arte")):
+            arte = None if corte else (_archivo(m.get("arte"), cm + ".arte", EXT_ARTE, "arte-formato") if m.get("arte") else arte_d)
+            if not corte and not arte and not (m.get("arte") or d.get("arte")):
                 A.append(alarma("arte-falta", f"«{prod.get('nombre')}» en «{nom}»", campo=cm + ".arte"))
             nd["moldes"].append({"pid": pid, "molde_nombre": prod.get("nombre"), "variable": vcl,
                                  "variable_nombre": next((str(v.get("label") or vcl) for v in variantes if v["clave"] == vcl), None) if vcl else None,
@@ -1040,7 +1064,9 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                 A.append(alarma("cantidad-invalida", f"fila {n}: «{cv}»", fila=n, campo=f"{cf}.{col_cant.get('id')}")); continue
         # obligatorias (las columnas de talle son un grupo: cada molde mira la suya)
         for c in cols:
-            if c.get("obligatoria") and c.get("role") not in ("talle", "diseno") and not fila.get(str(c.get("id")), ""):
+            # (en la tizada para corte no se exigen nombre ni número: no se estampan, MAPA 816)
+            if (c.get("obligatoria") and c.get("role") not in ("talle", "diseno")
+                    and not (corte and c.get("role") in ("nombre", "numero")) and not fila.get(str(c.get("id")), "")):
                 A.append(alarma("columna-obligatoria-vacia", f"fila {n}: falta «{c.get('label')}»", fila=n, campo=f"{cf}.{c.get('id')}"))
         # el talle, molde por molde del diseño de la fila
         algun = False
@@ -1123,9 +1149,10 @@ def revisar_datos(pedido, archivos, estado_previo=None):
         filas_n.append(fila)
     # cómo se reparten las mesas
     mesas = pedido.get("mesas") if isinstance(pedido.get("mesas"), dict) else {}
-    modo = str(mesas.get("modo") or "normal").strip().lower()
+    # TIZADA PARA CORTE (MAPA 816): sin decir nada, cada talle va en su mesa («talle_por_mesa»)
+    modo = str(mesas.get("modo") or ("talle_por_mesa" if corte else "normal")).strip().lower()
     talles_mesa = {}
-    if modo not in ("normal", "una_por_fila", "por_talles", "talles_separados"):
+    if modo not in ("normal", "una_por_fila", "por_talles", "talles_separados", "talle_por_mesa"):
         A.append(alarma("mesas-invalido", f"modo «{modo}»", campo="mesas.modo"))
     elif modo in ("por_talles", "talles_separados"):
         # «talles_separados» (MAPA 710): cada talle acomodado solo y apilados en la MISMA mesa con una
@@ -1154,7 +1181,18 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                           ("si_piezas_en_blanco", ("rechazar", "seguir"))):
         if opc.get(k) is not None and opc.get(k) not in permitidos:
             A.append(alarma("campo-tipo", f"`opciones.{k}` admite: " + ", ".join(permitidos), campo="opciones." + k))
+    # TIZADA PARA CORTE (MAPA 816): en qué formatos de máquina de corte sale cada mesa (además del PDF)
+    formatos = ["pdf"]
+    if opc.get("formatos") is not None:
+        fq = opc.get("formatos")
+        if not isinstance(fq, list) or not fq or any(str(x).strip().lower() not in FORMATOS_CORTE for x in fq):
+            A.append(alarma("formatos-invalidos", f"{fq!r}", campo="opciones.formatos"))
+        elif not corte:
+            A.append(alarma("formatos-sin-corte", campo="opciones.formatos"))
+        else:
+            formatos = list(dict.fromkeys(["pdf"] + [str(x).strip().lower() for x in fq]))
     normal = {
+        "corte": corte,                                     # TIZADA PARA CORTE (MAPA 816)
         "referencia": ref, "disenos": norm_d, "filas": filas_n,
         # 🔴 la ficha sólo con las columnas que el pedido USA (la pantalla manda las activas): sin esto salía
         # una columna vacía por cada una de la plantilla que el otro sistema no mandó (MAPA 712)
@@ -1166,7 +1204,9 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                      "si_texto_no_entra": opc.get("si_texto_no_entra") or "achicar",
                      "si_piezas_en_blanco": opc.get("si_piezas_en_blanco") or "rechazar",
                      "perfil_color": perfil_ok,
-                     "carpeta": _ruta_segura(opc.get("carpeta") or "") or None},
+                     "carpeta": _ruta_segura(opc.get("carpeta") or "") or None,
+                     # TIZADA PARA CORTE (MAPA 816): los formatos de cada mesa (el PDF siempre); sólo el molde, sin etiqueta
+                     "formatos": formatos},
     }
     if _frenan(A):
         return A, None
@@ -1252,6 +1292,12 @@ def cuerpo_de(normal):
         cuerpo["talles_mesa"] = normal["mesas"]["talles_mesa"]
     if modo == "talles_separados":
         cuerpo["talles_mesa_modo"] = "separados"           # MAPA 710
+    # CADA TALLE EN SU MESA (MAPA 816): «talle_por_mesa», y en la tizada para corte también con grupos (los talles
+    # que no van en ningún grupo salen cada uno aparte, como en la pantalla)
+    elif modo == "talle_por_mesa" or (normal.get("corte") and modo == "por_talles"):
+        cuerpo["talles_mesa_modo"] = "cada_uno"
+    if normal.get("corte"):
+        cuerpo["corte"] = True                              # TIZADA PARA CORTE: sin arte (MAPA 816)
     if normal["mesas"].get("separar_disenos"):
         cuerpo["separar_disenos"] = True                    # el botón «Separar diseños» (MAPA 717)
     if normal["mesas"].get("largo_cm"):
@@ -1297,6 +1343,8 @@ def _reglas_de_la_pantalla(cuerpo):
             return [alarma("pieza-sin-tela", txt)]
         if "no se puede usar" in txt and "tela" in txt.lower():
             return [alarma("tela-no-usable", txt)]
+        if "misma columna de talle" in err:          # antes que la de abajo: también dice «talle» y «columna»
+            return [alarma("misma-columna-de-talle", txt)]
         if "talle" in txt.lower() and "columna" in txt.lower():
             return [alarma("talle-inexistente", txt)]
         if "TODAS sus piezas" in txt:
@@ -2286,7 +2334,10 @@ def robot_terminar(ref):
         for a in (d.get("archivos") or []):
             h = hojas.get(a.get("origen")) or {}
             item = {"tipo": a.get("tipo"), "nombre": a.get("nombre"), "bytes": a.get("bytes"), "sha256": a.get("sha256")}
-            if a.get("tipo") == "tizada" and a.get("pagina") is not None:
+            # TIZADA PARA CORTE (MAPA 816): cada mesa también en los formatos pedidos (`tipo: corte` + `formato`)
+            if a.get("formato"):
+                item["formato"] = a.get("formato")
+            if a.get("tipo") in ("tizada", "corte") and a.get("pagina") is not None:
                 # 🔴 UNA MESA = UN ARCHIVO (MAPA 620): los MISMOS campos de antes (así no se le rompe
                 # nada al otro sistema), ahora de ESTA mesa: `mesas` = 1, `largo_cm` = [su largo],
                 # `consumo_cm` = su largo; `aprovechamiento` sigue siendo el de la tela entera.
@@ -3266,7 +3317,7 @@ def _cerrar_robots_viejos(guion):
             except OSError:
                 pass
     if cerrados:
-        print(f"[externo] se cerraron {len(cerrados)} robot(s) de arranques anteriores: {cerrados}", flush=True)
+        print(f"[externo] se cerraron {len(cerrados)} {'robot' if len(cerrados) == 1 else 'robots'} de arranques anteriores: {cerrados}", flush=True)
     return cerrados
 
 

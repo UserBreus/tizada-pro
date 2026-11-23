@@ -62,6 +62,9 @@ export function nombreEditable(capa) {
 
 /** Capas que no son talles ni piezas (`molde_real.CAPAS_SISTEMA`). */
 export const CAPAS_SISTEMA = new Set(['Fondo', 'Capa 1', 'Personalizable', '0', 'referencia', 'Referencia'])
+/** `CAPAS_GENERICAS` de motor_pedido: la capa que el programa pone sola. Si el molde está todo en UNA
+ *  de ellas y no hay otra capa de variante, esa capa ES la variante (`tallesDePlantilla`, MAPA 810). */
+export const CAPAS_GENERICAS = ['Capa 1', '0']
 /** `CAPAS_NO_PERS` de motor_pedido: cualquier OTRA capa del arte es un campo de personalización. */
 export const CAPAS_NO_PERS = new Set(['diseño', 'diseno', 'personalizable', 'guias', 'guías', 'guides',
   'guia', 'guía', 'fondo', 'capa 1', 'referencia', '0'])

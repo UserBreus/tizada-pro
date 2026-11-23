@@ -1247,6 +1247,20 @@ def _area_hoja(hoja, cell_pt):
     return sum(int(c["pieza"]["_mask"].sum()) for c in hoja) * (cell_pt / CM) ** 2
 
 
+def _juegos_completos(hoja, per):
+    """Copia (MAPA 759): de una mesa con copias de la MISMA fila, cuántos juegos completos trae (`m` = la pieza
+    `_pieza_i` que menos veces entró) y la mesa con sólo esos: de cada pieza sus primeros `m` lugares, numerados
+    0…m-1 como copias. Gemelo EXACTO: `juegosCompletos` (contorno.js)."""
+    por_pieza = {}
+    for c in hoja:
+        por_pieza.setdefault(c["pieza"].get("_pieza_i", 0), []).append(c)
+    m = min(len(por_pieza.get(j, [])) for j in range(per))
+    if m < 1:
+        return 0, None
+    usar = {id(c): i for j in range(per) for i, c in enumerate(por_pieza[j][:m])}
+    return m, [dict(c, pieza=dict(c["pieza"], _copia_i=usar[id(c)])) for c in hoja if id(c) in usar]
+
+
 def repartir_copias(fila, copias, cfg, hoja1=None, area1=None):
     """COPIA: LA MESA LLENA QUE SE REPITE (MAPA 720, reemplaza a la franja de la 703). El usuario: «cuando
     pongo copias no reducir la mesa a una sola fila del tamaño del objeto: acomodar en el tamaño máximo de la
@@ -1272,18 +1286,34 @@ def repartir_copias(fila, copias, cfg, hoja1=None, area1=None):
     if len(hojas) == 1 and k == copias:
         return [(hojas[0], {"copias": 1, "por_mesa": copias}, _area_hoja(hojas[0], cell_pt))]
     per = len(fila)
-    cuenta = {}
-    for c in hojas[0]:
-        ci = c["pieza"].get("_copia_i", 0)
-        cuenta[ci] = cuenta.get(ci, 0) + 1
-    enteras = sorted(ci for ci, v in cuenta.items() if v == per)
-    n = len(enteras)
-    if n == 0:
-        return None
-    nuevo = {ci: i for i, ci in enumerate(enteras)}
-    # la mesa llena con sus copias numeradas 0…n-1 (la Copia mezclada reparte esos lugares, MAPA 717)
-    lleno = [dict(c, pieza=dict(c["pieza"], _copia_i=nuevo[c["pieza"].get("_copia_i", 0)]))
-             for c in hojas[0] if c["pieza"].get("_copia_i", 0) in nuevo]
+    # 🔴 LA MESA LLENA = `n` PRENDAS COMPLETAS QUE ENTRAN EN UNA MESA (2026-10-30, MAPA 759). Antes se acomodaban
+    # `k` copias juntas y se contaban las copias que quedaban enteras en la primera mesa; pero el acomodo reparte
+    # por FORMA y puede mandar TODAS las de una pieza a la segunda mesa (medido: 37 buzos, la pieza 4 entera en la
+    # mesa 2) → 0 enteras (ninguna mesa que se repita) o 1 (la mesa llena impresa ×40). Ahora: `n` sale de la parte
+    # de la superficie que entró en la primera mesa, y se acomodan EXACTAMENTE `n` copias; si no entran en una mesa,
+    # una menos (casi siempre a la primera). La mesa llena trae sus `n` copias completas, numeradas 0…n-1.
+    if len(hojas) == 1:
+        n, lleno = k, hojas[0]
+    else:
+        a_tot = sum(_area_hoja(h, cell_pt) for h in hojas) or 1.0
+        n = max(1, min(k - 1, int(k * _area_hoja(hojas[0], cell_pt) / a_tot)))
+        lleno = None
+        while n >= 1:
+            cn, _ = anidar_contorno(_copias_de(fila, n), cfg)
+            cn = [h for h in cn if h]
+            if len(cn) == 1:
+                lleno = cn[0]
+                break
+            # no entró: la próxima con una menos (la MÁS GRANDE que entra; sin atajos que gasten tela). Atajo EXACTO: si
+            # la primera mesa de ESTE acomodo ya trae `n-1` juegos completos, es lo mismo que daría el intento de `n-1`
+            # (la mesa llena es del largo máximo igual) y se usa sin volver a acomodar.
+            m, sub = _juegos_completos(cn[0], per)
+            if m >= 1 and m == n - 1:            # (más de n-1 no puede traer: con las n, habría entrado todo)
+                n, lleno = m, sub
+                break
+            n -= 1
+        if lleno is None:
+            return None
     llenas, resto = divmod(copias, n)
     res = [(lleno, {"copias": llenas, "por_mesa": n}, _area_hoja(lleno, cell_pt))]
     if resto:
@@ -1448,20 +1478,46 @@ def _copia_por_filas(piezas, cfg, sep_dis, nombre_dis):
         for h in coloc:
             if not h:
                 continue
+            # 🔴 PRENDAS COMPLETAS Y PIEZAS SUELTAS (2026-10-30, MAPA 759): una prenda del pozo puede quedar partida entre
+            # dos mesas; antes contaba «en la mesa» en las DOS (una mesa de 0,86 m con 18 cuellos decía «18 por mesa»).
+            # `por_mesa` = las prendas con TODAS sus piezas acá; `sueltas` = las que tienen sólo algunas.
             cuenta = {}
             for c in h:
                 f = c["pieza"].get("_fila")
                 f = f if isinstance(f, int) else -1
-                cuenta.setdefault(f, set()).add(c["pieza"].get("_copia_i", 0))
+                ci = c["pieza"].get("_copia_i", 0)
+                cuenta.setdefault(f, {})[ci] = cuenta.setdefault(f, {}).get(ci, 0) + 1
             fs = sorted(cuenta)
             nro = lambda f: f + 1 if f >= 0 else None
-            n_mesa = sum(len(cuenta[f]) for f in fs)
-            info = ({"fila": nro(fs[0]), "copias": 1, "por_mesa": n_mesa} if len(fs) == 1 else
-                    {"fila": None, "filas": [{"fila": nro(f), "por_mesa": len(cuenta[f])} for f in fs], "copias": 1, "por_mesa": n_mesa})
+            comp = {f: sum(1 for v in cuenta[f].values() if v >= len(grupos[f])) for f in fs}
+            suel = {f: len(cuenta[f]) - comp[f] for f in fs}
+            n_mesa, n_suel = sum(comp.values()), sum(suel.values())
+            _s = lambda x: {"sueltas": x} if x else {}
+            info = ({"fila": nro(fs[0]), "copias": 1, "por_mesa": n_mesa, **_s(n_suel)} if len(fs) == 1 else
+                    {"fila": None, "filas": [{"fila": nro(f), "por_mesa": comp[f], **_s(suel[f])} for f in fs], "copias": 1,
+                     "por_mesa": n_mesa, **_s(n_suel)})
             colocaciones.append(h)
             mesas.append({**info, **dis})
             area += _area_hoja(h, cell_pt)
+    # EL TALLE DE CADA MESA (MAPA 820): Copia decía «Fila 3 - x5» y había que ir a la planilla a ver qué talle era
+    # la fila 3 (sobre todo en la tizada para corte, donde la mesa ES el talle). Los talles que lleva cada mesa,
+    # en el orden de las filas. Gemelo EXACTO del final de `copiaPorFilas` (contorno.js).
+    for i, h in enumerate(colocaciones):
+        tl = _talles_de_mesa(h)
+        if tl:
+            mesas[i] = {**mesas[i], "talles": tl}
     return colocaciones, area, mesas
+
+
+def _talles_de_mesa(h):
+    """Los talles de las piezas de una mesa, sin repetir y en el orden de las filas de la planilla (MAPA 820)."""
+    _fila = lambda c: c["pieza"].get("_fila") if isinstance(c["pieza"].get("_fila"), int) else -1
+    out = []
+    for c in sorted(h, key=_fila):
+        t = c["pieza"].get("talle")
+        if t not in (None, "") and str(t) not in out:
+            out.append(str(t))
+    return out
 
 
 def anidar_por_fila(piezas, cfg):

@@ -1434,9 +1434,26 @@ input[type="number"] {
   box-shadow: 0 0 0 1px hsl(320 100% 50% / 0.35), 0 12px 34px hsl(320 100% 50% / 0.14);
 }
 
+/* LA TERCERA: TIZADA PARA CORTE (MAPA 816) — amarillo, el tercer color del sistema. */
+.camino-amarillo {
+  background: radial-gradient(120% 120% at 0% 0%, hsl(55 100% 50% / 0.09) 0%, rgba(255,255,255,0.02) 60%);
+  border-color: hsl(55 100% 50% / 0.42);
+}
+.camino-amarillo .camino-icon { color: var(--cmyk-yellow); }
+.camino-amarillo:hover {
+  border-color: var(--cmyk-yellow);
+  box-shadow: 0 0 0 1px hsl(55 100% 50% / 0.32), 0 12px 34px hsl(55 100% 50% / 0.12);
+}
+/* tres tarjetas: en una pantalla común entran de a tres; más angosta, una abajo de la otra */
+@media (max-width: 1100px) {
+  .dos-caminos.tres { grid-template-columns: 1fr 1fr !important; }
+  .dos-caminos.tres > :last-child { grid-column: 1 / -1; }
+}
+
 /* En pantallas angostas dejan de ser mitad y mitad: una arriba de la otra, o el texto no entra. */
 @media (max-width: 720px) {
-  .dos-caminos { grid-template-columns: 1fr !important; }
+  .dos-caminos, .dos-caminos.tres { grid-template-columns: 1fr !important; }
+  .dos-caminos.tres > :last-child { grid-column: auto; }
   .camino-card { padding: 22px 20px; gap: 10px; }
   .camino-titulo { font-size: 17px; }
 }

@@ -40,14 +40,21 @@ export function prepararArte(mupdf, bytes, contexto) {
   const ordenVar = contexto.orden_var || []
   const fuentes = contexto.fuentes || { catalogo: [], alias: {} }
   const sha1 = sha1HexBytes(bytes)
+  // 🔴 UNA SOLA COPIA DEL ARTE EN EL MOTOR (MAPA 811): cada paso de acá abre el arte (detección,
+  // mapeo, personalización —una vez por campo—, validación) y abrir desde los BYTES lo copia entero
+  // en la memoria del hilo. Con «base nfl mujer y diablos.ai» (239 MB) la segunda preparación en el
+  // mismo hilo fallaba con «malloc (238911340 bytes) failed». Desde un mismo `Buffer` no se copia
+  // nada (los resultados son los mismos: verificado con los artes del servidor); se suelta al final.
+  const fuente = new mupdf.Buffer(bytes)
+  try {
   let modo = contexto.modo || 'separado'
-  if (contexto.plantilla) modo = arteEsSeparado(mupdf, bytes, contexto.plantilla) ? 'separado' : 'clasico'
-  const det = detectarArte(mupdf, bytes, registro, contexto.ancho_thumb || 240)
+  if (contexto.plantilla) modo = arteEsSeparado(mupdf, fuente, contexto.plantilla) ? 'separado' : 'clasico'
+  const det = detectarArte(mupdf, fuente, registro, contexto.ancho_thumb || 240)
   let auto = {}, pers = {}, mapeo = {}, pv = {}, validacion
   const errManual = {}
   if (modo === 'separado') {
-    auto = mapeoPorNombre(mupdf, bytes, registro)
-    pers = extraerPersonalizacion(mupdf, bytes)
+    auto = mapeoPorNombre(mupdf, fuente, registro)
+    pers = extraerPersonalizacion(mupdf, fuente)
     // Los NOMBRES de la guía mandan: el mapeo fijo sólo rellena piezas sin nombre y nunca pisa
     // una mesa ya reclamada (misma regla que `_subir_arte_analizar`)
     mapeo = { ...auto }
@@ -82,7 +89,7 @@ export function prepararArte(mupdf, bytes, contexto) {
     }
     const completo = [...alcance].every((p) => p in mapeo)
     if (completo) {
-      validacion = validarArteSeparado(mupdf, bytes, registro, fuentes, mapeo, ordenVar, [...alcance])
+      validacion = validarArteSeparado(mupdf, fuente, registro, fuentes, mapeo, ordenVar, [...alcance])
     } else {
       const faltan = [...alcance].filter((p) => !(p in mapeo)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
       validacion = { aprobado: false, modo: 'separado',
@@ -91,7 +98,7 @@ export function prepararArte(mupdf, bytes, contexto) {
     }
   } else {
     if (!contexto.plantilla) throw new Error('para validar un arte clásico hace falta la plantilla (contexto.plantilla)')
-    validacion = validarArte(mupdf, bytes, contexto.plantilla, fuentes)
+    validacion = validarArte(mupdf, fuente, contexto.plantilla, fuentes)
     pers = validacion.personalizacion || {}
   }
   const entradas = {
@@ -104,4 +111,5 @@ export function prepararArte(mupdf, bytes, contexto) {
     'validacion.json': [texto(validacion), { level: 6 }],
   }
   return { zip: zipSync(entradas), sha1, modo, det, auto, pers, mapeo, pv, validacion, mapeoManualErrores: errManual }
+  } finally { try { fuente.destroy() } catch { /* nada */ } }   // los documentos ya se cerraron; los que quedaran guardan su referencia
 }

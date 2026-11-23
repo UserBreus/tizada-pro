@@ -170,16 +170,60 @@ function _avisarQueCalcula(input, init) {
   return { ...(init || {}), headers }
 }
 
+// 🔴 LOS MISMOS GET A LA VEZ, UNA SOLA VEZ (inspector, MAPA 774): al abrir el paso Arte salían dos `/api/plantilla/deteccion`
+// iguales por talle y dos `/api/arte/deteccion?solo_molde=1`. Sólo estas lecturas, sólo mientras la primera está en
+// viaje (nada se guarda después) y cada uno recibe su propia copia de la respuesta.
+const _GET_COMPARTIBLE = /\/api\/(plantilla\/deteccion|arte\/deteccion|productos\/[^/?]+\/motor_b)(\?|$)/
+const _getEnViaje = new Map()
+// …y dos lecturas del MOLDE que se piden una detrás de otra al cargar un arte (la detección `solo_molde` y el contexto
+// del arte): la misma respuesta sirve 10 s (son datos del molde; inspector MAPA 775). Con un arte pesado la preparación
+// tarda más de 2 s y se volvían a pedir (MAPA 776). Cualquier ESCRITURA de esta pestaña (POST/PUT/DELETE: un mapeo, la
+// plantilla, las variables) las tira: lo que se lea después ya es lo nuevo.
+const _GET_RECIENTE = /\/api\/(arte\/deteccion\?solo_molde=1|productos\/[^/?]+\/arte_contexto)/
+const _getReciente = new Map()   // url → {t, p}
+let _genReciente = 0              // sube con cada escritura: una lectura que salió ANTES no se guarda como reciente
+let _escribiendo = 0              // escrituras en viaje: una lectura que sale MIENTRAS tanto va directo y no se guarda (inspector, MAPA 777)
+// POST que sólo LEEN (no cambian nada en el servidor): no tiran lo reciente. `/prendas` traduce filas y sale una vez
+// por talle al cargar un arte: con él adentro la caché no servía nunca (inspector, MAPA 777).
+const _ESCRITURA_AJENA_AL_MOLDE = /\/api\/(?:(?:disenos\/guardar|pedido\/plan|reservas|registro|pestana)(?:\?|\/|$)|paquetes\/)/   // (no `pedido/`: las tipografías del pedido cambian el molde, MAPA 785)
+const _POST_LECTURA = /\/api\/productos\/[^/?]+\/(prendas|editables_cfg)(\?|$)/   // (+ `/editables_cfg`: arma la config y la devuelve, MAPA 778)
+// 🔴 LOS ERRORES DEL NAVEGADOR, EN CASTELLANO DESDE DONDE NACEN (inspector, MAPA 783): «Failed to fetch» y
+// «Unexpected token '<'… is not valid JSON» llegaban crudos a ~15 carteles propios (Tizadas, Monitor, Publicación,
+// Integraciones, glifos…). Se traducen acá, en `fetch` y en `Response.json()`: el mensaje queda en castellano y
+// `name` vacío (así `String(e)` no antepone «TypeError: »). `AbortError` NO se toca: el código lo reconoce por el nombre.
+function _errEs(e, cual) {
+  if (!e || e.name === 'AbortError') return e
+  const m = String(e.message || e)
+  let es = null
+  if (cual === 'red' && e instanceof TypeError) es = 'no hay conexión con el servidor'   // (sólo el `fetch` del navegador llega acá)
+  else if (cual === 'json' && e instanceof SyntaxError) es = 'el servidor contestó algo que no se entiende (¿está levantado y al día?)'
+  if (!es) return e
+  const err = new Error(es)
+  err.name = ''
+  err.original = e
+  return err
+}
+let _jsonEsInstalado = false
+function _instalarJsonEs() {
+  if (_jsonEsInstalado || typeof Response === 'undefined') return
+  _jsonEsInstalado = true
+  const orig = Response.prototype.json
+  Response.prototype.json = function () { return orig.call(this).catch((e) => { throw _errEs(e, 'json') }) }
+}
+
+function _urlDe(input) { try { return typeof input === 'string' ? input : (input && input.url) || '' } catch { return '' } }
+
 export function instalarCalculos(rutaApi = (x) => x) {
   if (typeof window === 'undefined' || _fetch) return
   _fetch = window.fetch.bind(window)
-  window.fetch = async (input, init0) => {
+  const _fetchCalc = async (input, init0) => {
     const init = _avisarQueCalcula(input, init0)
     const veces = new Map()            // clave → cuántas veces la pidió el servidor
     const adentro = new Map()          // clave → {clave, resultado_json} que viajan en la petición
     let init2 = init
     for (;;) {
-      const r = await _fetch(input, init2)
+      // el error de RED se traduce acá, donde nace (MAPA 784): lo de abajo (los cálculos en la PC) son errores del programa
+      const r = await _fetch(input, init2).catch((e) => { throw _errEs(e, 'red') })
       if (r.status !== 428 && r.headers.get('X-Calcular') !== '1') return r
       let d = null
       try { d = await r.clone().json() } catch { d = null }
@@ -202,5 +246,41 @@ export function instalarCalculos(rutaApi = (x) => x) {
         for (const pd of lista) await resolverCalculo(pd, rutaApi)
       }
     }
+  }
+  _instalarJsonEs()
+  window.fetch = (input, init0) => _fetchApp(input, init0)
+  function _fetchApp(input, init0) {
+    const metodo = String((init0 && init0.method) || (input && input.method) || 'GET').toUpperCase()
+    const url = _urlDe(input)
+    if (metodo !== 'GET' || (init0 && init0.body)) {
+      if (_POST_LECTURA.test(url) || _ESCRITURA_AJENA_AL_MOLDE.test(url)) return _fetchCalc(input, init0)
+      // una ESCRITURA: lo reciente y lo que viaja ya no sirve (las que ya viajan las reciben sólo quienes las pidieron
+      // antes); y al TERMINAR otra vez, porque el servidor pudo contestar una lectura antes de terminar de guardar
+      const tirar = () => { _getReciente.clear(); _getEnViaje.clear(); _genReciente++ }
+      tirar(); _escribiendo++
+      const p = _fetchCalc(input, init0)
+      const fin = () => { _escribiendo--; tirar() }
+      p.then(fin, fin)
+      return p
+    }
+    if (!(_GET_COMPARTIBLE.test(url) || _GET_RECIENTE.test(url))) return _fetchCalc(input, init0)
+    // mientras viaja una escritura: nada de lo reciente (ni se lee ni se guarda), pero dos lecturas IGUALES que salen
+    // juntas siguen viajando una vez (el `solo_molde` salía dos veces al cargar el arte: inspector, MAPA 783)
+    if (_GET_RECIENTE.test(url) && _escribiendo === 0) {
+      const r0 = _getReciente.get(url)
+      if (r0 && Date.now() - r0.t < 10000) return r0.p.then((r) => r.clone())
+    }
+    let p = _getEnViaje.get(url)
+    if (!p) {
+      p = _fetchCalc(input, init0)
+      _getEnViaje.set(url, p)
+      const soltar = () => { if (_getEnViaje.get(url) === p) _getEnViaje.delete(url) }
+      p.then(soltar, soltar)
+      if (_GET_RECIENTE.test(url) && _escribiendo === 0) {
+        const _pr = p, _g = _genReciente
+        _pr.then((r) => { if (r.ok && _g === _genReciente) _getReciente.set(url, { t: Date.now(), p: _pr }); else _getReciente.delete(url) }, () => _getReciente.delete(url))
+      }
+    }
+    return p.then((r) => r.clone())
   }
 }

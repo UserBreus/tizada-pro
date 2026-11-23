@@ -7,6 +7,7 @@
 //
 // Corre igual en el navegador (Web Worker) y en Node (worker_threads), para poder probarlo.
 
+import { guardarPdf } from './pdf/guardar.js'
 const enNode = typeof self === 'undefined' || typeof self.postMessage !== 'function'
 const canal = enNode ? (await import('node:worker_threads')).parentPort : self
 const escuchar = (fn) => (enNode ? canal.on('message', fn) : (self.onmessage = (ev) => fn(ev.data)))
@@ -25,6 +26,26 @@ const moldesA = new Map()      // clave → MoldeA (la plantilla abierta con `mo
 const contornosA = new Map()   // `${clave}|${mesa}|${talle}` → contornos de esa mesa/talle
 const contextosA = new Map()   // clave del arte → contexto (`pieza/caminoA.js`)
 const basesA = new Map()       // id → base armada (queda acá: nombra documentos abiertos acá)
+// 🔴 UNA COPIA POR ARTE PARA TODOS LOS CONTEXTOS DEL HILO (MAPA 813). El hilo del molde junta los
+// contextos del visor (uno por configuración, hasta 4) y los de la tizada (piezas + ficha): con un
+// arte de 239 MB, cada uno con su copia eran 239 MB × 6 contra el tope de 2 GB del motor, y la tizada
+// fallaba en la PC («la tizada la genera tu computadora…»). `arteId` = la identidad del archivo que
+// manda la página (la misma clave con que lo guarda en su caché). Los documentos abiertos guardan su
+// propia referencia: soltar acá nunca rompe un contexto vivo, sólo deja de ofrecer la copia.
+const artesBuf = new Map()     // arteId → { buf: mupdf.Buffer, claves: Set(clave de contexto) }
+let nPropios = 0
+function tomarArte(arteId, clave, bytes) {
+  let a = artesBuf.get(arteId)
+  if (!a) { a = { buf: new mupdf.Buffer(bytes), claves: new Set() }; artesBuf.set(arteId, a) }
+  a.claves.add(clave)
+  return a.buf
+}
+function soltarArte(arteId, clave) {
+  const a = arteId ? artesBuf.get(arteId) : null
+  if (!a) return
+  a.claves.delete(clave)
+  if (!a.claves.size) { try { a.buf.destroy() } catch { /* nada */ } artesBuf.delete(arteId) }
+}
 
 async function cargarPieza() {
   if (P) return
@@ -113,7 +134,7 @@ const TAREAS = {
       }
       const cat = pdf.getTrailer().get('Root')
       for (const k of ['Metadata', 'PieceInfo', 'AcroForm', 'Names', 'Outlines']) { try { cat.delete(k) } catch { /* no estaba */ } }
-      const buf = pdf.saveToBuffer('garbage=4,compress=yes').asUint8Array().slice()
+      const buf = guardarPdf(pdf, 'garbage=4,compress=yes')
       return { valor: buf, transfer: [buf.buffer] }
     } finally {
       try { d.destroy() } catch { /* nada */ }
@@ -217,7 +238,7 @@ const TAREAS = {
       for (const v of r) caja.push(doc.newReal(v))
       pageObj.put('MediaBox', caja); pageObj.put('CropBox', caja)
       out.graftPage(0, doc, mesa - 1)
-      const pdf = out.saveToBuffer('compress').asUint8Array().slice()
+      const pdf = guardarPdf(out, 'compress')
       return { valor: pdf, transfer: [pdf.buffer] }
     } finally {
       try { out.destroy() } catch { /* nada */ }
@@ -353,25 +374,46 @@ const TAREAS = {
    */
   async contexto_a({ clave, arte: arteBytes, registro, ordenVar, mapeoArte, editablesCfg, editablesTamano, editablesColor,
                      editablesMarca, editablesSinMarca, marcasComoCruz = true, referencia, borde, objetos = [], conPersonalizacion = false,
-                     molde = null, clasico = null }) {
+                     molde = null, clasico = null, arteId = null }) {
     await cargar()
     await cargarPieza()
     if (!abridor) throw new Error('primero hay que cargar las tipografías (`fuentes`)')
     const PA = await import('./pieza/caminoA.js')
     const MA = await import('./arte/mapeo.js')
     const ED = await import('./arte/editables.js')
-    if (contextosA.has(clave)) { try { contextosA.get(clave).ctx.cerrar() } catch { /* nada */ } }
+    // 🔴 SIN `arteId` (una prueba, un llamador viejo) la copia es SÓLO de este contexto, pero igual vive
+    // mientras viva él: el contexto abre el arte DE A POCO (una capa aislada, el limpio) al armar cada
+    // pieza, y soltarla al terminar de armarlo dejaba a la primera pieza con «no document to open»
+    // (contrato `verificar_navegador_pieza_a.py` §4, 2026-11-23). Un id propio la suelta con él.
+    const sinArte = arteBytes === null || arteBytes === undefined
+    if (!sinArte && !arteId) arteId = `propio|${clave}|${++nPropios}`
+    const viejo = contextosA.get(clave)
+    if (viejo) {
+      try { viejo.ctx.cerrar() } catch { /* nada */ }
+      contextosA.delete(clave)
+      // con OTRO arte se suelta su copia; con el mismo se queda (la va a usar el contexto nuevo)
+      if (viejo.arteId !== arteId) soltarArte(viejo.arteId, clave)
+    }
     // 🔴 Las bases armadas con el contexto anterior NOMBRAN sus documentos (el arte, los editables),
     // y `cerrar()` acaba de destruirlos. Si quedaban en `basesA`, la próxima pieza del mismo
     // talle/variable reusaba una base muerta y reventaba con «cannot find page tree» o «invalid
     // page number»: pasaba al cargar un arte nuevo con el visor ya mostrando el anterior, y la
     // pantalla le tiraba TODOS los talles al servidor (reporte 2026-09-18: «tarda en cargar un arte»).
     for (const k of [...basesA.keys()]) if (k.startsWith(clave + '|')) basesA.delete(k)
-    let mapeoVar
-    try { mapeoVar = MA.mapeoVariantesArte(mupdf, arteBytes, registro, ordenVar || []) } catch { mapeoVar = {} }
+    // 🔴 UNA SOLA COPIA DEL ARTE EN EL MOTOR PARA TODOS LOS PASOS (MAPA 811) Y TODOS LOS CONTEXTOS
+    // (MAPA 813): cada paso abre el arte (mapeo, editables, personalización: ésta lo abre una vez por
+    // campo) y abrir desde los BYTES lo copia entero en la memoria del hilo cada vez. Desde el MISMO
+    // `Buffer` no se copia nada; el contexto también lo recibe (`arte: arteBuf`) y no guarda los bytes.
+    // 🔴 TIZADA PARA CORTE (MAPA 816): sin arte (`arte: null`) no hay nada que abrir ni que leer: el
+    // contexto arma cada pieza en blanco con su borde de corte (`contextoCaminoA` con `arte: null`)
+    const arteBuf = sinArte ? null : tomarArte(arteId, clave, arteBytes)
+    let quedo = false
+    try {
+    let mapeoVar = {}
+    if (!sinArte) { try { mapeoVar = MA.mapeoVariantesArte(mupdf, arteBuf, registro, ordenVar || []) } catch { mapeoVar = {} } }
     let editables = []
-    if (mapeoArte && editablesCfg !== null && editablesCfg !== undefined) {
-      try { editables = ED.extraerEditables(mupdf, arteBytes) } catch { editables = [] }
+    if (!sinArte && mapeoArte && editablesCfg !== null && editablesCfg !== undefined) {
+      try { editables = ED.extraerEditables(mupdf, arteBuf) } catch { editables = [] }
     }
     const porArchivo = new Map(objetos.map((o) => [o.archivo, o.bytes]))
     // 🔴 EL ARTE CLÁSICO (2026-09-22): el diseño viene dibujado sobre la MISMA mesa del molde, sin
@@ -379,7 +421,7 @@ const TAREAS = {
     // moldería por talle (`geometrias_base`), que salen del molde abierto en este hilo. Antes el
     // navegador no lo sabía hacer y esos pedidos se generaban en el servidor.
     let capasMolde = null, geomsBase = null
-    const esClasico = clasico === null || clasico === undefined ? !Object.keys(PA.normalizarMapeo(mapeoArte).base || {}).length : !!clasico
+    const esClasico = !sinArte && (clasico === null || clasico === undefined ? !Object.keys(PA.normalizarMapeo(mapeoArte).base || {}).length : !!clasico)
     if (esClasico && molde && moldesA.has(molde)) {
       const m = moldesA.get(molde)
       capasMolde = PA.capasDelDocumento(m.doc)
@@ -399,19 +441,25 @@ const TAREAS = {
       }
     }
     const ctx = PA.contextoCaminoA(mupdf, {
-      capasMolde, geomsBase, clasico,
-      arte: arteBytes, mapeoArte, mapeoVar, editables, editablesCfg, editablesTamano, editablesColor,
+      capasMolde, geomsBase, clasico: sinArte ? false : clasico,
+      arte: arteBuf, mapeoArte, mapeoVar, editables, editablesCfg, editablesTamano, editablesColor,
       editablesMarca, editablesSinMarca, marcasComoCruz, referencia: referencia || 'alto', borde,
       objetosAgregados: objetos.length ? { objetos: objetos.map(({ bytes: _b, ...o }) => o), abrir: (a) => porArchivo.get(a) } : null,
       fuente: abridor.abrir,
     })
     let pers = null
-    if (conPersonalizacion) {
+    if (conPersonalizacion && !sinArte) {
       const PE = await import('./arte/personalizacion.js')
-      try { pers = PE.extraerPersonalizacion(mupdf, arteBytes) } catch { pers = {} }
+      try { pers = PE.extraerPersonalizacion(mupdf, arteBuf) } catch { pers = {} }
     }
-    contextosA.set(clave, { ctx, arteRect: ctx.arteRect })
+    contextosA.set(clave, { ctx, arteRect: ctx.arteRect, arteId: sinArte ? null : arteId })
+    quedo = true
     return { pers }
+    } finally {
+      // la copia queda mientras algún contexto la use (`soltarArte` al cerrarlo); si este contexto no
+      // llegó a quedar, se suelta su parte acá
+      if (!sinArte && !quedo) soltarArte(arteId, clave)
+    }
   },
   /**
    * Una pieza del camino A: el contorno sale de la plantilla (`extraer_piezas_mesa` por
@@ -470,16 +518,27 @@ const TAREAS = {
   /** Suelta UN contexto del arte (el visor guarda los últimos; MAPA 675) con sus bases armadas. */
   async contexto_a_soltar({ clave }) {
     const c = contextosA.get(clave)
-    if (c) { try { c.ctx.cerrar() } catch { /* nada */ } }
+    if (c) { try { c.ctx.cerrar() } catch { /* nada */ } soltarArte(c.arteId, clave) }
     contextosA.delete(clave)
     for (const k of [...basesA.keys()]) if (k.startsWith(clave + '|')) basesA.delete(k)
     return true
+  },
+  /** Cuánta memoria lleva tomada el motor de este hilo (nunca se achica): la página decide con esto si
+   *  le da a la tizada un hilo nuevo (`previa.js renovarMotorSiPesa`, MAPA 814). */
+  async memoria() {
+    let bytes = 0
+    try {
+      const m = globalThis.$libmupdf_wasm_Module
+      bytes = (m && m.HEAPU8 && m.HEAPU8.buffer && m.HEAPU8.buffer.byteLength) || 0
+    } catch { /* nada */ }
+    return { bytes }
   },
   /** Cierra lo del camino A de un pedido (moldes, contextos y bases). */
   async cerrar_a() {
     for (const m of moldesA.values()) { try { m.destroy() } catch { /* nada */ } }
     for (const c of contextosA.values()) { try { c.ctx.cerrar() } catch { /* nada */ } }
-    moldesA.clear(); contextosA.clear(); contornosA.clear(); basesA.clear()
+    for (const a of artesBuf.values()) { try { a.buf.destroy() } catch { /* nada */ } }
+    moldesA.clear(); contextosA.clear(); contornosA.clear(); basesA.clear(); artesBuf.clear()
     return true
   },
   /** El arte separado analizado acá (`arte/preparar.js`): el paquete que `POST /api/arte` guarda. */
@@ -487,7 +546,9 @@ const TAREAS = {
     await cargar()
     const { prepararArte } = await import('./arte/preparar.js')
     const r = prepararArte(mupdf, bytes, contexto)
-    return { valor: { zip: r.zip, sha1: r.sha1, modo: r.modo, validacion: r.validacion, mapeo: r.mapeo, mapeoManualErrores: r.mapeoManualErrores || null }, transfer: [r.zip.buffer] }
+    // det/auto/pers/pv: se guardan con el arte del pedido en la PC (`arte/enPc.js`, MAPA 760)
+    return { valor: { zip: r.zip, sha1: r.sha1, modo: r.modo, validacion: r.validacion, mapeo: r.mapeo, mapeoManualErrores: r.mapeoManualErrores || null,
+                      det: r.det, auto: r.auto, pers: r.pers, pv: r.pv }, transfer: [r.zip.buffer] }
   },
   /**
    * VALIDAR EL ARTE CON UN MAPEO NUEVO, ACÁ (2026-09-22, «el servidor sólo sostiene el sistema y la
@@ -581,16 +642,23 @@ const TAREAS = {
     return { valor: { ...r, svg }, transfer: [r.pdf.buffer] }
   },
   /** La vista (SVG, texto) de un PDF de una página (el objeto duplicado). */
+  /** TIZADA PARA CORTE (MAPA 816): una mesa de la hoja en un formato de máquina de corte (DXF/AI/PLT/SVG/EPS). */
+  async corte_exportar({ bytes, pi = 0, formato, etiqueta = false, titulo = 'mesa' }) {
+    await cargar()
+    const { exportarMesa } = await import('./corte/exportar.js')
+    const r = exportarMesa(mupdf, bytes, pi, formato, { etiqueta, titulo })
+    return { valor: r.bytes, transfer: [r.bytes.buffer] }
+  },
   async svg_de_pdf({ bytes }) {
     await cargar()
     const { svgDePdf } = await import('./pieza/svg.js')
     return svgDePdf(mupdf, bytes)
   },
   /** COLOCAR: el objeto entra al arte como la capa «Editable <nombre>» en cada mesa de la pieza. */
-  async arte_colocar({ arte, registro, mapeoBase, pieza, fx, fy, wCm, hCm, objPdf, nombre }) {
+  async arte_colocar({ arte, registro, mapeoBase, pieza, fx, fy, wCm, hCm, objPdf, nombre, talleRef = '' }) {
     await cargar()
     const EA = await import('./arte/editarArte.js')
-    const col = EA.colocacionesObjeto(mupdf, arte, { registro, mapeoBase, pieza, fx, fy, wCm, hCm })
+    const col = EA.colocacionesObjeto(mupdf, arte, { registro, mapeoBase, pieza, fx, fy, wCm, hCm, talleRef })
     const r = EA.inyectarEditable(mupdf, arte, col, objPdf, nombre)
     return { valor: r, transfer: [r.bytes.buffer] }
   },
@@ -738,7 +806,7 @@ const TAREAS = {
         }
       }
       // `garbage`: la mesa entera ya no la nombra nadie (cada pieza tiene su parte): no viaja
-      const pdf = out.saveToBuffer('garbage,compress').asUint8Array().slice()
+      const pdf = guardarPdf(out, 'garbage,compress')
       return { valor: { pdf, piezas: res }, transfer: [pdf.buffer] }
     } finally {
       for (const m of mapas.values()) { try { m.destroy() } catch { /* nada */ } }
@@ -807,7 +875,7 @@ const TAREAS = {
     if (perfil && perfil.icc) {
       const out = mupdf.Document.openDocument(pdf, 'application/pdf')
       H.embeberPerfil(out, perfil)
-      pdf = out.saveToBuffer('compress').asUint8Array().slice()
+      pdf = guardarPdf(out, 'compress')
       out.destroy()
     }
     // `validar_salida`: las cuatro validaciones de la hoja, con los mismos textos que el servidor

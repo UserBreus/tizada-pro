@@ -27,6 +27,7 @@
 //   · `writeStream` deja el stream sin filtro (mupdf lo comprime al guardar con `compress`).
 //   · El contrato `verificar_navegador_aplanar.py` compara la salida con la del servidor.
 
+import { guardarPdf } from '../pdf/guardar.js'
 import { instrucciones as parsear, escribir } from '../pdf/contenido.js'
 import { pyFixed } from '../py.js'
 import { sha1HexBytes } from '../sha1.js'
@@ -486,7 +487,7 @@ export function aplanarParaRip(mupdf, bytes, opciones = {}) {
     for (let i = 0; i < doc.countPages(); i++) removerRecursosNoReferenciados(doc.findPage(i))
     // recolección de basura (los OCG y los Form ya inlineados quedan sin referencia y se van),
     // compresión rápida sin pérdida (la misma que usa el servidor con pikepdf, nivel ~1)
-    const out = doc.saveToBuffer('garbage,compress,compression-effort=15').asUint8Array().slice()
+    const out = guardarPdf(doc, 'garbage,compress,compression-effort=15')
     // PDF 1.6 como Illustrator (máxima compatibilidad con el RIP): mupdf escribe la cabecera con la
     // versión del archivo original; `%PDF-d.d` mide lo mismo, así que se cambia en el lugar y los
     // desplazamientos de la tabla xref siguen valiendo (es lo que hace `force_version` de qpdf:

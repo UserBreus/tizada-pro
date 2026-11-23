@@ -14,21 +14,28 @@ function escribirSvg(mupdf, doc, pagina, recorte) {
   const page = doc.loadPage(pagina)
   const buf = new mupdf.Buffer()
   const w = new mupdf.DocumentWriter(buf, 'svg', 'text=path')
+  let dev = null
   try {
     if (recorte) {
-      const dev = w.beginPage([0, 0, recorte[2], recorte[3]])
+      dev = w.beginPage([0, 0, recorte[2], recorte[3]])
       page.run(dev, mupdf.Matrix.translate(-recorte[0], -recorte[1]))
     } else {
-      const dev = w.beginPage(page.getBounds())
+      dev = w.beginPage(page.getBounds())
       page.run(dev, mupdf.Matrix.identity)
     }
     w.endPage()
   } finally {
     w.close()
+    // 🔴 EL ESCRITOR Y SU DISPOSITIVO SE SUELTAN ACÁ (MAPA 814). El escritor guarda su propia referencia
+    // al buffer del SVG: sin `destroy()`, el SVG entero quedaba en la memoria del motor hasta que el
+    // navegador recolectara el objeto. Con una imagen de 120 MB cada vista previa es un SVG de 112 MB:
+    // medido, la 3ª en el mismo hilo llenaba los 2 GB («malloc failed») y la tizada ya no tenía lugar.
+    if (dev) { try { dev.destroy() } catch { /* nada */ } }
+    try { w.destroy() } catch { /* nada */ }
     page.destroy()
   }
-  const s = buf.asString()
-  buf.destroy()
+  let s
+  try { s = buf.asString() } finally { buf.destroy() }
   return s
 }
 

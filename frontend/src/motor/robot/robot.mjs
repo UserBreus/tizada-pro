@@ -338,6 +338,7 @@ async function guardarArchivos(ref, carpetaNombre, archivos) {
     fs.writeFileSync(tmp, a.bytes)
     fs.renameSync(tmp, path.join(dir, a.nombre))
     salida.push({ tipo: a.tipo, origen: a.origen, nombre: a.nombre, bytes: a.bytes.length, sha256: sha256(a.bytes), ruta: path.join(dir, a.nombre),
+      ...(a.formato ? { formato: a.formato } : {}),
       ...(a.pagina !== undefined ? { pagina: a.pagina, mesa: a.mesa, mesas_tela: a.mesas_tela } : {}) })
   }
   destino.carpeta = dir
@@ -384,7 +385,8 @@ async function procesar(ref, normal) {
   }
   // 1 y 2 · cada diseño, con cada uno de sus moldes: tipografías + arte
   let frena = false
-  for (const dis of normal.disenos) {
+  // TIZADA PARA CORTE (MAPA 816): no hay arte que leer
+  for (const dis of (normal.corte ? [] : normal.disenos)) {
     for (const mol of dis.moldes) {
       const st = await avance(`leyendo el arte de «${dis.nombre}» para «${mol.molde_nombre}»`)
       if (st.seguir === false) throw new Rechazo('cancelado')
@@ -454,6 +456,21 @@ async function procesar(ref, normal) {
     const pdf = MZ.paginaComoPdf(m.mupdf, new Uint8Array(src), mz.pi)
     archivos.push({ tipo: 'tizada', origen: mz.hoja.archivo, pagina: mz.pi, mesa: mz.numero, mesas_tela: mz.deLaTela,
       nombre: `${ref}__${MZ.nombreArchivoSeguro(mz.nombre)}.pdf`, bytes: Buffer.from(pdf), mime: 'application/pdf' })
+  }
+  // TIZADA PARA CORTE (MAPA 816): cada mesa también en los formatos de máquina de corte que pidió el pedido
+  // (`opciones.formatos`), con el mismo exportador que la descarga de la pantalla (`corte/exportar.js`)
+  const formatos = normal.corte ? ((normal.opciones || {}).formatos || []).filter((f) => f !== 'pdf') : []
+  if (formatos.length) {
+    const CX = await import('../corte/exportar.js')
+    for (const mz of MZ.mesasEnOrden(hojas)) {
+      const src = (r.archivos || {})[mz.hoja.archivo]
+      if (!src) continue
+      for (const f of formatos) {
+        const x = CX.exportarMesa(m.mupdf, new Uint8Array(src), mz.pi, f, { titulo: mz.nombre })   // sólo el molde, sin etiqueta
+        archivos.push({ tipo: 'corte', formato: f, origen: mz.hoja.archivo, pagina: mz.pi, mesa: mz.numero, mesas_tela: mz.deLaTela,
+          nombre: `${ref}__${MZ.nombreArchivoSeguro(mz.nombre)}.${CX.FORMATOS_CORTE[f].ext}`, bytes: Buffer.from(x.bytes), mime: CX.FORMATOS_CORTE[f].mime })
+      }
+    }
   }
   for (const [nombre, bytes] of Object.entries(r.archivos || {})) {
     if (deHoja.has(nombre)) continue

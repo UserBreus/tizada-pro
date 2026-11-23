@@ -286,7 +286,7 @@ def _tomar(n, espera, que, al_esperar=None):
                 _CUPO["usado"] += tomo
                 _CUPO["quien"][que] = tomo
                 if avisado:
-                    print(f"[procesos] {que}: lugar para {tomo} proceso(s) tras {pasado:.0f} s de espera")
+                    print(f"[procesos] {que}: lugar para {tomo} {'proceso' if tomo == 1 else 'procesos'} tras {pasado:.0f} s de espera")
                 return tomo
             if pasado >= espera:
                 ocupados = ", ".join(f"{k} ({v})" for k, v in _CUPO["quien"].items())

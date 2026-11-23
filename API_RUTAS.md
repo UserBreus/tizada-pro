@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **191 endpoints**. Generado automáticamente del código.
+Total: **193 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -203,6 +203,7 @@ Total: **191 endpoints**. Generado automáticamente del código.
 | POST | `/api/arte/preview_piezas` | PREVIEW REAL per-pieza (CACHEADO): sirve el render del motor por pieza desde `_piezas_base`. La 1ª vez por config arma y guarda; las siguientes son instantáneas | body: bg, diseno, editables, mapeo, pid, sin_prewarm, talle, variante |
 | GET | `/api/archivos/tengo` | ¿El servidor ya tiene un archivo con este SHA-1? (para no volver a subirlo). | q: sha1 |
 | POST | `/api/arte/validacion` | Guarda la validación de un arte que ARMÓ EL NAVEGADOR (p. ej. después de sumar una tipografía, `revalidarArte`). El servidor no la calcula: sólo compr | body: diseno, pid, validacion |
+| POST | `/api/arte/mapeo_fijo` | Siembra el mapeo FIJO del molde (`prod.mapeo_arte`) con un mapeo hecho a mano. Es la parte de `/api/arte/mapeo` que es config del MOLDE: el mapeo del  | body: mapeo, pid |
 
 ## Editables / Objetos agregados
 
@@ -279,6 +280,7 @@ Total: **191 endpoints**. Generado automáticamente del código.
 | GET | `/api/consola` | LA CONSOLA DEL SERVIDOR: exactamente lo que se vería en la ventana de PowerShell, con la fecha y la hora de cada línea. Sale de un ARCHIVO de texto (` | q: buscar, limite |
 | GET | `/api/registro` | Los últimos eventos. `tipo` (error/aviso/info), `area` y `limite` filtran. Pide sesión (o el token del taller, para leer el publicado desde acá): lo q | q: area, limite, tipo |
 | POST | `/api/registro/limpiar` |  | — |
+| POST | `/api/registro/navegador` | Lo que FALLÓ EN LA COMPUTADORA de quien usa el sistema (MAPA 813). La tizada se arma en la PC (`pedido/generar.js`): si falla allá, el servidor no se  | body: datos, porque, que |
 
 ## Ayuda en video (tutoriales de Drive)
 

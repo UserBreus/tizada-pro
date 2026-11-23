@@ -27,7 +27,12 @@ print("1. el caché de las previas tiene GENERACIÓN: un dibujo de antes de un v
 ok("const _pvLimpiar = () => { _pvCache.current = {}; _pvGen.current++; };" in app,
    "vaciar el caché sube la generación")
 _sueltos = [m.start() for m in re.finditer(r"_pvCache\.current = \{\}", app)]
-_permitidos = app.count("_pvCache.current = {}; _pvGen.current++;") + app.count("length > 300) _pvCache.current = {};")
+# Los dos topes de memoria (cantidad y, desde MAPA 814, PESO) vacían sin subir la generación a propósito:
+# corren dentro de `_pvGuardar` DESPUÉS de descartar lo de otra generación, así que lo que se borra es de
+# esta misma y sólo se redibuja al mirarlo.
+_permitidos = (app.count("_pvCache.current = {}; _pvGen.current++;")
+               + app.count("length > 300) _pvCache.current = {};")
+               + app.count("_total > PV_TOPE_PESO) _pvCache.current = {};"))
 ok(len(_sueltos) == _permitidos, f"nadie vacía el caché sin subir la generación ({len(_sueltos) - _permitidos} sueltos)")
 ok("if (gen != null && gen !== _pvGen.current) return;" in app, "`_pvGuardar` descarta lo de otra generación")
 ok(app.count("_pvGuardar(") == len(re.findall(r"_pvGuardar\([^;]*?, (?:gen|_gen)\)", app)),
@@ -55,7 +60,8 @@ ok("const clave = `${pid}|${d.id}|previa|${huella(JSON.stringify(cfg))}`" in pre
 ok("m.previasEnUso.set(clave, (m.previasEnUso.get(clave) || 0) + 1)" in previa and "!(m.previasEnUso.get(k) > 0)" in previa,
    "se guardan los últimos y nunca se suelta uno que se está usando")
 ok("async contexto_a_soltar({ clave })" in worker, "el hilo sabe soltar un contexto viejo (con sus bases)")
-ok("if (d.solo_navegador) {" in app and "'El visor del arte no pudo dibujar este talle'" in app,
+# (el término del molde va con `generoTerm` desde MAPA 776: «este talle» / «esta talla»…)
+ok("if (d.solo_navegador) {" in app and "`El visor del arte no pudo dibujar ${generoTerm(term.variante).este}" in app,
    "si igual falla, el aviso dice el motivo de ACÁ, no el «recargá la página» del servidor")
 
 print()

@@ -132,8 +132,11 @@ def ruta_arte_vigente(base):
 
 
 def fijar_version(base, n):
-    with open(_ver_puntero(base), "w", encoding="utf-8") as fh:
+    # .tmp + os.replace: un corte en el medio dejaba el puntero vacío (= versión 0, se perdían las ediciones; MAPA 775)
+    ruta = _ver_puntero(base)
+    with open(ruta + ".tmp", "w", encoding="utf-8") as fh:
         fh.write(str(int(n)))
+    os.replace(ruta + ".tmp", ruta)
 
 
 def reset_versiones(base):
@@ -174,15 +177,18 @@ def inyectar_editable(arte_path, colocaciones, pdf_obj, nombre):
         # NOMBRE ÚNICO: el nombre de la capa es la identidad del editable en todo el sistema. Si ya
         # hay una "Editable Escudo" y se agrega otra igual, quedan dos capas indistinguibles y el
         # editor no puede saber a cuál mover. Se desambigua con un sufijo.
+        from motor_pedido import _norm_nombre   # (ver abajo, MAPA 799)
         _usados = set()
         try:
             for _o in (pdf.Root.get("/OCProperties") or {}).get("/OCGs") or []:
-                _usados.add(str(_o.get("/Name") or ""))
+                _usados.add(_norm_nombre(str(_o.get("/Name") or "")))
         except Exception:
             pass
-        if capa in _usados:
+        # comparados como los compara TODO el sistema (`_norm_nombre`: sin mayúsculas, sin acentos, guión = espacio;
+        # gemelo de `inyectarEditable`, MAPA 798-799): «Editable Lógo» y «Editable logo» son el mismo editable
+        if _norm_nombre(capa) in _usados:
             _i = 2
-            while f"{capa} {_i}" in _usados:
+            while _norm_nombre(f"{capa} {_i}") in _usados:
                 _i += 1
             capa = f"{capa} {_i}"
         # la CAPA (OCG) es UNA sola para todas las mesas + su registro en el catálogo, o el visor

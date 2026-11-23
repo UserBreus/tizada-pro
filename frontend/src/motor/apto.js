@@ -42,7 +42,7 @@ export function evaluarEquipo(forzar = false) {
   } else if (puntos < UMBRAL_PUNTOS || (eq.memoriaGb && eq.memoriaGb < 2)) {
     nivel = 'no'; motivo = puntos < UMBRAL_PUNTOS
       ? `Esta computadora es demasiado lenta (${puntos} puntos de potencia; hacen falta ${UMBRAL_PUNTOS}): un molde con diseño tardaría más de un minuto.`
-      : `Esta computadora tiene muy poca memoria (${eq.memoriaGb} GB): no va a poder preparar moldes.`
+      : `Esta computadora tiene muy poca memoria (${String(eq.memoriaGb).replace('.', ',')} GB): no va a poder preparar moldes.`
   } else if (puntos < UMBRAL_PUNTOS * 2 || (eq.memoriaGb && eq.memoriaGb < 8) || (eq.nucleos && eq.nucleos < 4)) {
     nivel = 'justa'; motivo = `Funciona, pero los moldes grandes van a tardar más${moldeMaxMb ? ` (hasta ~${moldeMaxMb} MB por molde)` : ''}. Cerrá otras pestañas y programas mientras trabajás.`
   } else {

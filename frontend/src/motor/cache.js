@@ -154,7 +154,7 @@ function _bajar(clave, url) {
     }
     const blob = await r.blob()
     bytesBajados(blob.size)
-    guardarBlob(clave, blob).then(soltar, soltar)
+    guardarBlob(clave, blob).then(() => _soltarVersionesViejas(clave)).then(soltar, soltar)
     return blob
   })()
   _enVuelo.set(clave, p)
@@ -162,10 +162,34 @@ function _bajar(clave, url) {
   return p
 }
 
+// El arte de un diseño del SERVIDOR (`arte|pid|dis|<sello>`, el «principal» del molde): al guardar una versión nueva, las
+// anteriores de ese mismo diseño ya no las pide nadie (el sello cambia sólo cuando cambia el archivo) y se acumulaban
+// de a 1-7 MB (inspector, MAPA 777: 8 copias). 🔴 Nunca las `|pc,` (viven sólo acá: MAPA 585, 760).
+async function _soltarVersionesViejas(clave) {
+  const m = /^(arte\|[^|]+\|[^|]+\|)(.*)$/.exec(clave)
+  if (!m || m[2].startsWith('pc,')) return
+  try {
+    // 🔴 sólo las de la MISMA forma de sello (inspector, MAPA 778): las miniaturas (`mesa.js`, `<mtime>-<tamaño>`) y el
+    // motor (`<tamaño>,<µs>`) guardan el MISMO archivo con dos claves; borrándose entre sí se volvía a bajar cada vez
+    const forma = (x) => x.replace(/[0-9]+/g, '0')
+    const f0 = forma(m[2])
+    const viejas = (await clavesCache()).filter((k) => k !== clave && k.startsWith(m[1]) && !k.slice(m[1].length).startsWith('pc,')
+      && forma(k.slice(m[1].length)) === f0)
+    await borrarCache(viejas)
+  } catch { /* es limpieza */ }
+}
+
 /** Baja `url` (o lo toma del guardado) y lo deja guardado bajo `clave`. Devuelve Uint8Array. */
+// 🔴 EL ARTE DEL PEDIDO VIVE EN LA PC (MAPA 760-763): sus claves (`arte|pid|dis|pc,…` y los objetos agregados
+// `oa|…|pc,…`) existen SÓLO acá. Si no están, NO se bajan: la carpeta del servidor con ese nombre de diseño puede
+// tener el arte de OTRA persona (MAPA 758) y quedaría guardado como si fuera el de este pedido (lo encontró el
+// inspector: después de «colocar», un motor con la versión vieja lo bajaba).
+const esDelPedido = (clave) => /^arte\|[^|]+\|[^|]+\|pc,/.test(clave) || /^oa\|[^|]+\|[^|]+\|[^|]+\|pc,/.test(clave)
+
 export async function traerConCache(clave, url) {
   const hit = await leerCache(clave)
   if (hit) return hit
+  if (esDelPedido(clave)) throw new Error('el diseño de este pedido no está en esta computadora: volvé a cargar el arte')
   // una copia PROPIA por pedido: quien llama suele transferir el buffer a un hilo
   const blob = await _bajar(clave, url)
   return new Uint8Array(await blob.arrayBuffer())

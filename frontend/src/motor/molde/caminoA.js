@@ -45,7 +45,7 @@ import { CM, geometriaPagina, contornoDeDrawing, itemVisor, emparejarPorSolape }
 
 export const MM = 2.83465                          // puntos por mm (molde_real.MM)
 export const MARGEN_MESA_CM = 2.0                  // margen sugerido por lado (motor_pedido)
-import { CAPAS_SISTEMA } from '../nombres.js'
+import { CAPAS_SISTEMA, CAPAS_GENERICAS } from '../nombres.js'
 import { analizarVariantes } from './herramientas.js'
 export { CAPAS_SISTEMA }
 
@@ -249,6 +249,12 @@ export function tallesDePlantilla(molde) {
     const formas = conDibujo.map((n) => cnt.get(n)).sort((a, b) => a - b)
     const mediana = formas[Math.floor(formas.length / 2)]
     if (cnt.get('0') >= mediana * 0.5) conDibujo.push('0')      // tiene contenido de talle, no basura de CAD
+  }
+  // UNA SOLA VARIANTE EN LA CAPA GENÉRICA (MAPA 810, gemelo de `_talles_de_plantilla`): sin ninguna capa
+  // de variante y con el molde todo en «Capa 1» (Illustrator) o «0» (AutoCAD), esa capa ES la variante.
+  if (!conDibujo.length) {
+    const gen = CAPAS_GENERICAS.filter((n) => cnt.get(n))
+    if (gen.length === 1) conDibujo.push(gen[0])
   }
   return ordenarPorArchivo(molde, conDibujo)
 }

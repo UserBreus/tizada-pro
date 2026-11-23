@@ -221,8 +221,10 @@ function hilosParaVista(bytes) {
   const memGb = n.deviceMemory || 4
   const mb = bytes / 1048576
   // el cupo es de TODAS las vistas abiertas (un pedido son varias hojas): con 4 hojas y 6 hilos
-  // cada una serían 24 hilos y 24 copias del PDF
-  const abiertosYa = [...abiertas.values()].reduce((k, v) => k + v.obreros.length, 0)
+  // cada una serían 24 hilos y 24 copias del PDF. También las que se están ABRIENDO (todavía no
+  // están en `abiertas`): sin contarlas, varias hojas abriéndose a la vez se daban 6 hilos cada una.
+  const abiertosYa = [...abiertas.values(), ...[...abriendose.values()].map((a) => a.vista).filter(Boolean)]
+    .reduce((k, v) => k + v.obreros.length, 0)
   // medido (2026-09-18, 12 núcleos / 32 GB): 24 hilos dejaron listos 258 dibujos de un pedido de
   // 28 m de tela en ~8 min; cada hilo pesa ~150-300 MB con una hoja de 11 MB → un hilo por núcleo
   // (menos uno para la pantalla) mientras la memoria declarada dé (≈ 1 hilo por cada 0,8 GB)
@@ -231,6 +233,13 @@ function hilosParaVista(bytes) {
 }
 
 const abiertas = new Map()          // huella → Vista
+// 🔴 LAS QUE SE ESTÁN ABRIENDO: huella → {p (la promesa), vista (cuando ya existe), cancelada}. La vista
+// recién entra en `abiertas` cuando terminó de abrir, y abrir tarda (bajar, copiar el PDF a cada hilo):
+// al terminar una tizada el precalentado y el visor pedían LA MISMA hoja casi a la vez, cada uno abría
+// SU juego de hilos y el que quedaba afuera del mapa no lo cerraba nadie. Medido el 2026-10-30 tras 12
+// tizadas seguidas en la misma pestaña: 276 hilos «Dibujo de la tizada», 8,6 GB, y el navegador ya no
+// podía crear ninguno («Out of memory: Cannot allocate Wasm memory») → «No se pudo dibujar la vista».
+const abriendose = new Map()
 // LA VISTA ES UNA FOTO DE CADA MESA, DE UNA SOLA CALIDAD (decisión del usuario 2026-09-18):
 // «muchas imágenes pequeñas formando una es lo que lo hace lento… debe ser UNA sola calidad, como
 // una foto: si es buena se ve bien completa y se ve bien si me acerco». Así que cada mesa se dibuja
@@ -300,9 +309,15 @@ function _anotarFondo(clave, p) {
  * Dibuja de fondo lo que la pantalla va a pedir de esta vista: con `pxcm`, LA FOTO de cada mesa;
  * con `anchos`, esos anchos (la ficha técnica). Lo que ya está o ya se pidió no se cuenta dos veces.
  */
-export function precalentarTodo(v, { pxcm = null, anchos = [] } = {}) {
+export function precalentarTodo(v, { pxcm = null, anchos = [], contar = true } = {}) {
   const paginas = (v.medidas || []).length
-  const pedir = (p, ancho) => { if (!v.yaPedido(p, ancho, null)) _anotarFondo(`${v.huella}|${p}`, v.dibujo(p, ancho, null, true)) }
+  // `contar: false` = se dibuja de fondo igual pero NO entra en «N de M mesas listas» (la ficha técnica, MAPA 782)
+  const pedir = (p, ancho) => {
+    if (v.yaPedido(p, ancho, null)) return
+    const d = v.dibujo(p, ancho, null, true)
+    if (contar) _anotarFondo(`${v.huella}|${p}`, d)
+    else if (d && d.catch) d.catch(() => {})
+  }
   if (pxcm) for (let p = 0; p < paginas; p++) pedir(p, v.anchoFoto(p, pxcm))
   for (const ancho of anchos) for (let p = 0; p < paginas; p++) pedir(p, ancho)
 }
@@ -330,23 +345,38 @@ export async function bytesDeArchivo(huella, traer) {
 export async function abrirVista(huella, traer, { topeMb = 400 } = {}) {
   if (abiertas.has(huella)) return abiertas.get(huella)
   if (typeof Worker === 'undefined') return null
-  try {
-    let bytes = await leer(ARCHIVOS, huella)
-    if (bytes) bytes = new Uint8Array(bytes instanceof Blob ? await bytes.arrayBuffer() : bytes)
-    if (!bytes) {
-      const b = await traer()
-      if (!b) return null
-      if (b.byteLength > topeMb * 1024 * 1024) return null
-      bytes = new Uint8Array(b)
-      guardar(ARCHIVOS, huella, new Blob([bytes], { type: 'application/pdf' }))
+  // la MISMA hoja pedida dos veces mientras se abre → las dos esperan la misma vista (ver `abriendose`)
+  if (abriendose.has(huella)) return abriendose.get(huella).p
+  const a = { p: null, vista: null, cancelada: false }
+  a.p = (async () => {
+    try {
+      let bytes = await leer(ARCHIVOS, huella)
+      if (bytes) bytes = new Uint8Array(bytes instanceof Blob ? await bytes.arrayBuffer() : bytes)
+      if (!bytes) {
+        const b = await traer()
+        if (!b) return null
+        if (b.byteLength > topeMb * 1024 * 1024) return null
+        bytes = new Uint8Array(b)
+        guardar(ARCHIVOS, huella, new Blob([bytes], { type: 'application/pdf' }))
+      }
+      if (a.cancelada) return null
+      a.vista = new Vista(huella)
+      await a.vista.abrir(bytes, hilosParaVista(bytes.byteLength))
+      // la cerraron mientras abría («Nuevo pedido», otra tizada, el visor que se fue): sus hilos se cierran ya
+      if (a.cancelada) { a.vista.cerrar(); return null }
+      abiertas.set(huella, a.vista)
+      return a.vista
+    } catch {
+      // 🔴 LOS HILOS QUE YA ARRANCARON SE CIERRAN: si no, cada intento fallido (sin memoria, el visor
+      // reintenta 4 veces) dejaba sus hilos vivos y la falta de memoria se agrandaba sola
+      if (a.vista) { try { a.vista.cerrar() } catch { /* nada */ } }
+      return null                    // sin memoria, sin permiso, archivo raro: se reintenta / lo dibuja el servidor
+    } finally {
+      if (abriendose.get(huella) === a) abriendose.delete(huella)
     }
-    const v = new Vista(huella)
-    await v.abrir(bytes, hilosParaVista(bytes.byteLength))
-    abiertas.set(huella, v)
-    return v
-  } catch {
-    return null                      // sin memoria, sin permiso, archivo raro: lo dibuja el servidor
-  }
+  })()
+  abriendose.set(huella, a)
+  return a.p
 }
 
 /**
@@ -354,14 +384,14 @@ export async function abrirVista(huella, traer, { topeMb = 400 } = {}) {
  * ficha. Se guardan en la caché (no se vuelven a bajar del servidor) y se dibuja de fondo la foto
  * de cada mesa (`pxcm`) o las hojas de la ficha (`anchos`): al abrir el paso Tizada, ya están.
  */
-export async function precalentarVista(huella, bytes, { pxcm = null, anchos = [] } = {}) {
+export async function precalentarVista(huella, bytes, { pxcm = null, anchos = [], contar = true } = {}) {
   if (typeof Worker === 'undefined' || !bytes || !bytes.byteLength) return null
   try {
     const copia = new Uint8Array(bytes.slice ? bytes.slice() : bytes)
     guardar(ARCHIVOS, huella, new Blob([copia], { type: 'application/pdf' }))
     const v = await abrirVista(huella, async () => copia.buffer)
     if (!v) return null
-    precalentarTodo(v, { pxcm, anchos })
+    precalentarTodo(v, { pxcm, anchos, contar })   // la ficha: `contar: false` (no es una mesa, MAPA 783)
     return v
   } catch {
     return null
@@ -374,12 +404,17 @@ export async function precalentarVista(huella, bytes, { pxcm = null, anchos = []
 export function soltarVista(huella) {
   const v = abiertas.get(huella)
   if (v) { v.cerrar(); abiertas.delete(huella) }
+  // la que se estaba abriendo también: cuando termine de abrir, se cierra sola (`abrirVista`)
+  const a = abriendose.get(huella)
+  if (a) { a.cancelada = true; abriendose.delete(huella) }
 }
 
-/** Cierra las vistas abiertas (al salir del pedido, o al empezar uno nuevo). */
+/** Cierra las vistas abiertas (al salir del pedido, o al empezar uno nuevo) y las que se estaban abriendo. */
 export function cerrarVistas() {
   for (const v of abiertas.values()) v.cerrar()
   abiertas.clear()
+  for (const a of abriendose.values()) a.cancelada = true
+  abriendose.clear()
 }
 
 /** Borra del navegador lo guardado de un trabajo (sus dibujos y su archivo). */

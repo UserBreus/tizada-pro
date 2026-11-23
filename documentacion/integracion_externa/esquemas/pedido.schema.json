@@ -36,6 +36,14 @@
       "type": "boolean",
       "description": "true para rehacer un pedido ya listo con la misma referencia."
     },
+    "modo": {
+      "enum": [
+        "sublimado",
+        "corte"
+      ],
+      "default": "sublimado",
+      "description": "«corte» = TIZADA PARA CORTE (MAPA 816): sin arte; de cada pieza sale sólo su línea de corte (el molde, sin etiqueta), y cada talle en su mesa (salvo que `mesas` diga otra cosa). El arte, las tipografías y los editables se ignoran (alarma corte-ignora-arte); el molde a medida no entra (molde-no-corte); nombre y número no se exigen."
+    },
     "opciones": {
       "type": "object",
       "additionalProperties": false,
@@ -65,6 +73,22 @@
         "carpeta": {
           "type": "string",
           "description": "Subcarpeta de Drive (puede tener niveles: 2026-10/OV-123)."
+        },
+        "formatos": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "pdf",
+              "dxf",
+              "ai",
+              "plt",
+              "svg",
+              "eps"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Sólo con modo «corte»: cada mesa ADEMÁS en estos formatos de máquina de corte (el PDF sale siempre). dxf = DXF 2000 (mm), ai = Illustrator 3, plt = HPGL (40 unidades por mm), svg y eps. Vuelven en `archivos` con tipo «corte» y su `formato`."
         }
       }
     },
@@ -77,8 +101,10 @@
             "normal",
             "una_por_fila",
             "por_talles",
-            "talles_separados"
-          ]
+            "talles_separados",
+            "talle_por_mesa"
+          ],
+          "description": "talle_por_mesa = cada talle en su propia mesa (lo predeterminado con modo «corte»). Con modo «corte», `por_talles` junta los talles de cada grupo y los demás salen cada uno en su mesa."
         },
         "grupos": {
           "type": "array",

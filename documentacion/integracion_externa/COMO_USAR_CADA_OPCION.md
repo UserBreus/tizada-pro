@@ -33,6 +33,8 @@ a TIZADA PRO. Dice, opción por opción, **para qué sirve**, **cuándo usarla**
 | Que cada fila salga en su propia mesa y se imprima N veces | `mesas.modo = "una_por_fila"` + `planilla[].cantidad` | 1 |
 | Qué talles van juntos en una mesa | `mesas.modo = "por_talles"` + `mesas.grupos` | 2 |
 | Todos en la misma mesa pero sin mezclar talles | `mesas.modo = "talles_separados"` (+ `grupos` opcional) | 2 |
+| Cada talle en su propia mesa | `mesas.modo = "talle_por_mesa"` (lo de siempre con `modo: "corte"`) | 2 |
+| Tizada para CORTE, sin arte (mesa o láser) | `modo = "corte"` + `opciones.formatos` (dxf, ai, plt, svg, eps) | 2 |
 | El largo máximo de cada mesa | `mesas.largo_max_m` (sin él, el del nesting del molde) | 2 |
 | Que cada diseño vaya en sus propias mesas | `mesas.separar_disenos = true` (sin él, el mismo molde se mezcla) | 2 |
 | Los diseños del pedido (jugador, golero…) | `disenos[]` + `planilla[].diseno` | 3 |
@@ -59,7 +61,7 @@ La columna de **cantidad** de la planilla sirve para dos cosas **diferentes**, y
 | Cómo se acomodan las piezas | **Todas las filas mezcladas** en las mesas de cada tela, para gastar la menor tela posible | **Cada fila sola en su mesa**, en el orden de la planilla |
 | Cuántas mesas salen | Las que hagan falta según el largo máximo de mesa (pueden ser pocas y largas) | **Una por fila** (por tela) |
 | Qué devuelve el resultado | Un PDF por mesa, sin datos de fila | Un PDF por mesa con **`fila`** (el número de fila) y **`copias`** (la cantidad) |
-| El nombre del archivo | `REF__Mesa 1 - Tela.pdf` (las mesas se numeran por tela) | `REF__Mesa 3 - Tela - Fila 3 - x5.pdf` |
+| El nombre del archivo | `REF__Mesa 1 - Tela.pdf` (las mesas se numeran por tela) | `REF__Mesa 3 - Tela - Fila 3 - Talle M - x5.pdf` (el talle de la mesa; varios: `Talles S-M`; las copias siempre al final) |
 | ¿Quién «repite»? | TIZADA (ya vienen todas las piezas en el PDF) | **El que imprime**: manda la mesa a la impresora `copias` veces |
 | Requisito | — | La planilla del molde **tiene que tener** columna de cantidad (si no: alarma `mesas-invalido`) |
 
@@ -118,8 +120,8 @@ Resultado: si las dos banderas son de **moldes distintos**, una mesa por fila; s
 mezcladas que se repiten (ver arriba). En el resultado, cada archivo de tizada trae:
 
 ```json
-{ "tipo": "tizada", "nombre": "OV-2026-00123__Mesa 1 - Bandera (1,60) - Fila 1 - x20.pdf",
-  "mesa": 1, "fila": 1, "copias": 10, "por_mesa": 2, "ancho_cm": 157.0, "largo_cm": [312.4], ... }
+{ "tipo": "tizada", "nombre": "OV-2026-00123__Mesa 1 - Bandera (1,60) - Fila 1 - Talle 1,00x1,00 - 2 por mesa - x10.pdf",
+  "mesa": 1, "fila": 1, "copias": 10, "por_mesa": 2, "talles": ["1,00x1,00"], "ancho_cm": 157.0, "largo_cm": [312.4], ... }
 ```
 
 **Usarlo cuando:** lo mismo se fabrica **muchas veces igual** y conviene imprimir la mesa repetida en vez
@@ -172,6 +174,22 @@ sigue en otra mesa.
 - `grupos` es **opcional**: los talles de un mismo grupo sí van mezclados entre sí (útil para talles con
   pocas prendas); los que no están en ningún grupo van **cada uno aparte**.
 - En el resultado cada archivo trae `"talles": [...]` (los de esa mesa, en orden) y `"separados": true`.
+
+### Tizada para corte (`modo: "corte"`)
+
+Sin arte: de cada pieza sale **sólo su línea de corte** (el molde, sin etiqueta), y **cada talle en su mesa**. Para la
+mesa de corte o la máquina láser. Cada mesa vuelve en PDF y, si se piden, en los formatos de las máquinas:
+
+```json
+"modo": "corte",
+"opciones": { "formatos": ["dxf", "ai", "plt"] }
+```
+
+- `dxf` = DXF 2000 en mm (curvas exactas) · `ai` = Illustrator 3 · `plt` = HPGL (curvas en tramos de 0,02 mm) ·
+  `svg` · `eps`. Todo a escala 1:1, la línea de corte en la capa «Corte».
+- No mandar arte ni tipografías (se ignoran). Nombre y número no hacen falta.
+- Para juntar talles: `mesas.modo = "por_talles"` con `grupos`; los talles que no están en ningún grupo siguen
+  cada uno en su mesa.
 
 ### Separar diseños (`separar_disenos`)
 

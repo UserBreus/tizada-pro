@@ -1865,6 +1865,19 @@ function areaHoja(hoja, cellPt) {
   return n * (k * k)
 }
 
+/** Copia (MAPA 759) — gemelo EXACTO de `_juegos_completos`: cuántos juegos completos trae una mesa de copias de
+ * la misma fila y la mesa con sólo esos (de cada pieza sus primeros `m` lugares, numerados 0…m-1). */
+function juegosCompletos(hoja, per) {
+  const porPieza = new Map()
+  for (const c of hoja) { const j = c.pieza._pieza_i ?? 0; if (!porPieza.has(j)) porPieza.set(j, []); porPieza.get(j).push(c) }
+  let m = Infinity
+  for (let j = 0; j < per; j++) m = Math.min(m, (porPieza.get(j) || []).length)
+  if (!(m >= 1)) return [0, null]
+  const usar = new Map()
+  for (let j = 0; j < per; j++) porPieza.get(j).slice(0, m).forEach((c, i) => usar.set(c, i))
+  return [m, hoja.filter((c) => usar.has(c)).map((c) => ({ ...c, pieza: { ...c.pieza, _copia_i: usar.get(c) } }))]
+}
+
 /**
  * COPIA: LA MESA LLENA QUE SE REPITE (MAPA 720) — gemelo EXACTO de `repartir_copias` (nesting_contorno.py),
  * ver ahí el porqué. Las copias que llenan una mesa del largo máximo, acomodadas como siempre; la primera
@@ -1882,15 +1895,22 @@ export async function repartirCopias(fila, copias, cfg, hoja1 = null, area1 = nu
   if (!hojas.length) return null
   if (hojas.length === 1 && k === copias) return [[hojas[0], { copias: 1, por_mesa: copias }, areaHoja(hojas[0], cellPt)]]
   const per = fila.length
-  const cuenta = new Map()
-  for (const c of hojas[0]) { const ci = c.pieza._copia_i ?? 0; cuenta.set(ci, (cuenta.get(ci) || 0) + 1) }
-  const enteras = [...cuenta.entries()].filter(([, v]) => v === per).map(([ci]) => ci).sort((a, b) => a - b)
-  const n = enteras.length
-  if (n === 0) return null
-  const nuevo = new Map(enteras.map((ci, i) => [ci, i]))
-  // la mesa llena con sus copias numeradas 0…n-1 (la Copia mezclada reparte esos lugares, MAPA 717)
-  const lleno = hojas[0].filter((c) => nuevo.has(c.pieza._copia_i ?? 0))
-    .map((c) => ({ ...c, pieza: { ...c.pieza, _copia_i: nuevo.get(c.pieza._copia_i ?? 0) } }))
+  // 🔴 LA MESA LLENA = `n` PRENDAS COMPLETAS QUE ENTRAN EN UNA MESA (MAPA 759): ver `repartir_copias` (Python).
+  let n, lleno = null
+  if (hojas.length === 1) { n = k; lleno = hojas[0] } else {
+    let aTot = 0
+    for (const h of hojas) aTot += areaHoja(h, cellPt)
+    n = Math.max(1, Math.min(k - 1, Math.trunc(k * areaHoja(hojas[0], cellPt) / (aTot || 1))))
+    while (n >= 1) {
+      const cn = (await anidarContorno(copiasDe(fila, n), cfg, ejecutor)).colocaciones.filter((h) => h.length)
+      if (cn.length === 1) { lleno = cn[0]; break }
+      // no entró: la próxima con una menos; atajo EXACTO si esta primera mesa ya trae n-1 juegos completos (ver Python)
+      const [m, sub] = juegosCompletos(cn[0], per)
+      if (m >= 1 && m === n - 1) { n = m; lleno = sub; break }
+      n--
+    }
+    if (!lleno) return null
+  }
   const llenas = Math.floor(copias / n), resto = copias % n
   const res = [[lleno, { copias: llenas, por_mesa: n }, areaHoja(lleno, cellPt)]]
   if (resto) {
@@ -2024,23 +2044,46 @@ async function copiaPorFilas(piezas, cfg, sepDis, nombreDis, ejecutor = null) {
     const dis = sepDis ? { diseno: nombreDis.get(dk) } : {}
     for (const h of r.colocaciones) {
       if (!h.length) continue
+      // 🔴 PRENDAS COMPLETAS Y PIEZAS SUELTAS (MAPA 759): ver `_copia_por_filas` (Python)
       const cuenta = new Map()
       for (const c of h) {
         const f = Number.isInteger(c.pieza._fila) ? c.pieza._fila : -1
-        if (!cuenta.has(f)) cuenta.set(f, new Set())
-        cuenta.get(f).add(c.pieza._copia_i ?? 0)
+        if (!cuenta.has(f)) cuenta.set(f, new Map())
+        const ci = c.pieza._copia_i ?? 0
+        cuenta.get(f).set(ci, (cuenta.get(f).get(ci) || 0) + 1)
       }
       const fs = [...cuenta.keys()].sort((a, b) => a - b)
       const nro = (f) => (f >= 0 ? f + 1 : null)
-      const nMesa = fs.reduce((t, f) => t + cuenta.get(f).size, 0)
-      const info = fs.length === 1 ? { fila: nro(fs[0]), copias: 1, por_mesa: nMesa }
-        : { fila: null, filas: fs.map((f) => ({ fila: nro(f), por_mesa: cuenta.get(f).size })), copias: 1, por_mesa: nMesa }
+      const comp = new Map(fs.map((f) => [f, [...cuenta.get(f).values()].filter((v) => v >= grupos.get(f).length).length]))
+      const suel = new Map(fs.map((f) => [f, cuenta.get(f).size - comp.get(f)]))
+      const nMesa = fs.reduce((t, f) => t + comp.get(f), 0), nSuel = fs.reduce((t, f) => t + suel.get(f), 0)
+      const _s = (x) => (x ? { sueltas: x } : {})
+      const info = fs.length === 1 ? { fila: nro(fs[0]), copias: 1, por_mesa: nMesa, ..._s(nSuel) }
+        : { fila: null, filas: fs.map((f) => ({ fila: nro(f), por_mesa: comp.get(f), ..._s(suel.get(f)) })), copias: 1, por_mesa: nMesa, ..._s(nSuel) }
       colocaciones.push(h); mesas.push({ ...info, ...dis })
       area += areaHoja(h, cellPt)
       consumo += altoDe(h)
     }
   }
+  // EL TALLE DE CADA MESA (MAPA 820): Copia decía «Fila 3 - x5» y había que ir a la planilla a ver qué talle era
+  // la fila 3 (sobre todo en la tizada para corte, donde la mesa ES el talle). Los talles que lleva cada mesa,
+  // en el orden de las filas. Gemelo EXACTO del final de `_copia_por_filas` (Python).
+  for (let i = 0; i < mesas.length; i++) {
+    const tl = tallesDeMesa(colocaciones[i])
+    if (tl.length) mesas[i] = { ...mesas[i], talles: tl }
+  }
   return { colocaciones, area, consumo, mesas }
+}
+
+/** Los talles de las piezas de una mesa, sin repetir y en el orden de las filas de la planilla (MAPA 820). */
+function tallesDeMesa(h) {
+  const filaDe = (c) => (Number.isInteger(c.pieza._fila) ? c.pieza._fila : -1)
+  const out = []
+  for (const c of [...h].sort((a, b) => filaDe(a) - filaDe(b))) {
+    const t = c.pieza.talle
+    if (t != null && t !== '' && !out.includes(String(t))) out.push(String(t))
+  }
+  return out
 }
 
 /**

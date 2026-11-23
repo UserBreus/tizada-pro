@@ -201,11 +201,12 @@ def autenticar(usuario, password):
 
 
 def permisos_de(usuario_id):
+    # sin los RETIRADOS: siguen en la base de las instalaciones viejas y el admin decía «19 de 18 acciones» (MAPA 807)
     return [r["clave"] for r in db.filas(
         "SELECT DISTINCT p.clave FROM permiso p "
         "JOIN rol_permiso rp ON rp.permiso_id=p.id "
         "JOIN usuario_rol ur ON ur.rol_id=rp.rol_id "
-        "WHERE ur.usuario_id=? ORDER BY p.clave", usuario_id)]
+        "WHERE ur.usuario_id=? ORDER BY p.clave", usuario_id) if r["clave"] not in PERMISOS_RETIRADOS]
 
 
 def roles_de(usuario_id):

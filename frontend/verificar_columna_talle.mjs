@@ -69,7 +69,8 @@ ok(/const _faltaCol = colsTalle\.length > 1|_colsTalle\.length > 1\s*\n?\s*&& _m
    'la pantalla sabe a qué molde le falta');
 ok(/Falta decir de qué columna toma el talle cada molde/.test(APP),
    'la barra de abajo lo dice con todas las letras');
-ok(/disabled=\{!_mios\.length \|\| _faltaDis \|\| _faltaCol\}/.test(APP),
+// (después de `_faltaCol` puede venir más: `_choqueB`, dos moldes con la misma columna en un diseño, MAPA 755)
+ok(/disabled=\{!_mios\.length \|\| _faltaDis \|\| _faltaCol(\s*\|\|[^}]*)?\}/.test(APP),
    '🔴 y «A las piezas» queda apagado hasta que estén todos');
 
 console.log('\n6) El sistema NO adivina: lo pone el cliente');

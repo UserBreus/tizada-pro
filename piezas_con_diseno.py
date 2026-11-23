@@ -2734,7 +2734,7 @@ def _repartir(tareas, procesos, worker, tope, que, al_terminar=None, avisar_espe
             raise
         except Exception as e:
             motivo = f"{type(e).__name__}: {e}"
-            print(f"[camino B] {que}: {len(pendientes)} tarea(s) sin terminar en el intento {intento} "
+            print(f"[camino B] {que}: {len(pendientes)} {'tarea' if len(pendientes) == 1 else 'tareas'} sin terminar en el intento {intento} "
                   f"({motivo}); " + ("las reintento en procesos nuevos" if intento == 1 else "no insisto"))
     if pendientes:
         _cuanto = f"{tope:.0f} segundos" if tope < 120 else f"{tope / 60:.0f} minutos"

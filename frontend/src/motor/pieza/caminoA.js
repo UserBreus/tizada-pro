@@ -17,8 +17,9 @@
 // de la pieza (para la vista previa o los contratos) sale de `documentoPiezaCaminoA(mupdf, base,
 // estampado)`. Las mesas de origen que nombra `base.fuentesXo` (`{origen, pagina, doc}`) son las
 // que la hoja comparte (`hoja/componer.js`, el sello).
+import { guardarPdf } from '../pdf/guardar.js'
 import { instrucciones as parsear, escribir } from '../pdf/contenido.js'
-import { devolver } from '../pdf/prestado.js'
+import { devolver, soltarImagen } from '../pdf/prestado.js'
 import { recursosLigeros, sanearOc } from '../molde/paginas.js'
 import { suprimirCapas, aislarCapa, recolorarCapa, aislarObjeto, aislarCapaObjetos,
   limpiarCapasConservandoTalle } from '../molde/capas.js'
@@ -430,7 +431,7 @@ export function tieneContenidoReal(mupdf, doc, pagina) {
       fillPath() { dibujos++ }, strokePath() { dibujos++ },
       fillText() { texto++ }, strokeText() { texto++ }, clipText() { texto++ }, clipStrokeText() { texto++ }, ignoreText() { texto++ },
       // (`devolver`: el sombreado y la imagen son PRESTADOS — ver `pdf/prestado.js`)
-      clipPath: nada, clipStrokePath: nada, fillShade: devolver, fillImage: devolver, fillImageMask: devolver, clipImageMask: devolver,
+      clipPath: nada, clipStrokePath: nada, fillShade: devolver, fillImage: soltarImagen, fillImageMask: devolver, clipImageMask: devolver,
       popClip: nada, beginMask: nada, endMask: nada, beginGroup: nada, endGroup: nada, beginTile() { return 0 }, endTile: nada,
       beginLayer: nada, endLayer: nada, beginStructure: nada, endStructure: nada, beginMetatext: nada, endMetatext: nada,
       renderFlags: nada, setDefaultColorSpaces: nada, close: nada,
@@ -475,10 +476,28 @@ export function contextoCaminoA(mupdf, opciones) {
   const B = bc.B
   // el arte se guarda como BYTES una vez: cada uso (limpio, aislado por capa, crudo) abre su copia,
   // como `_abrir_pike(arte)` abre el archivo de nuevo en el Python
-  const arteBytes = arte instanceof Uint8Array ? arte : arte instanceof ArrayBuffer ? new Uint8Array(arte)
-    : arte.saveToBuffer('').asUint8Array().slice()
+  // `arte` puede venir ya como `mupdf.Buffer` COMPARTIDO (el hilo guarda UNO por arte para todos sus
+  // contextos, MAPA 813): ése es de quien lo pasó y acá no se suelta ni se guardan los bytes aparte.
+  const bufExterno = typeof mupdf.Buffer === 'function' && arte instanceof mupdf.Buffer
+  // 🔴 TIZADA PARA CORTE (MAPA 816): SIN ARTE (`arte: null`). Cada pieza sale en blanco con su borde de
+  // corte (y la etiqueta, que va en el estampado): el mismo `armarBase` con el dibujo vacío, como una
+  // pieza sin mesa asignada. Nunca se abre ningún archivo.
+  const sinArte = arte === null || arte === undefined
+  // el arte se guarda como BYTES una vez: cada uso (limpio, aislado por capa, crudo) abre su copia,
+  // como `_abrir_pike(arte)` abre el archivo de nuevo en el Python
+  const arteBytes = (bufExterno || sinArte) ? null : arte instanceof Uint8Array ? arte : arte instanceof ArrayBuffer ? new Uint8Array(arte)
+    : guardarPdf(arte, '')
   const abiertos = []
-  const nuevoArte = () => { const d = new mupdf.PDFDocument(arteBytes); abiertos.push(d); return d }
+  // 🔴 UNA SOLA COPIA DEL ARCHIVO EN EL MOTOR (MAPA 811). Abrir desde los BYTES copia el archivo
+  // entero en la memoria del hilo cada vez, y acá se abren varios a la vez (tal cual, limpio, uno por
+  // capa «Editable …» aislada): con un arte de 239 MB eran 239 MB por copia contra un tope de 2 GB.
+  // Abiertos desde el MISMO `Buffer` comparten esos bytes (MuPDF sólo los lee); cada documento
+  // guarda su propia referencia, así que el buffer se suelta en `cerrar()` sin romper ninguno.
+  let arteBuf = bufExterno ? arte : null
+  const nuevoArte = () => {
+    if (arteBuf === null) arteBuf = new mupdf.Buffer(arteBytes)
+    const d = new mupdf.PDFDocument(arteBuf); abiertos.push(d); return d
+  }
   let arteCrudo = null                                   // el archivo tal cual (capas, `arte_rect`)
   const arteTalCual = () => { if (arteCrudo === null) arteCrudo = nuevoArte(); return arteCrudo }
   const mapeo = normalizarMapeo(mapeoArte)
@@ -486,8 +505,9 @@ export function contextoCaminoA(mupdf, opciones) {
   // vacío» mandaba un arte separado SIN asignar al camino clásico: se pegaba como si estuviera
   // dibujado sobre la plantilla, sin escalar y corrido (el banderín «con el diseño movido»). Con la
   // validación en la mano, una pieza sin asignar sale en blanco, como dice el aviso.
-  const separado = clasico === null || clasico === undefined ? Object.keys(mapeo.base).length > 0 : !clasico
-  const capasArte = separado ? capasDelDocumento(arteTalCual()) : new Set()   // `CAPAS_ARTE`
+  // sin arte: «separado» con el mapeo vacío → ninguna pieza tiene mesa del arte → dibujo vacío
+  const separado = sinArte ? true : clasico === null || clasico === undefined ? Object.keys(mapeo.base).length > 0 : !clasico
+  const capasArte = (separado && !sinArte) ? capasDelDocumento(arteTalCual()) : new Set()   // `CAPAS_ARTE`
 
   // ── editables: qué se saca del diseño base y se redibuja aparte ──
   const editadosNombres = new Set()
@@ -661,7 +681,7 @@ export function contextoCaminoA(mupdf, opciones) {
     return d
   }
 
-  const mesaArte = (pieza, talle, variante = null) => (separado ? mesaArteDe(mapeo, mapeoVar, pieza, talle, variante) : null)
+  const mesaArte = (pieza, talle, variante = null) => ((separado && !sinArte) ? mesaArteDe(mapeo, mapeoVar, pieza, talle, variante) : null)
 
   /** `_dibujar_objetos_agregados`. */
   const dibujarObjetosAgregados = (pieza, variante, talle, cont, W, H, clip, mesaRect, fuentesXo, nombres) => {
@@ -794,9 +814,11 @@ export function contextoCaminoA(mupdf, opciones) {
   const cerrar = () => {
     for (const d of abiertos) { try { d.destroy() } catch { /* nada */ } }
     abiertos.length = 0
+    if (arteBuf !== null && !bufExterno) { try { arteBuf.destroy() } catch { /* nada */ } }
+    arteBuf = null
   }
 
-  return { separado, mapeo, B, bc, referencia, mesaArte, armarBase, armarBaseClasico, arteRect, redibujarValidos, cerrar }
+  return { separado, sinArte, mapeo, B, bc, referencia, mesaArte, armarBase, armarBaseClasico, arteRect, redibujarValidos, cerrar }
 }
 
 /**
@@ -818,7 +840,7 @@ export function documentoPiezaCaminoA(mupdf, base, estampado = '') {
   const contenido = new TextEncoder().encode(base.baseStream + estampado)
   const page = out.addPage([0, 0, base.W + 2 * base.B, base.H + 2 * base.B], 0, res, contenido)
   out.insertPage(out.countPages(), page)
-  const bytes = out.saveToBuffer('compress').asUint8Array().slice()
+  const bytes = guardarPdf(out, 'compress')
   for (const m of mapas.values()) { try { m.destroy() } catch { /* nada */ } }
   try { out.destroy() } catch { /* nada */ }
   return bytes

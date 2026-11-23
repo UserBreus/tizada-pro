@@ -847,6 +847,53 @@ def main():
     finally:
         VT._DOCS["catalogo"] = cat0
 
+    print("\n11 · TIZADA PARA CORTE (`modo: \"corte\"`, MAPA 816): sin arte, un talle por mesa, en los formatos de corte")
+    corte = pedido(referencia="OV-CORTE-1", modo="corte",
+                   disenos=[{"nombre": "JUGADOR", "moldes": [{"molde": PID, "tela": "44", "telas_por_pieza": {"Cuello": "77"}}]}],
+                   planilla=[{"talle": "M", "manga": "Corta"}, {"talle": talles[-1], "manga": "Corta"}, {"talle": "M", "manga": "Larga"}],
+                   opciones={"formatos": ["dxf", "ai", "plt", "svg", "eps"]})
+    c, cods, d = codigos(corte)
+    ok(c == 200 and not cods and d.get("aceptaria"), f"un pedido de corte sin arte ni nombre/número pasa la revisión ({c}, {cods})")
+    _avisos_c = [a["codigo"] for a in d.get("alarmas") or []]
+    c, cods, d = codigos(dict(corte, disenos=[{"nombre": "JUGADOR", "arte": "artes/jugador.ai",
+                                               "moldes": [{"molde": PID, "tela": "44", "telas_por_pieza": {"Cuello": "77"}}]}]))
+    ok(not cods and "corte-ignora-arte" in [a["codigo"] for a in d.get("alarmas") or []],
+       f"con arte en un pedido de corte: se ignora con el aviso corte-ignora-arte (sin frenar) ({cods})")
+    for cod, p in (("modo-invalido", dict(corte, modo="laser")),
+                   ("formatos-invalidos", dict(corte, opciones={"formatos": ["dwg"]}))):
+        c, cods, _ = codigos(p)
+        ok(cod in cods, f"{cod}: frena ({cods})")
+    c, cods, d = codigos(pedido(opciones={"formatos": ["dxf"]}))
+    ok(not cods and "formatos-sin-corte" in [a["codigo"] for a in d.get("alarmas") or []], "formatos sin modo corte: aviso formatos-sin-corte")
+    _cuc = IE.cuerpo_de({"corte": True, "disenos": [{"slug": "x-j", "nombre": "J", "moldes": [{"pid": "P", "plantilla": "P", "variable": "v1"}]}],
+                         "filas": [{"talle": "M", "__diseno": "J"}], "mesas": {"modo": "talle_por_mesa"}, "opciones": {}, "columnas": []})
+    ok(_cuc.get("corte") is True and _cuc.get("talles_mesa_modo") == "cada_uno", "el cuerpo lleva `corte` y «cada talle en su mesa», como la pantalla")
+    c, d = _http("POST", api + "/pedidos", llave=llave, cuerpo=_zip(corte, {}), tipo="application/zip")
+    ok(c == 202 and d.get("aceptado"), f"el paquete de corte (sin ningún archivo) se acepta ({c}: {[a['codigo'] for a in d.get('alarmas') or []]})")
+    r = _correr_robot(base)
+    c, est = _http("GET", api + "/pedidos/OV-CORTE-1", llave=llave)
+    if est.get("estado") != "listo":
+        print("    --- salida del robot ---\n" + (r.stdout or "")[-3000:] + "\n" + (r.stderr or "")[-3000:])
+    ok(est.get("estado") == "listo", f"el robot la terminó (estado: {est.get('estado')} · {est.get('etapa')})")
+    arch = (est.get("resultado") or {}).get("archivos") or []
+    pdfs = [a for a in arch if a.get("tipo") == "tizada"]
+    cortes = [a for a in arch if a.get("tipo") == "corte"]
+    ok(pdfs and all(len(a.get("talles") or []) == 1 for a in pdfs), f"{len(pdfs)} mesa(s), cada una de UN talle: {[a.get('talles') for a in pdfs]}")
+    ok(len(cortes) == 5 * len(pdfs) and {a.get("formato") for a in cortes} == {"dxf", "ai", "plt", "svg", "eps"},
+       f"cada mesa también en los cinco formatos ({len(cortes)} archivos de corte para {len(pdfs)} mesas)")
+    ok(all(a.get("tela") and a.get("mesa") and a.get("talles") for a in cortes), "los de corte traen los datos de su mesa (tela, número, talles)")
+    import ezdxf
+    _dx = next((a for a in cortes if a.get("formato") == "dxf"), None)
+    if _dx:
+        import urllib.request as _ureq       # (con alias: un `import urllib…` acá haría local el nombre en todo main)
+        with _ureq.urlopen(_ureq.Request(base + _dx["descarga"], headers={"X-Api-Key": llave}), timeout=120) as rr:
+            c, cuerpo_dx = rr.status, rr.read()
+        _tmpdx = os.path.join(_TMP, "corte.dxf")
+        open(_tmpdx, "wb").write(cuerpo_dx)
+        _doc = ezdxf.readfile(_tmpdx)
+        ok(c == 200 and _doc.dxfversion == "AC1015" and not _doc.audit().errors and len(_doc.modelspace().query('*[layer=="Corte"]')),
+           f"el DXF se baja de TIZADA y lo abre un lector independiente sin errores ({c})")
+
     # para mirarlos a mano: `py verificar_integracion_externa.py --guardar <carpeta>`
     if "--guardar" in sys.argv:
         dst = sys.argv[sys.argv.index("--guardar") + 1]

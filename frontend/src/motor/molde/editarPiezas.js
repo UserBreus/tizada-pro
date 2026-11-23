@@ -19,6 +19,7 @@
 // El archivo del usuario no se toca: esto devuelve los bytes de una VERSIÓN nueva. Y no se guarda nada
 // sin verificar (`verificarEdicion`): se vuelve a leer el molde y, si alguna pieza que no se tocó cambió
 // de número o de lugar, o la cantidad no da, se rechaza. Gemelo: `piezas_molde.editar_piezas`.
+import { guardarPdf } from '../pdf/guardar.js'
 import { instrucciones, escribir, contenidoCrudo } from '../pdf/contenido.js'
 import { pyFixed } from '../py.js'
 import { ocgPorNombre, nombreEnRecursos } from './herramientas.js'
@@ -334,7 +335,7 @@ export function editarPiezas(mupdf, bytes, ediciones, mesa = 1) {
         ...trazadoEnUsuario(e.segmentos, [1, 0, 0, 1, 0, 0]), { op: 'S', args: [] }, { op: 'EMC', args: [] }, { op: 'Q', args: [] })
     }
     pageObj.put('Contents', doc.addStream(escribir(nuevo), doc.newDictionary()))
-    return { bytes: doc.saveToBuffer('compress').asUint8Array().slice() }
+    return { bytes: guardarPdf(doc, 'compress') }
   } finally { doc.destroy() }
 }
 

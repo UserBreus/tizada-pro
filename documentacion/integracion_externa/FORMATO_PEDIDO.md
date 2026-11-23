@@ -112,6 +112,7 @@ Ver `pedido_ejemplo.json`. Todo en UTF-8.
 | `cliente` | opcional | Texto, para reconocerlo en la pantalla |
 | `aviso_url` | opcional | Dónde avisar al terminar. Sólo vale si es del mismo sitio que la dirección configurada en Integraciones |
 | `reemplazar` | opcional | `true` para rehacer un pedido que ya se generó con esa misma referencia |
+| `modo` | opcional | `"sublimado"` (por defecto, lo de siempre) o `"corte"`: **tizada para corte** — sin arte, de cada pieza sólo su línea de corte (sin etiqueta), cada talle en su mesa. Ver «Tizada para corte» abajo |
 | `opciones` | opcional | Ver abajo |
 | `mesas` | opcional | Ver abajo |
 
@@ -195,6 +196,7 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 | `si_piezas_en_blanco` | `"rechazar"` · `"seguir"` (salen sin diseño y avisa) | `rechazar` |
 | `perfil_color` | El perfil a forzar: el archivo o el nombre de uno de `GET /perfiles`. Uno que no existe → `perfil-desconocido` | el del sistema |
 | `carpeta` | Subcarpeta de Drive donde guardar (`"2026-10/OV-2026-00123"`) | la referencia |
+| `formatos` | Sólo con `modo: "corte"`: cada mesa además en `"dxf"` (DXF 2000, mm), `"ai"` (Illustrator 3), `"plt"` (HPGL), `"svg"`, `"eps"`. Otro valor → `formatos-invalidos`; sin `modo: "corte"` se ignora (`formatos-sin-corte`) | `["pdf"]` |
 
 ### `mesas`
 
@@ -204,6 +206,7 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 | `"una_por_fila"` | Una mesa por fila; la cantidad pasa a ser copias. Las copias se acomodan en una mesa del largo máximo (el del nesting o `largo_max_m`); si alcanzan para llenarla, sale UN archivo con la mesa llena que se imprime `copias` veces (19 con lugar para 5 → 5×3). Todo lo que no llena una mesa, de cualquier fila y talle, se acomoda JUNTO como en `normal` y se imprime 1 vez (MAPA 725). Cada archivo trae `por_mesa` unidades. Todas las mesas, del ancho imprimible de la tela |
 | `"por_talles"` | Los talles de cada grupo comparten mesa: `"grupos": [["S","M"],["L","XL"]]` |
 | `"talles_separados"` | Todos en la misma mesa sin mezclar talles: cada talle acomodado solo y apilado debajo del anterior, con una línea punteada entre talles; `grupos` opcional (esos sí van mezclados). Resultado: `"separados": true` |
+| `"talle_por_mesa"` | Cada talle en su propia mesa. Es lo que se usa **sin decir nada** con `modo: "corte"`. Con `modo: "corte"` y `por_talles`, los talles de cada grupo van juntos y los demás, cada uno en su mesa |
 
 | Otro campo de `mesas` | Qué hace |
 |---|---|
@@ -256,7 +259,7 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 | `referencia`, `pedido_externo`, `cliente` | Lo que mandó el otro sistema, tal cual |
 | `tizada_id` | El número de la tizada dentro de TIZADA PRO |
 | `destino` | `tipo` = `drive` (con `carpeta_id` y `carpeta_enlace`) o `local` (Drive sin configurar o caído: se bajan con `descarga`). Nunca trae rutas del disco del servidor |
-| `archivos[]` | Cada PDF: `tipo` (`tizada` o `ficha`), `nombre`, `bytes`, `sha256`, `descarga` (la ruta para bajarlo de TIZADA, haya Drive o no), y si se subió a Drive `drive_id`, `enlace`, `carpeta_id`. Las tizadas traen además `tela`, `mesas`, `ancho_cm`, `largo_cm` (uno por mesa), `consumo_cm`, `aprovechamiento` y `moldes`; con `una_por_fila`, `fila`, `copias` y `por_mesa` (y `filas` si la mesa mezcla varias filas del mismo molde); con `separar_disenos`, `diseno` |
+| `archivos[]` | Cada archivo: `tipo` (`tizada`, `ficha` o — con `modo: "corte"` y `opciones.formatos` — `corte`, con su `formato`), `nombre`, `bytes`, `sha256`, `descarga` (la ruta para bajarlo de TIZADA, haya Drive o no), y si se subió a Drive `drive_id`, `enlace`, `carpeta_id`. Las tizadas traen además `tela`, `mesas`, `ancho_cm`, `largo_cm` (uno por mesa), `consumo_cm`, `aprovechamiento` y `moldes`; con `una_por_fila`, `fila`, `copias` y `por_mesa` (y `filas` si la mesa mezcla varias filas del mismo molde); con `separar_disenos`, `diseno` |
 | `resumen` | Prendas, piezas, telas usadas y perfil de color |
 | `disenos[]` | Por diseño y variable: la `variable` (clave) y su `variable_nombre`, la prenda (`molde`, `nombre`), la tela y qué quedó **sin sublimar** (`no_sublimado`) |
 | `alarmas[]` | Los avisos que quedaron |
@@ -264,6 +267,28 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 Hay **un PDF por mesa** (como «Descargar todo» de TIZADA) más la **ficha técnica**. Los nombres llevan la
 referencia adelante y el nombre de la mesa: `OV-2026-00123__Mesa 1 - Bandera (1,60).pdf`. El mismo JSON de resultado queda en la
 carpeta de Drive como `OV-2026-00123__resultado.json`.
+
+### Tizada para corte (`modo: "corte"`)
+
+El tercer camino de la pantalla de Pedido (MAPA 816): lo mismo que un pedido de siempre pero **sin arte**.
+
+- De cada pieza sale **sólo su línea de corte** (siempre, aunque el molde la tenga apagada): el molde y nada más, sin
+  etiqueta. Sin nombre ni número: esas columnas no se exigen aunque la planilla las marque.
+- **Cada talle en su mesa** salvo que `mesas` diga otra cosa.
+- No lleva `arte`, `tipografias`, `editables`, `ajustes`, `colores`, `mapeo_arte` ni `reemplazos`: si vienen se ignoran
+  (`corte-ignora-arte`, no frena). Las telas sí: `tela` (y `telas_por_pieza`) como siempre; `piezas_apagadas` = las que no se cortan.
+- Sólo moldes base: un molde a medida → `molde-no-corte`.
+- Además del PDF de cada mesa, los `opciones.formatos` pedidos: en `archivos[]` vienen con `tipo: "corte"`, su
+  `formato` y los mismos datos de la mesa (`tela`, `mesa`, `talles`, `largo_cm`…). Nombre: el de la mesa con su
+  extensión (`OV-123__Mesa 1 - Principal - Talle S.dxf`). En mm reales, escala 1:1; la línea de corte en la capa
+  «Corte» (rojo).
+
+```json
+{ "formato": "tizadapro.pedido/1", "referencia": "OV-123", "modo": "corte",
+  "opciones": { "formatos": ["dxf", "ai"] },
+  "disenos": [ { "nombre": "JUGADOR", "moldes": [ { "variable": "v_bu8p7gy", "tela": "12" } ] } ],
+  "planilla": [ { "talle": "M" }, { "talle": "L" } ] }
+```
 
 ### El aviso (webhook)
 

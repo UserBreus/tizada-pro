@@ -44,7 +44,9 @@ export async function prepararArteEnNavegador(archivo, { pid, diseno = null, rut
       w.onerror = (e) => no(new Error('el hilo que analiza el diseño no arrancó: ' + (e.message || '')))
       w.postMessage({ id: 1, tipo: 'arte_preparar', datos: { bytes, contexto: { ...contexto, diseno, plantilla: plantilla ? plantilla.slice() : null, manual: mapeoManual } } }, [bytes.buffer])
     })
-    return { zip: r.zip, modo: r.modo, validacion: r.validacion, mapeo: r.mapeo, sha1: r.sha1, mapeoManualErrores: r.mapeoManualErrores || null }
+    // `det`/`auto`/`pers`/`pv`: lo que se guarda con el arte del pedido EN LA PC (`arte/enPc.js`, MAPA 760)
+    return { zip: r.zip, modo: r.modo, validacion: r.validacion, mapeo: r.mapeo, sha1: r.sha1, mapeoManualErrores: r.mapeoManualErrores || null,
+             det: r.det, auto: r.auto, pers: r.pers, pv: r.pv }
   } finally {
     try { w.terminate() } catch { /* nada */ }
   }

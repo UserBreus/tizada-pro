@@ -97,6 +97,12 @@ try:
     ok(existe("20260911-100200-cccc"), "borró una que la pantalla NO mandó (sin incluir_anteriores)")
     print("  · anotada: borrada · generando: intacta · «../datos»: ignorado")
 
+    # ── 4b: CADA PESTAÑA SU PEDIDO (MAPA 787): la que tiene anotada OTRA pestaña (`conservar`) no se va ──────
+    r = llamar({"ids": [], "incluir_anteriores": True, "conservar": ["20260911-100200-cccc"]})
+    ok(existe("20260911-100200-cccc") and "20260911-100200-cccc" not in r["borrados"],
+       "«Nuevo pedido» se llevó la tizada que tenía anotada OTRA pestaña (`conservar`)")
+    print("  · la de otra pestaña (`conservar`) queda")
+
     # ── 4: incluir_anteriores se lleva lo terminado que la pantalla no tenía ─────────────────
     r = llamar({"ids": [], "incluir_anteriores": True})
     ok("20260911-100200-cccc" in r["borrados"] and not existe("20260911-100200-cccc"), "incluir_anteriores no se llevó la terminada")
@@ -144,6 +150,7 @@ finally:
 _app = io.open(os.path.join(_AQUI, "frontend", "src", "App.jsx"), encoding="utf-8").read()
 ok("Las tizadas generadas en este pedido se borran del servidor" in _app, "el confirmar de «Nuevo pedido» no avisa que las tizadas se borran")
 ok("/api/pedido/limpiar_trabajos" in _app and "incluir_anteriores: true" in _app, "«Nuevo pedido» no llama a limpiar_trabajos con incluir_anteriores")
+ok("conservar: [...tizadasDeOtrasPestanas()]" in _app, "«Nuevo pedido» no manda las tizadas de las OTRAS pestañas (`conservar`, MAPA 787)")
 ok("Las tizadas ya generadas y la configuración de los moldes no se tocan" not in _app, "el aviso viejo («no se tocan») sigue")
 print("  · el confirmar avisa y el front llama al endpoint")
 

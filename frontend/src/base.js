@@ -31,12 +31,43 @@ export function esRutaAdmin() {
   return p === BASE + '/admin'
 }
 
-// Envoltorio de fetch (idempotente: si ya se instaló, no se vuelve a envolver).
-if (BASE && !window.fetch.__tizadaBase) {
+// 🔴 EL MOLDE ACTIVO ES DE CADA PESTAÑA (MAPA 819). Dos pestañas del mismo navegador comparten la sesión del
+// servidor: lo que activaba una le cambiaba el molde a la otra, que pedía la configuración del molde ajeno y lo
+// volvía a activar (8 `activar` seguidos, «Molde activado ✓» en una pestaña quieta). Cada pestaña recuerda el
+// suyo (sessionStorage = de la pestaña, sobrevive al F5) y lo manda en cada pedido a la API (`X-Tizada-Molde`);
+// el servidor avisa cuando un pedido de ESTA pestaña activó otro (`X-Tizada-Molde-Activado`).
+const CLAVE_MOLDE = 'tizada_molde_pestana'
+let moldePestana = null
+try { moldePestana = sessionStorage.getItem(CLAVE_MOLDE) || null } catch { /* sin sessionStorage: sólo en memoria */ }
+/** El molde activo de ESTA pestaña (null = todavía ninguno: manda el de la sesión). */
+export function moldeDePestana() { return moldePestana }
+/** Lo que el servidor dice que es el activo de esta pestaña (`/api/productos` → `activo`, o un activar). */
+export function ponerMoldeDePestana(pid) {
+  moldePestana = pid ? String(pid) : null
+  try { if (moldePestana) sessionStorage.setItem(CLAVE_MOLDE, moldePestana); else sessionStorage.removeItem(CLAVE_MOLDE) } catch { /* nada */ }
+}
+const esPropia = (ruta) => typeof ruta === 'string' && ruta.startsWith('/api/')
+
+// Envoltorio de fetch (idempotente: si ya se instaló, no se vuelve a envolver): el prefijo de la publicación
+// (si hay) y el molde de la pestaña.
+if (!window.fetch.__tizadaBase) {
   const original = window.fetch.bind(window)
+  const conMolde = (opciones) => {
+    if (!moldePestana) return opciones
+    const h = new Headers((opciones && opciones.headers) || undefined)
+    if (!h.has('X-Tizada-Molde')) h.set('X-Tizada-Molde', moldePestana)
+    return { ...(opciones || {}), headers: h }
+  }
+  const leerAviso = (r) => {
+    try { const a = r && r.headers && r.headers.get('X-Tizada-Molde-Activado'); if (a) ponerMoldeDePestana(a) } catch { /* nada */ }
+    return r
+  }
   const envuelto = (entrada, opciones) => {
-    if (typeof entrada === 'string') return original(rutaApi(entrada), opciones)
-    if (entrada instanceof Request && entrada.url.startsWith(window.location.origin)) {
+    if (typeof entrada === 'string') {
+      if (!esPropia(entrada)) return original(rutaApi(entrada), opciones)
+      return original(rutaApi(entrada), conMolde(opciones)).then(leerAviso)
+    }
+    if (BASE && entrada instanceof Request && entrada.url.startsWith(window.location.origin)) {
       const ruta = entrada.url.slice(window.location.origin.length)
       const nueva = rutaApi(ruta)
       if (nueva !== ruta) return original(new Request(window.location.origin + nueva, entrada), opciones)

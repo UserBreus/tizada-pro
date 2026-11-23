@@ -150,6 +150,23 @@ def _dibujos(path):
 # que el sello (cada pieza es una página mostrada con `show_pdf_page`), y eso corre los puntos en
 # el último bit del `float`. Medido sobre la tizada real: el desvío máximo fue **0,0015 pt**.
 TOL_PT = float(os.environ.get("TIZADA_TOL_TRAZADO") or 0.01)
+# 🔴 …Y A VECES UNA ESCALA DE .99999 EN LA DE SIEMPRE (diagnosticado 2026-11-23, MAPA 819; el rojo «0,0101 pt»
+# de la 808). `show_pdf_page` calcula el rect de destino en float32 de MuPDF: en una hoja de 14 030 pt de alto,
+# una pieza BAJA (un cuello de 154 pt) puesta lejos del borde queda con fh = 0,9999931 y MuPDF escribe
+# `/Matrix [.99999 0 0 .99999 …]` — la pieza de REFERENCIA sale achicada 1e-5 (1 de 264 colocaciones). El
+# SELLO está bien: contra la posición calculada a mano da ≤ 0,0005 pt y el trazo igual al de la base (17,008).
+# Por eso la tolerancia suma un error PROPORCIONAL al tamaño de la figura (1e-5: lo que mueve esa escala) y el
+# ancho de trazo se compara en relativo. Un corrimiento de verdad (un punto, una pieza) sigue saltando.
+TOL_REL = 1e-5
+
+
+def _tope(rect):
+    """El desvío admitido para una figura: el fijo + lo que corre una escala de .99999 en su tamaño."""
+    try:
+        w, h = abs(float(rect[2]) - float(rect[0])), abs(float(rect[3]) - float(rect[1]))
+    except Exception:
+        return TOL_PT
+    return TOL_PT + TOL_REL * max(w, h)
 
 
 def _comparar_dibujos(a, b):
@@ -164,14 +181,16 @@ def _comparar_dibujos(a, b):
         for k in ("color", "fill"):
             if tuple(x.get(k) or ()) != tuple(y.get(k) or ()):
                 probs.append(f"figura {i}: {k} {x.get(k)} vs {y.get(k)}")
-        if round(float(x.get("width") or 0), 4) != round(float(y.get("width") or 0), 4):
+        wa, wb = float(x.get("width") or 0), float(y.get("width") or 0)
+        if abs(wa - wb) > max(5e-5, 2 * TOL_REL * max(wa, wb)):
             probs.append(f"figura {i}: ancho de trazo {x.get('width')} vs {y.get('width')}")
         ra, rb = x.get("rect"), y.get("rect")
         if ra is not None and rb is not None:
             d = max(abs(float(p) - float(q)) for p, q in zip(ra, rb))
             peor = max(peor, d)
-            if d > TOL_PT:
-                probs.append(f"figura {i}: se movió {d:.4f} pt (tope {TOL_PT} pt)")
+            tope = _tope(ra)
+            if d > tope:
+                probs.append(f"figura {i}: se movió {d:.4f} pt (tope {tope:.4f} pt)")
         if len(probs) > 8:
             break
     return probs, len(A), peor

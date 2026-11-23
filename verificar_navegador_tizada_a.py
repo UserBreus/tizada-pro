@@ -36,12 +36,14 @@ ok, FALLOS, _TMP, NODE = VT.ok, VT.FALLOS, VT._TMP, VT.NODE
 PID = "prod_tizada_a"
 ORIGEN = os.path.join(AQUI, "entrada", "prod_20260820_095558_38bc")
 DATOS_ORIGEN = os.path.join(AQUI, "datos", "productos", "prod_20260820_095558_38bc")
-DISENO = "jugador"
+# 🔴 `x-…` (MAPA 772): un diseño con nombre en la carpeta COMPARTIDA ya no tiene arte en el servidor (vive en
+# la PC); los únicos del servidor son el «principal» y los `x-…` del otro sistema. Los artes de prueba son los mismos.
+DISENO = "x-contrato-jugador"
 # 🔴 UN SEGUNDO DISEÑO DEL MISMO MOLDE EN LA MISMA HOJA (reporte 2026-09-18: «en la tizada no mantiene
 # el arte de cada molde; nombres y números sí»). La hoja compartía el dibujo del arte por «mesa N»
 # sin mirar de qué arte era: las piezas del golero salían con el arte del jugador. Con los dos
 # diseños acá, la comparación píxel a píxel contra el servidor lo agarra.
-DISENO2 = "golero"
+DISENO2 = "x-contrato-golero"
 
 
 def main():
@@ -50,7 +52,7 @@ def main():
     sub = S._diseno_sub(DISENO)
     os.makedirs(os.path.join(carpeta, sub))
     shutil.copy2(os.path.join(ORIGEN, "plantilla.ai"), os.path.join(carpeta, "plantilla.ai"))
-    shutil.copy2(os.path.join(ORIGEN, "disenos", DISENO, "arte.ai"), os.path.join(carpeta, sub, "arte.ai"))
+    shutil.copy2(os.path.join(ORIGEN, "disenos", "jugador", "arte.ai"), os.path.join(carpeta, sub, "arte.ai"))
     pl = os.path.join(carpeta, "plantilla.ai")
     arte = os.path.join(carpeta, sub, "arte.ai")
     ddir = os.path.join(_TMP, "datos", "productos", PID)
@@ -72,7 +74,7 @@ def main():
     sub2 = S._diseno_sub(DISENO2)
     os.makedirs(os.path.join(carpeta, sub2))
     arte2 = os.path.join(carpeta, sub2, "arte.ai")
-    shutil.copy2(os.path.join(ORIGEN, "disenos", DISENO2, "arte.ai"), arte2)
+    shutil.copy2(os.path.join(ORIGEN, "disenos", "golero", "arte.ai"), arte2)
     os.makedirs(os.path.join(ddir, sub2), exist_ok=True)
     mapeo2 = MP.mapeo_por_nombre(arte2, registro)
     pers2 = MP.extraer_personalizacion(arte2)
@@ -82,7 +84,7 @@ def main():
               open(os.path.join(ddir, sub2, "validacion_arte.json"), "w", encoding="utf-8"))
     VT._DOCS["catalogo"] = {"activo": PID, "productos": [{
         "id": PID, "nombre": "Molde de prueba A", "planilla_template_id": "plan_default", "variante_guia": "M",
-        "disenos": [{"id": DISENO, "nombre": "Jugador"}, {"id": DISENO2, "nombre": "Golero"}], "mapeo_arte": mapeo, "referencia_medida": "alto",
+        "disenos": [{"id": DISENO, "nombre": "X-Contrato-Jugador"}, {"id": DISENO2, "nombre": "X-Contrato-Golero"}], "mapeo_arte": mapeo, "referencia_medida": "alto",
         "editables": {DISENO: {"*": {"escudo": {"transforms": {"M": {"dx": 0.06, "dy": -0.04, "rot": 12, "scale": 1.15}}}}}},
         "borde_corte": {"activo": True, "color": [0, 0, 0, 1], "mm": 2.0}}],
         "plantillas_planillas": [{"id": "plan_default", "nombre": "Estándar", "columnas": [
@@ -91,11 +93,11 @@ def main():
         "reglas_planilla": [], "telas": []}
     comunes = [t for t in ["S", "M", "L", "XL"] if t in talles] or talles[:3]
     elegidos = [comunes[0], comunes[len(comunes) // 2], comunes[-1]][:3]
-    filas = [{"talle": t, "nombre": n, "numero": num, "diseno": "Jugador"} for t, (n, num) in zip(elegidos, [("PÉREZ", "10"), ("GÓMEZ", "7"), ("DÍAZ", "23")])]
-    filas.append({"talle": elegidos[0], "nombre": "LÓPEZ", "numero": "1", "diseno": "Jugador"})
+    filas = [{"talle": t, "nombre": n, "numero": num, "diseno": "X-Contrato-Jugador"} for t, (n, num) in zip(elegidos, [("PÉREZ", "10"), ("GÓMEZ", "7"), ("DÍAZ", "23")])]
+    filas.append({"talle": elegidos[0], "nombre": "LÓPEZ", "numero": "1", "diseno": "X-Contrato-Jugador"})
     # las del golero, en los mismos talles que el jugador: comparten mesas del molde y de nombre de arte
-    filas.append({"talle": elegidos[1], "nombre": "NACHO", "numero": "12", "diseno": "Golero"})
-    filas.append({"talle": elegidos[-1], "nombre": "RAMOS", "numero": "25", "diseno": "Golero"})
+    filas.append({"talle": elegidos[1], "nombre": "NACHO", "numero": "12", "diseno": "X-Contrato-Golero"})
+    filas.append({"talle": elegidos[-1], "nombre": "RAMOS", "numero": "25", "diseno": "X-Contrato-Golero"})
     cuerpo = {"molds": [PID], "prendas": filas, "default_diseno": DISENO,
               "moldes_por_diseno": {DISENO: [PID], DISENO2: [PID]},
               "planilla": {"columnas": [{"id": "talle", "label": "Talle"}, {"id": "nombre", "label": "Nombre"}, {"id": "numero", "label": "Número"},
@@ -104,7 +106,9 @@ def main():
     ok(len(registro) >= 30 and len(mapeo) > 0, f"{len(registro)} piezas · mapeo por nombre de {len(mapeo)} · talles {elegidos} · {len(filas)} prendas")
 
     print("\n2 · EL SERVIDOR GENERA")
-    with S.app.test_request_context("/api/pedido/plan", method="POST", json=cuerpo):
+    # (los diseños `x-…` sólo los usa el robot, con su token: MAPA 773)
+    _ROBOT = {"X-Robot-Token": S.IE.robot_token()}
+    with S.app.test_request_context("/api/pedido/plan", method="POST", json=cuerpo, headers=_ROBOT):
         plan = S._plan_del_pedido(cuerpo)
         plan_nav = S._plan_para_navegador(plan)
         cat = S._cargar_catalogo()
@@ -129,7 +133,7 @@ def main():
     import ficha_tecnica as FT
     _guias = []
     for _sp in plan["_guias_ficha"]:
-        with S.app.test_request_context("/", method="POST", json=cuerpo):
+        with S.app.test_request_context("/", method="POST", json=cuerpo, headers=_ROBOT):
             g = S._molde_guia_ficha(PID, cat["productos"][0], registro, _sp.get("diseno") or "principal", _sp, reempl={})
         if g:
             _guias.append(g)
@@ -137,8 +141,8 @@ def main():
     ok(os.path.exists(os.path.join(salida_py, "FICHA_TECNICA.pdf")), f"ficha técnica del servidor ({len(_guias)} guía(s))")
 
     print("\n3 · EL NAVEGADOR GENERA LO MISMO")
-    with S.app.test_request_context("/", method="GET"):
-        motor = S.app.test_client().get(f"/api/productos/{PID}/motor_b").get_json()
+    with S.app.test_request_context("/", method="GET", headers=_ROBOT):
+        motor = S.app.test_client().get(f"/api/productos/{PID}/motor_b", headers=_ROBOT).get_json()
     ok(motor.get("camino_a") and any(d["id"] == DISENO for d in motor.get("disenos") or []), "el motor del molde dice camino A y trae el diseño con su arte")
     fuentes = {}
     for ruta in glob.glob(os.path.join(S.FUENTES, "*")):
@@ -186,8 +190,12 @@ def main():
             xa = da[i].get_pixmap(matrix=fitz.Matrix(z, z), alpha=False, colorspace=fitz.csRGB)
             xb = dbb[i].get_pixmap(matrix=fitz.Matrix(z, z), alpha=False, colorspace=fitz.csRGB)
             if (xa.width, xa.height) == (xb.width, xb.height):
-                distintos, fuera = VT._distintos(xa.samples, xb.samples, xa.width, xa.height)
-                ok(fuera == 0, f"ficha pág {i + 1}: dibujo a 100 dpi: {fuera} píxeles distintos que no son borde ({distintos} en total)")
+                distintos, fuera = VT._distintos(xa.samples, xb.samples, xa.width, xa.height, tol=1)   # ±1/255 = redondeo (MAPA 772)
+                ok(fuera == 0, f"ficha pág {i + 1}: dibujo a 100 dpi: {fuera} píxeles distintos que no son borde ni redondeo ({distintos} en total)")
+                # …con TOPE (inspector, MAPA 773): el redondeo son unos pocos píxeles sueltos; un corrimiento parejo de ±1
+                # (otra conversión de color) cambiaría MUCHOS y no puede pasar como redondeo
+                _red = sum(1 for _a, _b in zip(xa.samples, xb.samples) if _a != _b and abs(_a - _b) <= 1)
+                ok(_red <= len(xa.samples) // 100, f"ficha pág {i + 1}: lo tolerado como redondeo es poco ({_red} de {len(xa.samples)} valores, tope 1 %)")
             else:
                 ok(False, f"ficha pág {i + 1}: dibujo de distinto tamaño")
     print(f"\n    tiempos: servidor {t_py:.1f} s · navegador {tiempos['segundos']:.1f} s (Node, un hilo)")

@@ -90,7 +90,10 @@ def molde_por_defecto():
     return min(c, key=os.path.getsize) if c else None
 
 
-def _distintos(py, js, W, H):
+def _distintos(py, js, W, H, tol=0):
+    """`tol`: diferencia de intensidad que se tolera como redondeo (sólo la FICHA usa 1: en un patrón vectorial muy
+    denso, una milésima de coordenada entre los dos motores da ±1/255 en algún píxel liso — MAPA 772). Las hojas de la
+    tizada, lo que se imprime, se comparan con 0."""
     distintos = fuera = 0
     for k in range(min(len(py), len(js))):
         a, b = py[k], js[k]
@@ -98,6 +101,8 @@ def _distintos(py, js, W, H):
             continue
         distintos += 1
         d = abs(a - b)
+        if d <= tol:
+            continue
         px, py_ = (k // 3) % W, (k // 3) // W
         if px >= W - 1 or py_ >= H - 1:
             continue

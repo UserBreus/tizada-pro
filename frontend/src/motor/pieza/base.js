@@ -10,6 +10,7 @@
 // escala del XObject (= `/UserUnit` de la mesa, `cont.user_unit`), `x0/y0` la esquina del contorno
 // en crudas y `x0m/y0m` en coordenadas de dispositivo (`bbox_mu`, y hacia abajo), que es lo que
 // usan los placeholders y las etiquetas.
+import { guardarPdf } from '../pdf/guardar.js'
 import { pyFixed, pyG } from '../py.js'
 import { segmentosTiras } from '../molde/tiras.js'
 import { normForma } from '../molde/formas.js'
@@ -217,5 +218,5 @@ export function documentoPieza(mupdf, mesaDoc, pagina, base, estampado = '') {
   const contenido = new TextEncoder().encode(base.baseStream + estampado)
   const page = out.addPage([0, 0, base.W + 2 * base.B, base.H + 2 * base.B], 0, res, contenido)
   out.insertPage(out.countPages(), page)
-  return out.saveToBuffer('compress').asUint8Array().slice()
+  return guardarPdf(out, 'compress')
 }

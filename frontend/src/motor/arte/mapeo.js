@@ -226,14 +226,27 @@ export function arteEsSeparado(mupdf, bytesArte, bytesPlantilla) {
 export { mesaTieneDiseno }
 
 /**
+ * `n` documentos del MISMO archivo abiertos desde UN buffer del motor (MAPA 811): cada uno guarda
+ * su referencia a los bytes, así que el buffer se suelta acá y los documentos siguen vivos. Mismo
+ * resultado que abrir `n` veces desde los bytes, sin copiar el archivo `n` veces.
+ */
+function abrirCopias(mupdf, bytes, n) {
+  // ya es un buffer del motor (lo armó quien llama, ver `contexto_a`): se usa tal cual y lo suelta él
+  if (bytes instanceof mupdf.Buffer) return Array.from({ length: n }, () => abrir(mupdf, bytes))
+  const buf = new mupdf.Buffer(bytes)
+  try { return Array.from({ length: n }, () => abrir(mupdf, buf)) } finally { buf.destroy() }
+}
+
+/**
  * `detectar_arte(path_arte, registro_molde, ancho_thumb=240)`: {mesas: [{mesa, w_cm, h_cm,
  * tiene_diseno, rango, rotulo, nombre_detectado, thumb, svg, thumb_w, thumb_h, sugerencia}],
  * piezas}. `thumb` = PNG en base64 dibujado con mupdf.js (guías, editables y capas de
  * personalización ocultas), a la misma escala que PyMuPDF.
  */
 export function detectarArte(mupdf, bytes, registro, anchoThumb = 240) {
-  const doc = abrir(mupdf, bytes)        // para MINIATURAS (capas ocultas)
-  const docTxt = abrir(mupdf, bytes)     // para LEER nombres (todo visible)
+  // las dos copias del MISMO archivo comparten sus bytes en el motor (MAPA 811): abrir desde los
+  // bytes copia el archivo entero cada vez, y con un arte de 239 MB eran 478 MB sólo para esto
+  const [doc, docTxt] = abrirCopias(mupdf, bytes, 2)   // MINIATURAS (capas ocultas) · LEER nombres (todo visible)
   try {
     try {
       for (const c of capasUi(doc)) {
@@ -377,7 +390,9 @@ const detalleFuentes = (requeridas, catalogo, alias) => {
  */
 export function validarArte(mupdf, bytesArte, bytesPlantilla, fuentes) {
   const { catalogo = [], alias = {} } = fuentes || {}
-  const db = abrir(mupdf, bytesPlantilla), da = abrir(mupdf, bytesArte)
+  // `da` y `d2` (más abajo) son el MISMO arte abierto dos veces a la vez: comparten un buffer (MAPA 811)
+  const [da, d2] = abrirCopias(mupdf, bytesArte, 2)
+  const db = abrir(mupdf, bytesPlantilla)
   const checks = []
   let ok = true
   try {
@@ -413,7 +428,6 @@ export function validarArte(mupdf, bytesArte, bytesPlantilla, fuentes) {
                   // por NOMBRE, como `sorted` de Python (allá es un set: sin ordenar, cada lado las listaba distinto)
                   detalle: ordenarPy([...tintas.keys()]).map((t) => `${t} (${tintas.get(t)} mesas)`).join(', ') || 'ninguna (solo proceso)' })
 
-    const d2 = abrir(mupdf, bytesArte)
     const planas = []
     try {
       for (const c of capasUi(d2)) if (c.text !== 'Fondo') configurarCapa(d2, c.number, 2)
@@ -440,7 +454,7 @@ export function validarArte(mupdf, bytesArte, bytesPlantilla, fuentes) {
 
     return { aprobado: !!ok, checks, tintas: Object.fromEntries(tintas), fuentes_requeridas: requeridas,
              fuentes_faltantes: ordenarPy(faltan.map(([n]) => n)), personalizacion: pers }
-  } finally { db.destroy(); da.destroy() }
+  } finally { db.destroy(); da.destroy(); d2.destroy() }   // (destroy dos veces no hace nada)
 }
 
 /**
@@ -467,8 +481,10 @@ export function validarArteSeparado(mupdf, bytes, registro, fuentes, mapeo, vari
     const tiene = (d, p) => d && d[p] && (typeof d[p] !== 'object' || Object.keys(d[p]).length > 0)
 
     const sinAsignar = piezas.filter((p) => !mapeo[p] && !tiene(mapeoVar, p))
+    // `faltan` (lista): el pedido descuenta las piezas que apagó en «Piezas a imprimir» (MAPA 821) sin leer el texto
     checks.push({ nombre: 'Cada pieza tiene un arte asignado', ok: !sinAsignar.length,
-                  detalle: `${piezas.length - sinAsignar.length}/${piezas.length} piezas` + (sinAsignar.length ? ` — faltan: ${sinAsignar.join(', ')}` : '') })
+                  detalle: `${piezas.length - sinAsignar.length}/${piezas.length} piezas` + (sinAsignar.length ? ` — faltan: ${sinAsignar.join(', ')}` : ''),
+                  faltan: [...sinAsignar], total: piezas.length })
     ok = ok && !sinAsignar.length
 
     if (variantesOrden && variantesOrden.length) {

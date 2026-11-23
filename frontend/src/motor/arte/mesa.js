@@ -57,7 +57,8 @@ function firmaDe(det) {
 export async function localizarMesas(det, { pid, diseno = null, rutaApi = (x) => x } = {}) {
   if (!det || !Array.isArray(det.mesas) || !det.mesas.length || typeof Worker === 'undefined') return det
   if (!(await navegadorHace('arte', rutaApi))) return det
-  const firma = firmaDe(det)
+  // el arte del pedido en la PC (`enPc.js deteccionPc`) trae su sello: la caché lo tiene, no se baja nada
+  const firma = det.firma_pc || firmaDe(det)
   if (!firma) return det
   const clave = `${pid}|${diseno || 'principal'}|${firma}`
   const a = abridor(clave)

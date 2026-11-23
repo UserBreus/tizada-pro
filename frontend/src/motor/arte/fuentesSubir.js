@@ -5,10 +5,12 @@
 // dibujar, buscaba si chocaba con otra del catálogo y, de yapa, volvía a validar el arte entero.
 // Acá se hace todo eso (`obrero.worker.js` → `fuente_analizar` / `arte_revalidar`) y el servidor
 // sólo guarda el archivo con lo que se le dice.
+import { pedirMotorB } from './motorB.js'   // el mismo /motor_b a la vez viaja una sola (MAPA 770)
 import { enHiloSuelto } from '../hiloSuelto.js'
 import { catalogoConPc } from '../texto/fuentesPc.js'
 import { traerConCache, claveDe, urlDe } from '../cache.js'
 import { resolverFuente } from '../texto/fuentes.js'
+import { aplicarArtesPc, actualizarDatosPc } from './enPc.js'
 
 async function json(url, opts) {
   const r = await fetch(url, opts)
@@ -70,7 +72,7 @@ export function aliasQuitados(an, reemplazos, destino) {
  */
 export async function revalidarArte({ pid, rutaApi }) {
   if (!pid) return
-  const info = await json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/motor_b`))
+  const info = await aplicarArtesPc(await pedirMotorB(rutaApi(`/api/productos/${encodeURIComponent(pid)}/motor_b`)), pid)   // de la PC (MAPA 760)
   if (!info.camino_a) return
   const d = (info.disenos || []).find((x) => x.id === 'principal')
   if (!d) return
@@ -90,6 +92,12 @@ export async function revalidarArte({ pid, rutaApi }) {
   }
   const val = await enHiloSuelto('arte_revalidar', { bytes: arte, modo, contexto, mapeo, plantilla },
     [arte.buffer, ...(plantilla ? [plantilla.buffer] : [])], 'arte')
+  // el arte del pedido en ESTA PC (MAPA 760-761): la validación nueva queda con él (el plan la lee de ahí) y el
+  // servidor no tiene ese arte: no se le manda nada
+  if (d.en_pc) {
+    await actualizarDatosPc(pid, d.id, { validacion: { ...(val || {}), archivo: (d.validacion || {}).archivo, modo: (d.validacion || {}).modo } })
+    return
+  }
   await json(rutaApi('/api/arte/validacion'), {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pid, diseno: 'principal', validacion: val }),

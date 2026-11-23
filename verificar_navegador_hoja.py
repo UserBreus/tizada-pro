@@ -3,8 +3,9 @@
 CONTRATO: EL NAVEGADOR COMPONE LA HOJA (EL SELLO) IGUAL QUE EL SERVIDOR — `py verificar_navegador_hoja.py [N_prendas]`
 
 CONTRATO_LENTO — corre el motor entero sobre un pedido de 7 prendas (2 páginas de mesa) y rasteriza a
-60 dpi las cuatro hojas (dos de ellas de más de 5 m): ~100 s, de los que 90 son el render. Entra en la
-tanda con `--todos`. Con `3` tarda ~50 s (una página).
+60 dpi las cuatro hojas (dos de ellas de más de 5 m). Eran ~100 s; desde el optimizador del nesting
+(16 carriles, MAPA 728-736) el acomodo del motor Python solo lleva ~28 min (medido 2026-11-02 por el
+inspector: 29 min 26 s en total, VERDE). Entra en la tanda con `--todos`. Con `3`, una página.
 
 PLAN_NAVEGADOR.md, etapa 4, punto 2. `frontend/src/motor/hoja/componer.js` hace en el navegador lo
 que `hoja_pike.componer_hoja_sello` hace en el servidor: la hoja de una tela con el dibujo de cada

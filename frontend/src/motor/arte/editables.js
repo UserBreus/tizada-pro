@@ -13,7 +13,7 @@ import { pyRound } from '../py.js'
 import { sha1Hex } from '../sha1.js'
 import { instrucciones, contenidoCrudo } from '../pdf/contenido.js'
 import { dibujosDePagina } from '../pdf/dibujos.js'
-import { devolver } from '../pdf/prestado.js'
+import { devolver, soltarImagen } from '../pdf/prestado.js'
 import { cropboxPyMuPDF } from '../molde/contornos.js'
 import { abrir, nombresOc, normNombre, reprPy, strOperando, floatOperando, transformarRect, rectVacio } from './texto.js'
 import { esCapaEditable, nombreEditable } from '../nombres.js'
@@ -201,7 +201,7 @@ export function bboxlog(mupdf, page) {
     // no se lo reconoce) para que `extraerEditables` lo mida por su recorte.
     // (`devolver`: el sombreado y la imagen son PRESTADOS — ver `pdf/prestado.js`)
     fillShade(shade, ctm) { const b = shade.getBounds(); devolver(shade); add('fill-shade', rectSinLimite(b) ? b : transformarRect(b, ctm)) },
-    fillImage(image, ctm) { devolver(image); add('fill-image', transformarRect([0, 0, 1, 1], ctm)) },
+    fillImage(image, ctm) { soltarImagen(image); add('fill-image', transformarRect([0, 0, 1, 1], ctm)) },
     fillImageMask(image, ctm) { devolver(image); add('fill-imgmask', transformarRect([0, 0, 1, 1], ctm)) },
     clipImageMask(image) { devolver(image) },
     beginLayer(name) { capa = name || '' },

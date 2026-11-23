@@ -34,11 +34,17 @@ export function crearPool(n, crearObrero, nombre = 'obrero') {
       } else p.resolve(m.valor)
     }
     w.onerror = (e) => {
-      for (const [id, p] of pendientes) if (p.obrero === o) { pendientes.delete(id); p.reject(new Error(e.message || 'el hilo se cortó')) }
+      // `tareaTermina` también acá y al cerrar: si no, el Monitor la mostraba «haciendo» para siempre
+      for (const [id, p] of pendientes) if (p.obrero === o) { pendientes.delete(id); tareaTermina(p.mon, false); p.reject(new Error(e.message || 'el hilo se cortó')) }
     }
     obreros.push(o)
   }
+  // 🔴 UN EQUIPO CERRADO CONTESTA «cancelado» EN EL ACTO (MAPA 814). Antes, mandarle una tarea a un
+  // hilo ya terminado dejaba la promesa esperando para siempre: quien todavía tuviera el motor viejo
+  // en la mano (una vista previa a medio pedir cuando la tizada renueva el hilo) quedaba colgado.
+  let cerrado = false
   const mandar = (o, tipo, datos, transfer, alAvance = null) => new Promise((resolve, reject) => {
+    if (cerrado) { reject(new Error('cancelado')); return }
     const id = siguienteId++
     pendientes.set(id, { resolve, reject, obrero: o, mon: tareaEmpieza(tipo), alAvance })
     o.carga++
@@ -57,8 +63,9 @@ export function crearPool(n, crearObrero, nombre = 'obrero') {
       return Promise.all(obreros.map((o) => mandar(o, tipo, datosDe(o.i))))
     },
     cerrar() {
+      cerrado = true
       for (const o of obreros) { try { o.w.terminate() } catch { /* nada */ } }
-      for (const [, p] of pendientes) p.reject(new Error('cancelado'))
+      for (const [, p] of pendientes) { tareaTermina(p.mon, false); p.reject(new Error('cancelado')) }
       pendientes.clear()
     },
   }

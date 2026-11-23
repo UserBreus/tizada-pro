@@ -42,6 +42,7 @@
 //                  procesos: [{nombre, proceso, pieza, sin_marca, pdf?: Uint8Array, svg?: b64,
 //                              thumb?: b64|Uint8Array, medidas: [{talles, texto}], nota?}]}]
 // Devuelve los bytes del PDF (Uint8Array).
+import { guardarPdf } from '../pdf/guardar.js'
 import { pyRound, pyStrip } from '../py.js'
 import { sha1HexBytes } from '../sha1.js'
 
@@ -266,10 +267,11 @@ function insertarTexto(ctx, pg, x, y, buffer, size, fontname, color) {
 function texto(ctx, pg, x, y, s, size = 9, color = NEGRO, bold = false, maxW = null) {
   s = pyStr(s)
   const fn = bold ? FONT_B : FONT
-  if (verdad(maxW)) {
+  if (verdad(maxW) && largoTexto(ctx, s, fn, size) > maxW) {
+    // no entra: se achica hasta que entre CON «...» al final (gemelo: `_texto` de ficha_tecnica.py, MAPA 791)
     let cs = Array.from(s)
-    while (cs.length && largoTexto(ctx, cs.join(''), fn, size) > maxW) cs = cs.slice(0, -1)
-    s = cs.join('')
+    while (cs.length && largoTexto(ctx, cs.join('') + '...', fn, size) > maxW) cs = cs.slice(0, -1)
+    s = cs.length ? cs.join('').replace(/\s+$/, '') + '...' : ''   // (si ni «...» entra, nada: gemelo de ficha_tecnica.py)
   }
   insertarTexto(ctx, pg, x, y, s, size, fn, color)
   return largoTexto(ctx, s, fn, size)
@@ -509,10 +511,11 @@ function seccion(ctx, pg, y, t) {
 // PLANILLA SIN TALLES (MAPA 622): sin columna de talle la tabla no es «de talles». Sólo se decide
 // con columnas que traen su `role`; una planilla vieja sin roles queda igual. Gemelo de
 // `_titulo_tabla` (ficha_tecnica.py).
-export function tituloTabla(columnas) {
+export function tituloTabla(columnas, terminoPl = null) {
   const cols = columnas || []
   if (cols.some((c) => c && 'role' in c) && !cols.some((c) => c && c.role === 'talle')) return 'PLANILLA DEL PEDIDO'
-  return 'TABLA DE TALLES'
+  // con el término del molde («tamaños»…) si la pantalla lo mandó (MAPA 804); si no, como siempre
+  return 'TABLA DE ' + (typeof terminoPl === 'string' && terminoPl.trim() ? terminoPl.trim() : 'talles').toUpperCase()
 }
 
 function dibujarTabla(ctx, pg, y, columnas, filas, yMax, fila0 = 0) {
@@ -541,7 +544,9 @@ function dibujarTabla(ctx, pg, y, columnas, filas, yMax, fila0 = 0) {
     dibujarRect(ctx, pg, [x0, y, x0 + W_NUM, y + altoFila], { fill: [0.90, 0.92, 0.94], color: null })
     texto(ctx, pg, x0 + 7, y + 12, String(fila0 + r + 1), 8, [0.25, 0.28, 0.32], true)
     columnas.forEach((c, i) => {
-      const val = pyGet(fila, c.id, pyGet(fila, c.label, ''))
+      let val = pyGet(fila, c.id, pyGet(fila, c.label, ''))
+      // CANTIDAD vacía = 1 prenda (MAPA 801; gemelo: `_dibujar_tabla` de ficha_tecnica.py)
+      if (c && c.role === 'cantidad' && (val == null || pyStrip(String(val)) === '')) val = '1'
       texto(ctx, pg, cx(i + 1) + 6, y + 12, val, 8.5, NEGRO, false, wCol - 10)
     })
     y += altoFila
@@ -696,7 +701,7 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
 
     // 1) TABLA (arriba). Puede ocupar más de una página si hay muchas filas (la numeración sigue).
     let pg = nuevaPagina(ctx)
-    const titulo = tituloTabla(columnas)
+    const titulo = tituloTabla(columnas, (planilla || {}).termino_pl)
     let y = seccion(ctx, pg, 78, titulo)
     y += 6
     let restan, f0
@@ -945,7 +950,7 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
     // objeto por objeto los recursos de la mesa y no cambia nada. Con piezas en PDF suelto cada una
     // trae SU copia de la mesa del talle: ahí `garbage=4` las junta en una (si no, la ficha pesa la
     // mesa tantas veces como piezas).
-    return doc.saveToBuffer(ctx.piezasSueltas ? 'garbage=4,compress' : 'garbage,compress').asUint8Array().slice()
+    return guardarPdf(doc, ctx.piezasSueltas ? 'garbage=4,compress' : 'garbage,compress')
   } finally {
     for (const gd of ctx.guias || []) {
       try { gd.mapa.destroy() } catch { /* nada */ }

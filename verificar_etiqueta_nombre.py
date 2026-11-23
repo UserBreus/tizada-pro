@@ -15,6 +15,7 @@ sobre el borde— y se mira exactamente qué string llegó.
     intenta tocar la base (ver [[test-no-toca-mssql]]).
 """
 import json
+import glob
 import os
 import re
 import shutil
@@ -53,12 +54,20 @@ for _p in (_cat.get("productos") or []):
         continue
     # se prefiere el que tenga piezas NUMERADAS: es el caso que se está verificando
     _num = sum(1 for n in _reg if re.search(r"\s+\d+\s*$", str(n)))
-    _cands.append({"pid": _pid, "nombre": _p.get("nombre"), "reg": _reg, "num": _num, "prod": _p})
+    # 🔴 con ARTE: desde MAPA 760 el arte del pedido vive en la PC y muchos moldes no tienen ninguno en la carpeta;
+    # el elegido sin arte reventaba con «no such file: arte.ai» (MAPA 807)
+    _artes = sorted(glob.glob(os.path.join(RAIZ, "entrada", _pid, "disenos", "*", "arte.ai")))
+    _con_arte = os.path.exists(os.path.join(RAIZ, "entrada", _pid, "arte.ai")) or bool(_artes)
+    _cands.append({"pid": _pid, "nombre": _p.get("nombre"), "reg": _reg, "num": _num, "prod": _p,
+                   "con_arte": _con_arte, "artes": _artes})
 
 if not _cands:
     print("No hay ningún molde con plantilla + registro: no se puede verificar.")
     sys.exit(1)
-_cands.sort(key=lambda c: (c["num"], len(c["reg"])), reverse=True)
+_cands.sort(key=lambda c: (c["con_arte"], c["num"], len(c["reg"])), reverse=True)
+if not _cands[0]["con_arte"]:
+    print("Ningún molde con plantilla + registro tiene un arte en la carpeta: no se puede verificar.")
+    sys.exit(1)
 _M = _cands[0]
 PID, REG = _M["pid"], _M["reg"]
 
@@ -70,6 +79,10 @@ for _d in (_M["prod"].get("disenos") or []):
     if os.path.exists(os.path.join(RAIZ, "entrada", PID, "disenos", _slug, "arte.ai")):
         DISENO = _nom
         break
+else:
+    # ninguno de sus diseños con nombre: el primer arte de la carpeta (su carpeta es el slug del diseño)
+    if not os.path.exists(os.path.join(RAIZ, "entrada", PID, "arte.ai")) and _M["artes"]:
+        DISENO = os.path.basename(os.path.dirname(_M["artes"][0]))
 
 # ── 2. Sandbox: copia de los datos + doble de `db` ──────────────────────────────────────────
 _TMP = tempfile.mkdtemp(prefix="verif_etq_nom_")
@@ -125,9 +138,10 @@ _TEXTOS = []
 _orig = MP._eops_borde
 
 
-def _espia(cont, Sc, x0, y0, B, rx, ry, t, texto, size, align, fetq, bc_activo=False):
+def _espia(cont, Sc, x0, y0, B, rx, ry, t, texto, size, align, fetq, *a, **kw):
+    # el resto pasa tal cual: el motor sumó `adentro=` y el espía viejo lo rechazaba → ninguna etiqueta (MAPA 807)
     _TEXTOS.append(texto)
-    return _orig(cont, Sc, x0, y0, B, rx, ry, t, texto, size, align, fetq, bc_activo)
+    return _orig(cont, Sc, x0, y0, B, rx, ry, t, texto, size, align, fetq, *a, **kw)
 
 
 MP._eops_borde = _espia

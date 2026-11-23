@@ -6,8 +6,10 @@
 // lo mismo con MuPDF (mismo resultado: el objeto entra como una capa OCG «Editable <nombre>» con un
 // Form XObject, en un content stream propio de cada mesa) y el servidor sólo GUARDA la versión
 // nueva del arte (el original del usuario nunca se toca: `arte.v<N>.ai`).
+import { guardarPdf } from '../pdf/guardar.js'
 import { formDePagina, rectPagina } from '../pieza/caminoA.js'
 import { mapeoVariantesArte } from './mapeo.js'
+import { normNombre } from '../nombres.js'
 
 const PT_A_CM = 2.54 / 72.0
 const nulo = (o) => !o || (o.isNull && o.isNull())
@@ -31,7 +33,7 @@ export function normalizarObjeto(mupdf, bytes, nombreArchivo) {
         const pg = src.loadPage(0)
         const r = pg.getBounds()
         pg.destroy()
-        const pdf = una.saveToBuffer('compress').asUint8Array().slice()
+        const pdf = guardarPdf(una, 'compress')
         return { pdf, w_cm: (r[2] - r[0]) * PT_A_CM, h_cm: (r[3] - r[1]) * PT_A_CM, tipo: 'vector' }
       } finally { una.destroy() }
     } finally { src.destroy() }
@@ -50,7 +52,7 @@ export function normalizarObjeto(mupdf, bytes, nombreArchivo) {
         xo.put('Im0', ref)
         res.put('XObject', xo)
         doc.insertPage(0, doc.addPage([0, 0, w, h], 0, res, `q ${w} 0 0 ${h} 0 0 cm /Im0 Do Q`))
-        const pdf = doc.saveToBuffer('compress').asUint8Array().slice()
+        const pdf = guardarPdf(doc, 'compress')
         return { pdf, w_cm: w / dpi * 2.54, h_cm: h / dpi * 2.54, tipo: 'imagen' }
       } finally { doc.destroy() }
     } finally { img.destroy() }
@@ -89,7 +91,7 @@ function tieneDpi(bytes, ext) {
  * `fx/fy` = el punto tocado en fracciones de la PIEZA (y hacia abajo). Devuelve
  * `[[mesa, [x0, y0, x1, y1]], …]` en coordenadas de página (y hacia arriba).
  */
-export function colocacionesObjeto(mupdf, arteBytes, { registro, mapeoBase, pieza, fx, fy, wCm, hCm }) {
+export function colocacionesObjeto(mupdf, arteBytes, { registro, mapeoBase, pieza, fx, fy, wCm, hCm, talleRef = '' }) {
   const talles = [...new Set(Object.values(registro || {}).flatMap((v) => Object.keys(v || {})))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   const mesaTalles = new Map()
   let mv = {}
@@ -115,7 +117,10 @@ export function colocacionesObjeto(mupdf, arteBytes, { registro, mapeoBase, piez
         if (!mr) continue
         const [ax0, ay0, aw, ah] = mr
         const porT = registro[pieza] || {}
-        const tm = (mesaTalles.get(mesa) || []).find((t) => porT[t])
+        // el talle de REFERENCIA de la medida: el que se está mirando si está en esta mesa (antes el primero por orden
+        // alfabético, «0»: un logo de 9 cm salía de 16 cm en M — inspector, MAPA 794; gemelo en servidor.py)
+        const _ts = mesaTalles.get(mesa) || []
+        const tm = (talleRef && _ts.includes(talleRef) && porT[talleRef]) ? talleRef : _ts.find((t) => porT[t])
         const inf = (tm ? porT[tm] : Object.values(porT)[0]) || {}
         const phCm = Number(inf.h_cm || 0)
         if (!(phCm > 0)) continue
@@ -171,10 +176,14 @@ export function inyectarEditable(mupdf, arteBytes, colocaciones, objPdf, nombre)
     const usados = new Set()
     if (!nulo(ocp) && !nulo(ocp.get('OCGs'))) {
       const og = ocp.get('OCGs')
-      for (let i = 0; i < og.length; i++) { try { usados.add(og.get(i).get('Name').asString()) } catch { /* nada */ } }
+      for (let i = 0; i < og.length; i++) { try { usados.add(normNombre(og.get(i).get('Name').asString())) } catch { /* nada */ } }
     }
+    // como compara TODO el sistema (`normNombre`: sin mayúsculas, sin acentos, guión = espacio): «Editable Logo» o
+    // «Editable Lógo» junto a «Editable logo» son el mismo editable; con las dos el logo salía DOS veces en la hoja y
+    // el editor mezclaba sus figuras (MAPA 798-799; gemelo: `inyectar_editable` de objetos_agregados.py)
     let capa = `Editable ${nombre}`.trim()
-    if (usados.has(capa)) { let i = 2; while (usados.has(`${capa} ${i}`)) i++; capa = `${capa} ${i}` }
+    const _ya = (c) => usados.has(normNombre(c))
+    if (_ya(capa)) { let i = 2; while (_ya(`${capa} ${i}`)) i++; capa = `${capa} ${i}` }
     const d = doc.newDictionary()
     d.put('Type', doc.newName('OCG'))
     d.put('Name', doc.newString(capa))
@@ -223,7 +232,7 @@ export function inyectarEditable(mupdf, arteBytes, colocaciones, objPdf, nombre)
       hechas.push(Number(mesa))
     }
     if (!hechas.length) throw new Error('ninguna mesa válida para colocar el objeto')
-    const bytes = doc.saveToBuffer('compress').asUint8Array().slice()
+    const bytes = guardarPdf(doc, 'compress')
     return { bytes, capa, mesas: hechas }
   } finally {
     try { src.destroy() } catch { /* nada */ }
@@ -280,7 +289,7 @@ export function quitarEditable(mupdf, arteBytes, capa) {
       else { const a = doc.newArray(); for (const q of quedan) a.push(q); pageObj.put('Contents', a) }
       for (const n of nombres) { try { props.delete(n) } catch { /* nada */ } }
     }
-    const bytes = doc.saveToBuffer('compress').asUint8Array().slice()
+    const bytes = guardarPdf(doc, 'compress')
     return { bytes, borrados }
   } finally {
     try { doc.destroy() } catch { /* nada */ }

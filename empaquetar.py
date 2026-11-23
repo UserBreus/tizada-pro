@@ -29,9 +29,9 @@ INCLUIR_CARPETAS = ["frontend/dist", "db", "catalogo_fuentes",
                     "frontend/node_modules/opentype.js", "documentacion/integracion_externa"]
 # archivos sueltos fuera de la raíz (`package.json` dice que los .js del motor son módulos)
 INCLUIR_SUELTOS = ["frontend/package.json"]
-# LOS CONECTORES (MAPA 619): viajan para que el OTRO SISTEMA los baje por su API
-# (`/api/externo/v1/conectores`). La pantalla del publicado NO los ofrece (MAPA 572: «se le pasa a
-# cada usuario manual»; ver `servidor.illustrator_extension_zip`). Los .exe llevan la versión en el
+# LOS CONECTORES (MAPA 619, 765): van SIEMPRE en el paquete — los botones del publicado los ofrecen (regla del
+# usuario 2026-11-02, deja sin efecto la 572 que los escondía; ver `servidor.illustrator_extension_zip`) y el OTRO
+# SISTEMA los baja por su API (`/api/externo/v1/conectores`). Los .exe llevan la versión en el
 # nombre: se buscan con un patrón (`construir.py` deja sólo el último). La extensión de Illustrator
 # va entera (son KB): de ahí sale la versión (manifiesto) y el ZIP para Mac.
 INCLUIR_PATRONES = ["extension_illustrator/Instalar-USER-PRO-Illustrator-*.exe", "extension_corel/Instalar-USER-PRO-Corel-*.exe",

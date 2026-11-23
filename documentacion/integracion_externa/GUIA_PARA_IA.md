@@ -248,6 +248,7 @@ Límites: 600 MB, 400 archivos. `POST /pedidos` como multipart `paquete` o cuerp
 - `mesas.separar_disenos` (opcional, booleano): sin él el MISMO MOLDE se mezcla aunque cambie el diseño — también con `una_por_fila`, en mesas mezcladas que se repiten (`fila: null` + `filas: [{fila, por_mesa}]` en el archivo); con `true` cada diseño va en sus propias mesas y el archivo trae `diseno` (MAPA 717).
 - `mesas.largo_max_m` (opcional, metros, 0,10 a 50): el largo máximo de cada mesa del pedido; sin él rige el del nesting del molde. Mal → `largo-mesa-invalido`; un molde a medida más largo que eso → `tela-no-entra` (MAPA 716).
 - `reemplazar: true` para rehacer una referencia ya `listo`.
+- `modo: "corte"` (MAPA 816): **tizada para corte**, sin arte — de cada pieza sólo su línea de corte (sin etiqueta), cada talle en su mesa (`mesas.modo` por defecto `talle_por_mesa`). No mandar arte, tipografías ni editables (se ignoran: `corte-ignora-arte`); nombre y número no se exigen; un molde a medida → `molde-no-corte`. `opciones.formatos`: `["dxf","ai","plt","svg","eps"]` (además del PDF) → vuelven en `archivos[]` con `tipo: "corte"` y `formato`.
 - `aviso_url` (mismo sitio que la URL configurada en TIZADA).
 
 ---
@@ -258,6 +259,7 @@ Forma: `{codigo, frena, etapa, mensaje, donde: {campo, fila}}`. `frena: true` re
 | Grupo | Códigos | Acción del sistema externo |
 |---|---|---|
 | Catálogo | `variable-desconocida`, `variable-ambigua`, `molde-no-disponible`, `molde-archivado`, `planillas-distintas` | Re-sincronizar el catálogo; mandar la `clave` (`molde-archivado`: esa prenda ya no se ofrece) |
+| Diseño | `misma-columna-de-talle` | En un diseño, cada columna de talle va con un solo molde: dos prendas que leen «Talle» van en diseños distintos (camiseta con «Talle» + short con «Talle short» sí van juntas) |
 | Tela | `tela-falta`, `tela-desconocida`, `tela-no-usable`, `tela-no-permitida`, `tela-no-entra` | Ofrecer sólo telas del molde, usables y donde entra (`calcular`) |
 | Planilla | `talle-inexistente`, `opcion-inexistente`, `opcion-sin-piezas`, `columna-obligatoria-vacia`, `cantidad-invalida`, `fila-diseno-desconocido` | Validar los campos contra `GET /moldes/{codigo}` |
 | A medida | `medida-falta`, `medida-invalida`, `forma-invalida`, `terminacion-invalida`, `tiras-invalidas`, `tiras-sin-margen`, `tiras-no-a-medida` | Seguir §5; probar con `calcular` |

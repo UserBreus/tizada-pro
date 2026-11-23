@@ -280,7 +280,7 @@ _TALLES = ["XS", "S", "M", "L", "XL", "2XL"]
 _REG = {"Frente": {t: {} for t in _TALLES}}
 _orden_orig, _map_orig, _ext_orig = S._orden_var, MP.mapeo_variantes_arte, MP.extraer_editables
 try:
-    S._orden_var = lambda reg: _TALLES
+    S._orden_var = lambda reg, pid=None: _TALLES   # (`_orden_var(reg, pid)`: el orden del molde)
     MP.mapeo_variantes_arte = lambda arte, reg, orden: {
         "Frente": {"XS": 1, "S": 1, "M": 2, "L": 2, "XL": 3, "2XL": 3}}
     MP.extraer_editables = lambda arte, **_k: [
@@ -295,7 +295,8 @@ try:
     _md = _r[0]["medidas"] if _r else []
     ok(len(_md) == 3, f"una línea por RANGO del arte (salieron {len(_md)})")
     _txt = [f"{m['talles']} → {m['texto']}" for m in _md]
-    ok(_txt == ["XS a S → 6.5 × 6.5 cm", "M a L → 7.5 × 7.5 cm", "XL a 2XL → 8.5 × 8.5 cm"],
+    # (coma decimal: lo que lee la persona va en castellano, MAPA 776-780)
+    ok(_txt == ["XS a S → 6,5 × 6,5 cm", "M a L → 7,5 × 7,5 cm", "XL a 2XL → 8,5 × 8,5 cm"],
        f"cada medida con SU tramo de talles: {_txt}")
 
     # …y con UNA SOLA mesa (default / arte por talle) → la medida del TALLE GUÍA
@@ -307,7 +308,7 @@ try:
                           marcas=S._editables_marca(_prodm, "principal"),
                           sin_marca=S._editables_sin_marca(_prodm, "principal"))
     _md2 = _r2[0]["medidas"] if _r2 else []
-    ok(len(_md2) == 1 and _md2[0]["talles"] == "talle M" and _md2[0]["texto"] == "7.5 × 7.5 cm",
+    ok(len(_md2) == 1 and _md2[0]["talles"] == "talle M" and _md2[0]["texto"] == "7,5 × 7,5 cm",
        f"sin rangos, la medida es la del TALLE GUÍA: {_md2}")
 
     # …y si el tamaño está CONFIGURADO, manda la configuración (no el arte)

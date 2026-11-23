@@ -65,7 +65,7 @@
       ],
       "reglas": [
         "Nunca desplegar/rehacer páginas en el servidor sobre la cáscara (no hay dibujo): 409 con _MSJ_EN_PC.",
-        "Las claves `|pc,` de IndexedDB SÓLO las borran soltarMoldesEnPc / soltarPaginasEnPc; ninguna otra limpieza.",
+        "Las claves `|pc,` de IndexedDB SÓLO las borran soltarMoldesEnPc / soltarPaginasEnPc (moldes) y soltarArtePc / soltarArtesPc (artes del pedido, `arte/enPc.js`, sólo prefijos artepc|/arte-original|/arte|…|pc,); ninguna otra limpieza.",
         "Decidir «este molde ya no existe» con una lista pedida DESPUÉS de leer las claves, nunca con la lista de la pantalla.",
         "El sello de la PC es ['pc', sha1, rev]: lo arma la PC antes de subir el índice; servidor y motor tienen que coincidir."
       ],
@@ -84,7 +84,8 @@
         "moldes-en-la-pc",
         "camino-b",
         "generar-navegador",
-        "lista-moldes"
+        "lista-moldes",
+        "arte-en-pc"
       ]
     },
     {
@@ -107,6 +108,10 @@
         [
           "frontend/src/motor/cache.js",
           "claveDe"
+        ],
+        [
+          "frontend/src/motor/cache.js",
+          "async function _soltarVersionesViejas(clave)"
         ]
       ],
       "palabras": [
@@ -120,10 +125,12 @@
       "reglas": [
         "Las claves se arman SÓLO con claveDe (cache.js); una clave armada a mano no la encuentra el motor.",
         "La limpieza de versiones viejas nunca toca claves `|pc,`.",
-        "guardarCache arma el Blob ANTES de cualquier await (el que llama transfiere el buffer)."
+        "guardarCache arma el Blob ANTES de cualquier await (el que llama transfiere el buffer).",
+        "Al guardar una versión nueva del arte de un diseño del SERVIDOR (`arte|pid|dis|<sello>`) se borran las anteriores de ese diseño (`_soltarVersionesViejas`, cache.js); nunca las `|pc,` (MAPA 777)."
       ],
       "cicatrices": [
-        "MAPA 529: sello _sello_archivo en µs; un sello distinto entre servidor y PC = se baja dos veces o no se encuentra."
+        "MAPA 529: sello _sello_archivo en µs; un sello distinto entre servidor y PC = se baja dos veces o no se encuentra.",
+        "MAPA 778: `_soltarVersionesViejas` borraba la copia del MISMO arte guardada por el otro camino (miniaturas `<mtime>-<tamaño>` vs motor `<tamaño>,<µs>`) → se rebajaba: sólo se borran las de la misma FORMA de sello."
       ],
       "contratos": [],
       "mapa": [
@@ -154,6 +161,14 @@
         [
           "frontend/src/App.jsx",
           "const fetchProductos"
+        ],
+        [
+          "servidor.py",
+          "SESSION_REFRESH_EACH_REQUEST"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "estadoSeqRef"
         ]
       ],
       "palabras": [
@@ -166,17 +181,24 @@
       "reglas": [
         "Una respuesta de /api/productos más vieja que la ya aplicada se descarta (_prodSeq).",
         "Todo marcado optimista sobre productosCat necesita sostenerse hasta una lista pedida DESPUÉS del guardado (patrón _talleLocal).",
-        "`prod_default` es el activo DE ARRANQUE, no un molde: no pedir sus datos."
+        "`prod_default` es el activo DE ARRANQUE, no un molde: no pedir sus datos.",
+        "La cookie de sesión viaja SÓLO cuando la sesión cambia (`SESSION_REFRESH_EACH_REQUEST = False`): si cada respuesta la reenvía, una consulta lenta que salió antes de activar otro molde la pisa con el activo viejo. La semana se renueva en `/api/auth/yo`.",
+        "`fetchEstado` aplica sólo la ÚLTIMA respuesta (`estadoSeqRef`) y `handleActivarProducto` pide el estado del molde que activó (`fetchEstado(id)`), no «el activo».",
+        "`/api/auth/yo` renueva la sesión como mucho cada 12 h (`session[\"_renovada\"]`): su respuesta lleva la sesión del comienzo y al abrir la app sale junto a un `activar`."
       ],
       "cicatrices": [
         "MAPA 589: «TALLE DE» se desmarcaba solo: una recarga vieja pisaba lo recién tocado.",
-        "MAPA 591: 404 de prod_default/motor_b al abrir el programa."
+        "MAPA 591: 404 de prod_default/motor_b al abrir el programa.",
+        "MAPA 799: `/api/plantilla/deteccion` de la Camiseta terminó 1 ms después de activar la Bandera y su cookie dejó activa la Camiseta; el Arte del pedido mostraba los talles de la Bandera (4 de 6 veces).",
+        "MAPA 800: `/api/auth/yo` con `session.modified = True` siempre podía pisar el `activar` que sale a la vez al abrir la app."
       ],
       "contratos": [],
       "mapa": [
         582,
         589,
-        591
+        591,
+        799,
+        800
       ],
       "memoria": "columna-talle-por-molde.md",
       "conexiones": [
@@ -258,6 +280,22 @@
         [
           "correr_contratos.py",
           "TIZADA_SOLO_NAVEGADOR=os.environ.get(\"TIZADA_SOLO_NAVEGADOR\", \"0\")"
+        ],
+        [
+          "frontend/src/motor/calculos.js",
+          "let _genReciente = 0"
+        ],
+        [
+          "frontend/src/motor/calculos.js",
+          "const _POST_LECTURA ="
+        ],
+        [
+          "frontend/src/motor/calculos.js",
+          "function _errEs(e, cual)"
+        ],
+        [
+          "frontend/src/motor/calculos.js",
+          "const _ESCRITURA_AJENA_AL_MOLDE ="
         ]
       ],
       "palabras": [
@@ -274,14 +312,26 @@
         "La cabecera X-Calculos SÓLO a la misma origen (a otro host dispara preflight de CORS: rompe el puente de Illustrator).",
         "Sin tope de vueltas: lo que corta es que el mismo cálculo se pida 3 veces (bucle).",
         "Los contratos prueban la REFERENCIA en Python: `correr_contratos.py` les pasa `TIZADA_SOLO_NAVEGADOR=0` por defecto (MAPA 624); el que prueba el modo prendido lo pone él (`verificar_navegador_solo.py`). Corriendo uno suelto, ponerlo a mano.",
-        "Todo `except Exception` que envuelva un cálculo (`_calcular`/`_arte_calc`, directo o a través de otra función) empieza con `_relanzar_calculo(e)`; si no, el pedido al navegador sale como error con el nombre del cálculo. Lo vigila `verificar_calculos_no_se_tragan.py` (MAPA 721)."
+        "Todo `except Exception` que envuelva un cálculo (`_calcular`/`_arte_calc`, directo o a través de otra función) empieza con `_relanzar_calculo(e)`; si no, el pedido al navegador sale como error con el nombre del cálculo. Lo vigila `verificar_calculos_no_se_tragan.py` (MAPA 721).",
+        "El `fetch` de la app (`instalarCalculos`) junta los GET iguales A LA VEZ de `/api/plantilla/deteccion`, `/api/arte/deteccion` y `/motor_b` (cada uno recibe su copia; nada se guarda después) — MAPA 774.",
+        "`/api/arte/deteccion?solo_molde=1` y `/arte_contexto` se reutilizan 2 s (`_GET_RECIENTE`): datos del molde que se piden dos veces seguidas al cargar un arte (MAPA 775).",
+        "`_GET_RECIENTE` (10 s) y `_getEnViaje` se vacían con CUALQUIER escritura de la pestaña; una lectura que salió antes de una escritura no queda como reciente (`_genReciente`, MAPA 776).",
+        "Un POST que sólo LEE (`/prendas`, `_POST_LECTURA`) no tira la caché; una lectura que sale MIENTRAS viaja una escritura (`_escribiendo`) va directo y no se guarda; al terminar la escritura se vuelve a tirar todo (MAPA 777).",
+        "`_POST_LECTURA` = `/prendas` y `/editables_cfg` (sólo leen); un POST nuevo que sólo lee va ahí, si no tira la caché (MAPA 778).",
+        "Los errores del navegador se traducen donde NACEN: `window.fetch` (red) y `Response.prototype.json` (no es JSON) con `_errEs` → mensaje en castellano y `name` vacío; `AbortError` NUNCA se toca (MAPA 783).",
+        "El error de RED se traduce SÓLO en el `_fetch` del navegador (adentro de `_fetchCalc`); `.json()` SÓLO el SyntaxError. Un error del programa nunca se disfraza de «no hay conexión» (MAPA 784).",
+        "`_ESCRITURA_AJENA_AL_MOLDE` (disenos/guardar, pedido/, paquetes/, reservas, registro): no tiran ni frenan las lecturas del molde. Una escritura nueva que NO toca el molde va ahí (MAPA 784)."
       ],
       "cicatrices": [
         "MAPA 551: tope de 25 vueltas cortaba guías con muchos talles.",
         "MAPA 591: 428 rojos en la consola.",
         "2026-10-06 (MAPA 624): la suite tenía ~10 rojos por `_FaltaCalculo`/409 (contratos sin la variable) y 3 contratos que seguían esperando poder apagar «no calcula» o que el servidor leyera un molde pelado: estuvieron rojos desde el 2026-09-24.",
         "2026-10-06 (MAPA 624): contratos con dobles de `db` sin `filas` (`verificar_config_con_diseno.py`, `verificar_navegador_subida_a.py`), con dobles de firma vieja (`extraer_editables` sin `con_thumb` en `verificar_marcas_proceso.py`) y atados a datos del usuario (`verificar_color_nativo_cid.py`, el arte del GOLERO cambió): se corrigieron sin tocar lo que miden.",
-        "2026-10-15 (MAPA 721): «no se pudo leer el molde: analizar_variantes» parpadeando al subir un molde: `/api/plantilla/variantes` se tragaba el `_FaltaCalculo`."
+        "2026-10-15 (MAPA 721): «no se pudo leer el molde: analizar_variantes» parpadeando al subir un molde: `/api/plantilla/variantes` se tragaba el `_FaltaCalculo`.",
+        "MAPA 777: el `POST /prendas` (una lectura, 30 por carga de arte) vaciaba la caché en cada talle → 2 `/plantilla/deteccion` por talle.",
+        "MAPA 783: ~15 carteles propios mostraban «Failed to fetch» / «… is not valid JSON» sin pasar por showError.",
+        "MAPA 784: `_errEs` envolvía TODO `_fetchCalc` y un error de los cálculos de la PC salía como «no hay conexión con el servidor».",
+        "MAPA 785: `pedido/` en `_ESCRITURA_AJENA_AL_MOLDE` tapaba `fuente_resolver`/`fuentes_pedido_limpiar` (cambian las tipografías del molde) → sólo `pedido/plan`."
       ],
       "contratos": [
         "verificar_navegador_solo.py",
@@ -293,7 +343,9 @@
         551,
         591,
         624,
-        721
+        721,
+        774,
+        775
       ],
       "memoria": "servidor-calcula-pendiente.md",
       "conexiones": [
@@ -320,6 +372,26 @@
         [
           "frontend/src/App.jsx",
           "const _flujoB"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const choqueEnDiseno"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const choqueB"
+        ],
+        [
+          "servidor.py",
+          "def _columnas_repetidas"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const piezasSinDisenoAct"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const cancelarNavRef"
         ]
       ],
       "palabras": [
@@ -336,18 +408,30 @@
         "Todo texto que nombre un paso usa _nomPaso(k); el paso `arte` se llama «Piezas» en el molde con diseño (NO «Nombre de molde»).",
         "El molde con diseño nunca manda al paso «Moldes» (no existe en su recorrido).",
         "El chip «Aplicar» de configuraciones guardadas va SÓLO en pedidoPaso === 'arte'.",
-        "En el molde con diseño el botón de la pantalla de carga dice «A las piezas» (lleva al paso «Piezas»); el número del paso Tizadas sale de pasosPedido (4 en B, 5 en A)."
+        "En el molde con diseño el botón de la pantalla de carga dice «A las piezas» (lleva al paso «Piezas»); el número del paso Tizadas sale de pasosPedido (4 en B, 5 en A).",
+        "🔴 En un diseño, cada columna de talle va con UN solo molde (regla del usuario 2026-10-30, MAPA 755): ni dos moldes que lean la misma columna ni dos variables del mismo molde. Pantalla `choqueEnDiseno`/`choqueB` (catálogo, Mis artículos, camino B, barra del paso, irPasoArte) ↔ servidor `_columnas_repetidas` ↔ API `misma-columna-de-talle`. Un molde sin talle (planilla sin talle, columna apagada, a medida) no choca.",
+        "Una tarjeta de molde BLOQUEADA en el paso Moldes no va `disabled`: muestra el motivo corto y al tocarla avisa el completo (en pantalla táctil un `title` no se ve). Un diseño escrito que es de `DISENOS_PRESET` entra con el nombre de la lista.",
+        "`BtnSiguiente` apagado NO es `disabled`: lleva `aria-disabled` y al tocarlo muestra un globo con su `title` (el motivo) unos segundos."
       ],
       "cicatrices": [
         "MAPA 587-588: el chip salía en Diseño; el paso se llamó «Nombre de molde» y el usuario lo corrigió.",
-        "MAPA 594: «Al arte →», «5 · Tizadas» fijo y chips «0/1» en B se veían incoherentes con el recorrido."
+        "MAPA 594: «Al arte →», «5 · Tizadas» fijo y chips «0/1» en B se veían incoherentes con el recorrido.",
+        "MAPA 754/755: se podían elegir dos variables del mismo molde en un diseño y la tizada fabricaba sólo la primera sin avisar.",
+        "MAPA 756: «Cancelar» no cortaba la tizada armada en el navegador (sólo sabía cancelar un trabajo del servidor); la barra del Arte decía 3/3 con piezas sin diseño; al recargar, las telas no viajaban (registro de telas sin cargar) y salía «Principal»; un artículo propio sin nombrar desaparecía de «Mis artículos».",
+        "MAPA 776: `verificar_pasos_pedido.mjs` buscaba «No se pudo guardar el» literal; con `generoTerm` la frase lleva el género del término → el contrato acepta `${generoTerm`.",
+        "MAPA 801: el porqué de una tarjeta bloqueada estaba sólo en el `title`; «jugador» escrito a mano quedaba en minúsculas y el botón decía «JUGADOR».",
+        "MAPA 804: «Enviar» tocado mientras «Escaneando planilla…» no hacía nada ni avisaba (botón `disabled`, motivo sólo en el `title`)."
       ],
       "contratos": [
         "frontend/verificar_pasos_pedido.mjs"
       ],
       "mapa": [
         587,
-        588
+        588,
+        754,
+        755,
+        801,
+        804
       ],
       "memoria": "molde-con-diseno.md",
       "conexiones": [
@@ -433,11 +517,15 @@
         "config_externo.json (api-key) NUNCA a git ni a la pantalla.",
         "Cambiar la principal no pisa excepciones.",
         "_asig_de va con el slug del diseño del PEDIDO, no el del arte de reemplazo.",
-        "Una tela de baja no se borra ni pierde su mesa."
+        "Una tela de baja no se borra ni pierde su mesa.",
+        "Una actualización de telas fallida va al registro (`LOG.error(\"telas\", …)`) además de `telas_sync` (MAPA 790).",
+        "«La tela de esta prenda» (destino `todas`) ofrece sólo las telas que valen para TODAS las piezas (`listaPrenda` en `telaPickerRef`); la selección de piezas usa su intersección (`_idsDisp`)."
       ],
       "cicatrices": [
         "MAPA 587: _asig_de(dslug) con el slug del arte de reemplazo perdía las telas elegidas.",
-        "2026-10-06 (MAPA 624): `verificar_telas_margen.py` seguía esperando 180 − 3 para una tela sin medida (regla vieja); desde el 2026-09-28 sin medida no se usa."
+        "2026-10-06 (MAPA 624): `verificar_telas_margen.py` seguía esperando 180 − 3 para una tela sin medida (regla vieja); desde el 2026-09-28 sin medida no se usa.",
+        "MAPA 790: «Registro del sistema» decía «0 fallas» con la API de stock caída; el renglón del último intento no aparecía hasta volver a entrar; «2 volvióieron».",
+        "MAPA 802: el selector de la tela de la prenda ofrecía telas habilitadas sólo para algunas piezas (Rib sólo mangas) y se le podía poner al frente."
       ],
       "contratos": [
         "verificar_telas_margen.py"
@@ -445,7 +533,8 @@
       "mapa": [
         575,
         587,
-        624
+        624,
+        802
       ],
       "memoria": "telas-registro-grupos-pedido.md",
       "conexiones": [
@@ -477,12 +566,16 @@
         "piezasTodasFuera"
       ],
       "reglas": [
-        "Todo lo que recorra piezas (motor, previews, ficha, conteos) pasa por _sin_fuera / piezasDe con piezas_fuera."
+        "Todo lo que recorra piezas (motor, previews, ficha, conteos) pasa por _sin_fuera / piezasDe con piezas_fuera.",
+        "El cartel «Aprobado / Observado» del paso Arte descuenta las piezas apagadas: el chequeo «Cada pieza tiene un arte asignado» trae `faltan` (lista) y `total` en los dos gemelos (`validarArteSeparado` ↔ `validar_arte_separado`) y el badge recalcula `aprobado` sin ellas (MAPA 821). Lo apagado es del PEDIDO: nunca se guarda en la validación del arte."
       ],
-      "cicatrices": [],
+      "cicatrices": [
+        "2026-11-23 (MAPA 821): con los Vivos apagados la lista decía «todas con diseño ✓» y el cartel «Observado ✗ — faltan: Vivo derecho, Vivo izquierdo» (inspector)."
+      ],
       "contratos": [],
       "mapa": [
-        577
+        577,
+        821
       ],
       "memoria": "piezas-a-imprimir.md",
       "conexiones": [
@@ -518,7 +611,8 @@
       ],
       "reglas": [
         "La guía de la ficha NO se achica por el repo (piezas_solo: null en la guía).",
-        "La columna PIEZAS de Repo es POR PLANILLA: `plantilla.repo` = 'no' | 'boton' (por defecto) | 'siempre' (`col-repo-modo`). En el pedido `repoOn` = lo que dice la planilla o el botón (sólo con 'boton'); con 'no' el servidor ignora `__repo` (MAPA 624)."
+        "La columna PIEZAS de Repo es POR PLANILLA: `plantilla.repo` = 'no' | 'boton' (por defecto) | 'siempre' (`col-repo-modo`). En el pedido `repoOn` = lo que dice la planilla o el botón (sólo con 'boton'); con 'no' el servidor ignora `__repo` (MAPA 624).",
+        "La ventana de Repo MUESTRA el nombre sin el número interno si no hay otra igual (`_ver`), pero GUARDA el nombre entero (identidad de la pieza). Lista las dos mangas a propósito (MAPA 580)."
       ],
       "cicatrices": [],
       "contratos": [
@@ -526,7 +620,8 @@
       ],
       "mapa": [
         578,
-        624
+        624,
+        819
       ],
       "memoria": "repo-reposicion.md",
       "conexiones": [
@@ -644,6 +739,26 @@
         [
           "frontend/src/motor/nesting/contorno.js",
           "function copiaPorFilas"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _juegos_completos"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function juegosCompletos"
+        ],
+        [
+          "frontend/src/motor/pdf/mesaPorArchivo.js",
+          "export function nombreMesaDef"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function tallesDeMesa"
+        ],
+        [
+          "nesting_contorno.py",
+          "def _talles_de_mesa"
         ]
       ],
       "palabras": [
@@ -666,7 +781,11 @@
         "Cada lugar de una mesa mezclada lleva la pieza DE VERDAD de su fila: las copias marcan `_copia_i`/`_pieza_i` (`_copias_de` ↔ `copiasDe`); no sacar esas marcas.",
         "COPIA = LA MESA LLENA DEL LARGO MÁXIMO QUE SE REPITE (MAPA 720): se acomodan las copias que llenan una mesa de `altura_max_cm` (como mucho las que entran por superficie + 1); la primera mesa con sus copias COMPLETAS se imprime `copias // n` veces y el resto va en su mesa; todas en una mesa → una sola. Nada de franjas del alto de la pieza (703) ni repetir al costado (701). Sólo con Copia.",
         "🔴 COPIA NO SEPARA POR TALLE (MAPA 725): sólo las mesas LLENAS que se repiten ×N van aparte (por familia = misma pieza); TODO lo que no llena una mesa va a UN pozo (uno por diseño con «Separar») acomodado junto, en el orden de las filas. Separar talles es SÓLO el botón «Mesas».",
-        "El atajo de «no llena una mesa» mide por la CAJA (w·h), nunca preparando máscaras de antemano: mezclar piezas preparadas y no preparadas en el mismo acomodo lo hace más lento en el navegador (MAPA 725)."
+        "El atajo de «no llena una mesa» mide por la CAJA (w·h), nunca preparando máscaras de antemano: mezclar piezas preparadas y no preparadas en el mismo acomodo lo hace más lento en el navegador (MAPA 725).",
+        "🔴 La mesa llena son `n` prendas COMPLETAS que entran en UNA mesa: se acomodan exactamente `n` copias (n de la superficie que entró en la primera mesa) y si no entran, n-1 (atajo exacto: `juegosCompletos` == n-1). NUNCA contar «copias enteras» de un acomodo de más copias: el acomodo reparte por forma (MAPA 759).",
+        "En el pozo, `por_mesa` = prendas COMPLETAS en la mesa y `sueltas` = prendas con sólo algunas piezas (rótulo y nombre del archivo: «piezas de N»).",
+        "El nombre de la mesa con Copia termina SIEMPRE en « - xN» (robot y otro sistema lo leen del nombre del archivo); lo cuida `frontend/verificar_nombre_mesa.mjs` en el build.",
+        "Cada mesa de Copia lleva sus `talles` (los de SUS piezas, en el orden de las filas: `tallesDeMesa` ↔ `_talles_de_mesa`, al final de `copiaPorFilas`/`_copia_por_filas`) y el nombre los dice después de la fila: «Fila 3 - Talle M - x5» (MAPA 820). Cambiar el formato del nombre = entrada en `documentacion/integracion_externa/CAMBIOS.md`."
       ],
       "cicatrices": [
         "2026-10-14: la 701 repetía la mesa de 1 copia al costado → con banderines 19 copias gastaban ~1,80 m donde encastradas gastan ~1,20 (MAPA 703).",
@@ -674,12 +793,16 @@
         "2026-10-14: la mesa del resto (6 banderines) medía 49 cm y la llena (9) 46 cm: el resto sólo usaba el acomodo común (MAPA 705).",
         "2026-10-14 (MAPA 717): JUGADOR 33 + GOLERO 34 de la misma bandera con Copia salían en 4 archivos (459 cm); el usuario: «mismo molde, diferente diseño, debe mezclar».",
         "2026-10-15 (MAPA 720): la Copia achicaba la mesa a una franja del alto de la pieza (689 banderines = franja de 9 ×76); el usuario la quiere del largo máximo y repetida.",
-        "2026-10-15 (MAPA 725): la 717 armaba una mesa por familia = una por talle (20 camisetas con Copia: 19,7 m en 5 mesas contra 15,5 m sin Copia); el usuario: «¿por qué me separó por talle si no apreté Mesas?»."
+        "2026-10-15 (MAPA 725): la 717 armaba una mesa por familia = una por talle (20 camisetas con Copia: 19,7 m en 5 mesas contra 15,5 m sin Copia); el usuario: «¿por qué me separó por talle si no apreté Mesas?».",
+        "MAPA 759: 40 M con Copia → «Mesa 1 ×40» de una mesa entera de 19,73 m (≈1000 prendas): `por_mesa` salía 1 porque el acomodo de 37 copias mandó todas las de una pieza a la segunda mesa; y «18 por mesa» en 0,86 m (cuellos sueltos).",
+        "MAPA 799: un comentario agregado en la 798 se tragó `+ ' - x' + mf.copias` de `nombreMesaDef` y la mesa de 30 copias salía sin «- x30»; ningún contrato miraba el nombre.",
+        "2026-11-23 (MAPA 820): tizada para corte con Copia → «Mesa 1 - Dry Retro 1,60 - Fila 1 - x5» sin el talle (Copia no guardaba los talles de la mesa); el usuario: «falta en el nombre de cada mesa el talle que es»."
       ],
       "contratos": [
         "verificar_cantidad.py",
         "verificar_navegador_hoja.py",
-        "verificar_navegador_nesting.py"
+        "verificar_navegador_nesting.py",
+        "frontend/verificar_nombre_mesa.mjs"
       ],
       "mapa": [
         581,
@@ -690,7 +813,10 @@
         705,
         717,
         720,
-        725
+        725,
+        759,
+        799,
+        820
       ],
       "memoria": "copia-mesa-por-fila.md",
       "conexiones": [
@@ -1285,6 +1411,10 @@
         [
           "frontend/src/motor/pieza/caminoA.js",
           "clasico = null"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _detDeTalle = (pid, t) =>"
         ]
       ],
       "palabras": [
@@ -1301,14 +1431,18 @@
         "Caché de las previas del Arte (App.jsx): vaciarlo SIEMPRE con `_pvLimpiar()` (sube `_pvGen`), y todo dibujo guarda con `_pvGuardar(k, piezas, gen)` anotando la generación AL ARRANCAR; la pasada de todos los talles es de una generación. Si no, lo que estaba en camino guarda lo viejo con la clave de ahora (MAPA 674).",
         "El hilo del motor atiende varios pedidos A LA VEZ: nunca rearmar un contexto (`contexto_a`) que otro dibujo puede estar usando. El visor tiene un contexto POR CONFIGURACIÓN (clave con `huella(cfg)`, los últimos 4, `previasEnUso`) y suelta los viejos con `contexto_a_soltar` (MAPA 675).",
         "`_orden_var(reg, pid)`: el orden de talles sale de la plantilla DE ESE molde (`pid` o la ruta `pl`), nunca de la del molde activo de la sesión (MAPA 694).",
-        "SEPARADO O CLÁSICO LO DICE LA VALIDACIÓN DEL ARTE (`modo_arte` del plan → `clasico`; `contextoCaminoA({clasico})`, worker `contexto_a`, `previa.js` con `d.validacion.modo`), NUNCA «el mapeo está vacío»: un arte separado sin asignar salía como clásico (pegado sin escalar y corrido). Una pieza sin asignar sale en blanco. UNA pieza + UNA mesa sin rótulo se asignan solas (`mapeo_por_nombre` ↔ `mapeoPorNombre`). Una variable con mapeo vacío no tapa al automático si no hay nada asignado (MAPA 700)."
+        "SEPARADO O CLÁSICO LO DICE LA VALIDACIÓN DEL ARTE (`modo_arte` del plan → `clasico`; `contextoCaminoA({clasico})`, worker `contexto_a`, `previa.js` con `d.validacion.modo`), NUNCA «el mapeo está vacío»: un arte separado sin asignar salía como clásico (pegado sin escalar y corrido). Una pieza sin asignar sale en blanco. UNA pieza + UNA mesa sin rótulo se asignan solas (`mapeo_por_nombre` ↔ `mapeoPorNombre`). Una variable con mapeo vacío no tapa al automático si no hay nada asignado (MAPA 700).",
+        "La firma del contexto del arte (`asegurarContextoA`, previa.js) y la clave `_pvKeyCon` (App) incluyen `referencia_medida` del molde: cambiar alto/ancho manda rearma la vista previa sin F5.",
+        "La detección de un talle (`/api/plantilla/deteccion?talle_ref=`) se pide SIEMPRE por `_detDeTalle(pid, t)`: guarda el pedido en curso hasta que el resultado está en `_talleDetCache` (las dos pasadas del Arte la pedían a la vez: 2 por talle) y usa el `pid` del ítem, no `qPid` (MAPA 819)."
       ],
       "cicatrices": [
         "2026-10-07: un costadillo de relleno liso (rosa) salía «mesas vacías: [7, 8]» y el pedido externo se frenaba con `arte-mesa-vacia`; el negro «pasaba» sólo porque el borde de la miniatura de 0,04 se mezcla con el blanco del fondo y suma contraste. Arreglado: las mesas nombradas en la guía no se miden por color.",
         "2026-10-07: `verificar_navegador_camino_a.py` comparaba los archivos de detección del paquete contra el talle CRUDO; el paquete los nombra limpios como la caché del servidor («1,00x1,00» → «1_00x1_00», mismo archivo). Rojo recién con los moldes a medida (primer talle con coma). También saltea un molde efímero que se borra mientras corre.",
         "MAPA 674: «cargo el arte y no se cambia»: un dibujo del arte anterior se guardaba después de vaciar el caché, la segunda carga se colgaba de la pasada de la primera y el visor caía al servidor (409) cuando el hilo se rearmaba.",
         "MAPA 675: un solo contexto `…|previa` por diseño, rearmado por el visor / la pasada de talles / la precarga con configuraciones distintas, cerraba documentos en uso → el visor caía al servidor → 409 → «El visor del arte no puede dibujar: … recargá la página».",
-        "2026-10-13: banderín con arte sin guía → «faltan asignar» → el motor lo armó como arte CLÁSICO: el diseño corrido 3,8 cm y sin escalar en visor y tizada; el usuario lo vio como «se mueve el diseño al rotar» (MAPA 700)."
+        "2026-10-13: banderín con arte sin guía → «faltan asignar» → el motor lo armó como arte CLÁSICO: el diseño corrido 3,8 cm y sin escalar en visor y tizada; el usuario lo vio como «se mueve el diseño al rotar» (MAPA 700).",
+        "MAPA 804: con «Ancho manda» la vista previa del Arte seguía con el contexto/caché armado en «alto» hasta un F5.",
+        "MAPA 819: con golero.ai en «prueba pipo» salían 64 detecciones para 32 talles (la segunda pasada pedía entre la respuesta de la primera y su guardado)."
       ],
       "contratos": [
         "verificar_navegador_camino_a.py",
@@ -1323,7 +1457,9 @@
         674,
         675,
         694,
-        700
+        700,
+        804,
+        819
       ],
       "memoria": "camino-a-navegador.md",
       "conexiones": [
@@ -1438,6 +1574,10 @@
         [
           "motor_pedido.py",
           "TizadaMolde"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const armandoNavRef = useRef(false)"
         ]
       ],
       "palabras": [
@@ -1453,13 +1593,24 @@
         "Sin plan B en el servidor: si el navegador no puede, se avisa; no se genera en serie en el proceso web.",
         "El preview no puede matar la tizada (best-effort).",
         "Las VALIDACIONES de la hoja se hacen sobre la hoja FINAL (aplanada para el RIP y con perfil) en los dos motores: navegador `validarHoja` al final de `hoja`; servidor `MP.validar_hojas_finales` en `generar_multi` (el motor con `validar=False`). Validar antes del aplanado cuenta grupos que ya no existen (MAPA 624).",
-        "Aplanado y validación de la hoja: cada Form del molde se aplana UNA vez por archivo (`_listos` ↔ `listos`) y toda mesa del molde lleva `/TizadaMolde` (la validación no la recorre); `/TizadaBase` sigue siendo sólo la que no anida (MAPA 667)."
+        "Aplanado y validación de la hoja: cada Form del molde se aplana UNA vez por archivo (`_listos` ↔ `listos`) y toda mesa del molde lleva `/TizadaMolde` (la validación no la recorre); `/TizadaBase` sigue siendo sólo la que no anida (MAPA 667).",
+        "`generarPedidoEnNavegador({cancelado})`: corta en cada aviso de avance y antes de guardar el paquete; cancelada NUNCA pasa al servidor (MAPA 756).",
+        "Los contratos comparan las HOJAS de la tizada con tolerancia 0; sólo la FICHA tolera ±1/255 (`VT._distintos(..., tol=1)`): en un patrón vectorial muy denso una milésima de coordenada entre los dos motores redondea distinto (MAPA 772).",
+        "Una tizada que se armaba EN LA PC (sin `jobId`) y se recargó la página: al abrir pasa a «Se cortó al recargar…»; «Cancelar» la da por cancelada si esta pestaña no la está armando (`armandoNavRef`) (MAPA 785).",
+        "La ficha técnica corta un texto que no entra CON «...» (tres puntos: helv no tiene «…»); gemelos `_texto` (ficha_tecnica.py) ↔ `texto` (motor/ficha/ficha.js) — `verificar_navegador_ficha.py` (MAPA 791).",
+        "`verificar_sello.py` compara contra la hoja «de siempre» (`show_pdf_page`), que a veces sale con `/Matrix .99999` (float32 de MuPDF en hojas altas): la tolerancia suma 1e-5 del tamaño de la figura (`TOL_REL`) y el trazo se compara en relativo. Un desvío mayor sí es un corrimiento real del sello (MAPA 819)."
       ],
       "cicatrices": [
         "MAPA 169: una cola general dejó «Armando la tizada» clavada.",
         "Tiempos de referencia 4 moldes con diseño: 28-87 s (18-22/09).",
         "2026-10-06 (MAPA 624): `verificar_navegador_tizada_a.py` estaba rojo: sin `TIZADA_SOLO_NAVEGADOR=0` (FaltaCalculo) y con las validaciones del servidor hechas antes del aplanado (16 streams contra 14).",
-        "2026-10-09 (MAPA 667): moldes «PR» de 100 MB: la mesa con 17 grupos de transparencia no se marcaba y el aplanado la rehacía en cada página (65 s) y la validación la tokenizaba (41 s)."
+        "2026-10-09 (MAPA 667): moldes «PR» de 100 MB: la mesa con 17 grupos de transparencia no se marcaba y el aplanado la rehacía en cada página (65 s) y la validación la tokenizaba (41 s).",
+        "MAPA 785: recargar a mitad del armado en la PC la dejaba «Procesando» para siempre y «Cancelar» no hacía nada.",
+        "MAPA 786: el armado usa `estado: 'en cola'` (con espacio) y la conversión al recargar buscaba `en_cola`; ahora cualquier estado no terminal sin `jobId` se da por cortado.",
+        "MAPA 787: `cancelarNavRef = false` se ponía DESPUÉS de esperar telas/datos del arte y borraba un «Cancelar» tocado en esa espera → se limpia al empezar y se mira al terminar la espera.",
+        "MAPA 788: una tizada «lista» restaurada que el servidor ya no tenía (404) se mostraba lista; ahora se avisa al abrir.",
+        "MAPA 791: la ficha cortaba los nombres largos sin marca («FERNANDEZ VILLAN» parecía el nombre completo).",
+        "MAPA 808→819: `verificar_sello` rojo por 0,0101 pt en un cuello de 154 pt: era la REFERENCIA achicada ×0,99999, el sello estaba exacto (≤ 0,0005 pt)."
       ],
       "contratos": [
         "verificar_navegador_tizada.py",
@@ -1473,7 +1624,9 @@
         491,
         518,
         624,
-        667
+        667,
+        772,
+        819
       ],
       "memoria": "pesado-en-el-navegador.md",
       "conexiones": [
@@ -1508,6 +1661,14 @@
         [
           "frontend/src/motor/vista/vista.js",
           "export function soltarVista"
+        ],
+        [
+          "frontend/src/motor/vista/vista.js",
+          "const abriendose = new Map()"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const ZMIN_MESAS = 0.01"
         ]
       ],
       "palabras": [
@@ -1523,14 +1684,20 @@
         "UNA FOTO POR MESA a una sola calidad (`calidadFoto`, `FOTO_PXCM`; decisión del usuario 2026-09-18): no hay recortes de zoom ni en la pantalla ni pre-dibujados en el servidor (`_predibujar_recortes_fondo` sacado en la 624). La descarga de una mesa es `mesaSuelta` → `paginaComoPdf` (la página, sin rasterizar).",
         "🔴 La vista de la mesa NUNCA cae al servidor con «no calcula» prendido (contesta 409): se reintenta en la PC (abrir ×4, dibujo ×3) y si no sale, «Reintentar» (MAPA 733).",
         "Cada visor (`useVistaLocal`) suelta SÓLO las vistas que abrió (`propias` + `soltarVista`); `cerrarVistas()` (todas) es sólo para «Nuevo pedido» y para armar una tizada nueva (MAPA 741).",
-        "La foto de una mesa nunca se rinde de una: el dibujo se reintenta y baja a 1/2 y 1/4 de calidad; si el `<img>` da error se vuelve a dibujar solo hasta 4 veces y recién ahí aparece «Reintentar» (MAPA 741)."
+        "La foto de una mesa nunca se rinde de una: el dibujo se reintenta y baja a 1/2 y 1/4 de calidad; si el `<img>` da error se vuelve a dibujar solo hasta 4 veces y recién ahí aparece «Reintentar» (MAPA 741).",
+        "🔴 Una hoja se abre UNA vez aunque la pidan dos a la vez (precalentado + visor): `abrirVista` comparte la promesa por huella (`abriendose`); `soltarVista`/`cerrarVistas` cancelan también las que se están abriendo, y si abrir falla se cierran los hilos ya creados (MAPA 754).",
+        "`precalentarTodo(v, {contar: false})` para lo que no es una mesa (la ficha técnica): se dibuja de fondo pero no entra en «N de M mesas listas» (MAPA 782).",
+        "El nombre de cada mesa (`MesasInfinito`) se agranda al alejar (`fsNombre = min(12/zoom, max(12, ancho/10))`): con «Ver todo» medía 3,6 px (MAPA 821). El nombre entero va en el `title`."
       ],
       "cicatrices": [
         "MAPA 433: «las mesas tardan o no se ven» era el pool del desplegado abandonado, no la PC.",
         "MAPA 468: recortes en serie de 4-17 s.",
         "2026-10-06 (MAPA 624): el servidor seguía pre-dibujando 128 recortes por mesa que la pantalla dejó de pedir el 09-18, y dos contratos (`verificar_mesa_por_talle.py`, `verificar_visor_display_list.py`) seguían exigiendo los recortes: estuvieron rojos semanas.",
         "2026-10-16 (MAPA 733): un fallo pasajero al abrir la hoja dejaba la mesa para siempre en «No se pudo traer la vista previa» (el servidor contestaba 409).",
-        "2026-10-21 (MAPA 741): «No se pudo dibujar la vista» con hojas que se dibujan bien: el visor de la ficha, al irse, cerraba TODAS las vistas (`cerrarVistas`) y las fotos de las mesas quedaban revocadas."
+        "2026-10-21 (MAPA 741): «No se pudo dibujar la vista» con hojas que se dibujan bien: el visor de la ficha, al irse, cerraba TODAS las vistas (`cerrarVistas`) y las fotos de las mesas quedaban revocadas.",
+        "MAPA 754: 12 tizadas seguidas en la misma pestaña dejaron 276 hilos «Dibujo de la tizada» (8,6 GB) → WebAssembly «Out of memory» → «No se pudo dibujar la vista». Carrera precalentado/visor + hilos no cerrados al fallar.",
+        "MAPA 782: «Ver todo» volvía a zoom 1 (escala real) y una mesa larga quedaba afuera → encuadra con `contRef`.",
+        "MAPA 783: la ficha se precalentaba AL GENERAR por `precalentarVista` (sin `contar: false`) → «0 de 2 mesas» con una; el piso del zoom 0,15 no dejaba ver entera una mesa de más de ~9 m → `ZMIN_MESAS = 0.01`."
       ],
       "contratos": [
         "verificar_navegador_vista.py",
@@ -1545,7 +1712,9 @@
         503,
         624,
         733,
-        741
+        741,
+        754,
+        821
       ],
       "memoria": "pool-desplegado-no-se-abandona.md",
       "conexiones": [
@@ -1630,7 +1799,8 @@
         "LA ETIQUETA NUNCA ENCIMA DEL BORDE (MAPA 702): con el borde por DENTRO (B) o CENTRADO (B/2) la baseline se corre ese ancho + 0,25·tamaño hacia adentro (`_adentro_del_borde` ↔ `adentroDelBorde`, en `_eops_borde`/`_eops_tramo`/`_eops_zonas` y sus gemelos, y `_offIn` del visor). Borde por fuera o apagado: 0 (lo de siempre)."
       ],
       "cicatrices": [
-        "2026-10-13: el banderín triangular (borde por dentro) salía con la etiqueta encima del borde de corte, tapándolo: la baseline se apoyaba en el contorno pensando sólo en el borde por fuera (MAPA 702)."
+        "2026-10-13: el banderín triangular (borde por dentro) salía con la etiqueta encima del borde de corte, tapándolo: la baseline se apoyaba en el contorno pensando sólo en el borde por fuera (MAPA 702).",
+        "MAPA 807: `verificar_etiqueta_nombre.py` elegía un molde sin arte en la carpeta (el arte vive en la PC, 760) y su espía de `_eops_borde` no aceptaba `adentro=` → «ninguna etiqueta»; ahora prefiere un molde con arte y el espía pasa *a/**kw."
       ],
       "contratos": [
         "verificar_etiqueta_posicion.py",
@@ -1639,7 +1809,8 @@
         "verificar_etiqueta_del_archivo.py"
       ],
       "mapa": [
-        702
+        702,
+        807
       ],
       "memoria": "etiqueta-baseline-no-romper.md",
       "conexiones": [
@@ -1684,6 +1855,22 @@
         [
           "integracion_externa.py",
           "_columna_talle_que_lee"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const prodPlanillaPedido ="
+        ],
+        [
+          "frontend/src/App.jsx",
+          "pidPlanillaPedidoRef"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const salirDePlanilla"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _planillaConDatos"
         ]
       ],
       "palabras": [
@@ -1699,11 +1886,30 @@
         "PLANILLA SIN TALLES (MAPA 622): una planilla puede no tener columna de talle (Config › Planillas › «Con talles / Sin talles»). El molde que no lee talle (sin columna, o con la suya apagada: `mapeo_columnas.talle == ''`) pone a cada fila SU único talle; con varios talles NO se adivina: el plan frena 409 «falta la columna de talle», guardar/asignar la planilla 409, y la API da la alarma `talle-sin-columna`. Gemelos: `_sin_col_talle` (servidor) ↔ `moldeSinTalle`/`_talleDeFilaMolde` (App) ↔ `_columna_talle_que_lee` (API).",
         "La ficha llama a la tabla «PLANILLA DEL PEDIDO» cuando las columnas traen `role` y ninguna es talle; gemelos `_titulo_tabla` (py) ↔ `tituloTabla` (js). Las columnas de la ficha viajan CON `role` (pantalla y API).",
         "Un pedido sólo con moldes A MEDIDA es «sin talles» (`planillaSinTalles`) y la columna Talle no se muestra (`columnasActivasPlanilla` no la cuenta para un molde a medida) (MAPA 623).",
-        "CANTIDAD por planilla: `mostrar` = 'no' | 'boton' | 'siempre' (selector `col-cantidad-modo`). Con 'no' la fila es UNA prenda (`_traducir_prendas`), el pedido no la muestra, no hay Copia y la API no la publica (MAPA 624)."
+        "CANTIDAD por planilla: `mostrar` = 'no' | 'boton' | 'siempre' (selector `col-cantidad-modo`). Con 'no' la fila es UNA prenda (`_traducir_prendas`), el pedido no la muestra, no hay Copia y la API no la publica (MAPA 624).",
+        "`filaVacia`: si la planilla NO tiene ninguna columna para escribir (sólo DISEÑO / botones), cada fila es una prenda; si tiene, el DISEÑO solo no la llena (MAPA 775 + 794). `totalPrendas` no suma las filas vacías.",
+        "Importar un CSV que trae Cantidad (> 1) con la Cantidad apagada la PRENDE y lo avisa (`_prenderCantidadSiViene`, MAPA 796).",
+        "🔴 La planilla del PEDIDO sale de los moldes del pedido (`prodPlanillaPedido`), nunca del molde «activo» del servidor (uno solo para todos, lo cambia Configuración); las filas se reinician sólo si cambia el template de la planilla del pedido (MAPA 798).",
+        "La planilla del pedido sale de los moldes DEL PEDIDO; mientras se cambia de molde (un instante sin ninguno) sigue la del último molde del pedido (`pidPlanillaPedidoRef`), nunca la del activo del servidor. «Nuevo pedido» la suelta.",
+        "Una columna que toma una regla de planilla se llama como la regla salvo que ya tenga un nombre puesto («Columna N» no cuenta). Si el servidor rechaza la planilla del molde, la pantalla vuelve a la guardada.",
+        "Al salir de editar una celda (Enter/Tab/Escape) el foco se pone DESPUÉS del redibujo (`_focusTras`): la celda editada todavía es el cuadro de texto que se va.",
+        "Salir del editor de una planilla con cambios sin guardar («Volver» o el menú Pedidos) pregunta antes (`planillaSucia` / `salirDePlanilla`).",
+        "El contador «N prendas» de la planilla está siempre a la vista (aparecer/desaparecer corría la tabla).",
+        "Salir de editar una celda redibuja en el acto (`flushSync`) y pone el foco (`_salirEdicion`); Escape vuelve el valor de antes (`plEdit.val`).",
+        "La planilla NO se guarda entre recargas (MAPA 55, pedido del usuario); con alguna celda escrita el navegador pregunta antes de irse (`beforeunload`, MAPA 819). No volver a guardarla sin preguntarle al usuario."
       ],
       "cicatrices": [
         "«Faltan datos en la planilla» salía de 640 porque se le pasaba `ancho={520}` a `Modal`, que sólo lee `maxWidth` (MAPA 596). A `Modal` el ancho va SIEMPRE por `maxWidth`.",
-        "2026-10-06 (MAPA 622): sin columna de talle la fila salía con talle vacío y el motor salteaba TODAS sus piezas en silencio (`registro[pieza]['']`); y con la columna Talle apagada en el molde la obligatoria por defecto era la columna «» y se descartaban todas las filas."
+        "2026-10-06 (MAPA 622): sin columna de talle la fila salía con talle vacío y el motor salteaba TODAS sus piezas en silencio (`registro[pieza]['']`); y con la columna Talle apagada en el molde la obligatoria por defecto era la columna «» y se descartaban todas las filas.",
+        "MAPA 794: una bandera sin personalización no se podía enviar nunca («Ninguna fila está completa: falta .»): la 775 dejaba todas las filas vacías.",
+        "MAPA 795: la Cantidad contaba como «columna para escribir»: una bandera con DISEÑO + Cantidad volvía a trabarse.",
+        "MAPA 796: un CSV con Cantidad 30 importado con la Cantidad apagada fabricaba 1 prenda por fila sin avisar.",
+        "MAPA 798: abrir un molde en Configuración › Moldería le cambiaba la planilla al pedido en curso y le borraba las filas.",
+        "MAPA 799: con la Bandera activa en Configuración, sacar y volver a poner el molde del pedido borraba las filas cargadas (la clave de la planilla pasaba un instante por la del activo).",
+        "MAPA 804: la columna con la regla «Sponsor» seguía «Columna 8» en el pedido y la ficha; la planilla rechazada quedaba marcada como elegida.",
+        "MAPA 805: Enter en la última fila dejaba el foco en el fondo de la página y lo que se escribía después se perdía.",
+        "MAPA 806: salir del editor de planillas sin «Guardar» perdía el cambio sin avisar; el chip de prendas aparecía y desaparecía y corría la tabla.",
+        "MAPA 807: con rAF el foco llegaba tarde y se perdían letras tecleadas enseguida; Escape dejaba lo escrito."
       ],
       "contratos": [
         "verificar_columnas_obligatorias.py",
@@ -1713,7 +1919,13 @@
       ],
       "mapa": [
         622,
-        624
+        624,
+        799,
+        804,
+        805,
+        806,
+        807,
+        819
       ],
       "memoria": "planilla-estilo-sheets.md",
       "conexiones": [
@@ -1808,10 +2020,14 @@
         "El paquete NUNCA lleva datos/ ni entrada/.",
         "No tocar el archivo VERSION: el número lo pone el usuario.",
         "Lo programado ya viajó: cambios locales posteriores no lo modifican.",
-        "El servidor corre en prioridad NORMAL: `__main__` la pide (`SetPriorityClass`, tipos de 64 bits declarados) y la tarea del publicado lleva `<Priority>5</Priority>`; el Programador de tareas la deja por debajo de lo normal y con la CPU ocupada el servidor se arrastraba (MAPA 685)."
+        "El servidor corre en prioridad NORMAL: `__main__` la pide (`SetPriorityClass`, tipos de 64 bits declarados) y la tarea del publicado lleva `<Priority>5</Priority>`; el Programador de tareas la deja por debajo de lo normal y con la CPU ocupada el servidor se arrastraba (MAPA 685).",
+        "`/api/actualizacion/log` acepta el token O una sesión iniciada (la pantalla Registro del sistema no tiene el token); sin usuarios sólo en el taller (MAPA 754).",
+        "Ningún sandbox/contrato puede llegar al publicado: `config_publicacion` usa la carpeta REAL del repo; reemplazarla al aislar (MAPA 786)."
       ],
       "cicatrices": [
-        "MAPA 685: `/api/salud` tardaba 26 s con un `cargo build` ajeno: el servidor estaba en BelowNormal (heredado del Programador de tareas)."
+        "MAPA 685: `/api/salud` tardaba 26 s con un `cargo build` ajeno: el servidor estaba en BelowNormal (heredado del Programador de tareas).",
+        "MAPA 754: desde la auditoría 2026-09-14 el log del ayudante pedía SÓLO el token y la pantalla daba 403 siempre: nunca se vio.",
+        "MAPA 786: el sandbox del inspector leía `datos/publicacion.json` REAL (`empaquetar.config_publicacion` no mira TIZADA_DATOS) y podía publicar a internet; ahora el sandbox lo reemplaza y rechaza las escrituras de /api/publicacion/."
       ],
       "contratos": [
         "verificar_publicacion_y_procesos.py",
@@ -1820,7 +2036,8 @@
       ],
       "mapa": [
         546,
-        685
+        685,
+        754
       ],
       "memoria": "respaldos-publicado.md",
       "conexiones": []
@@ -1926,7 +2143,8 @@
       "que": "Los carteles de «cargando» bloquean; los avisos no empujan la grilla; el contador de «usado antes de declarar» no sube; nada de alert/confirm. (La ayuda paso a paso y su diccionario se quitaron en MAPA 689.)",
       "archivos": [
         "frontend/verificar_tdz.mjs",
-        "frontend/verificar_estilo_ui.mjs"
+        "frontend/verificar_estilo_ui.mjs",
+        "frontend/src/erroresNavegador.js"
       ],
       "anclas": [
         [
@@ -1936,6 +2154,78 @@
         [
           "frontend/src/App.jsx",
           "pintarYa"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const generoTerm = (palabra)"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const cuantos = (n, palabra"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function pluralTerm(palabra)"
+        ],
+        [
+          "servidor.py",
+          "def _cuantos(n, palabra, plural=None)"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const termDe = (mid) =>"
+        ],
+        [
+          "servidor.py",
+          "def _termino_de(pid)"
+        ],
+        [
+          "servidor.py",
+          "def _genero_es(palabra)"
+        ],
+        [
+          "servidor.py",
+          "def _plural_es(palabra)"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const dec = (x, d = 1) =>"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const enCastellano = (txt) =>"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _ERR_TECNICO = ["
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const decT = (x, d = 2) =>"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const explicarError = (txt0) =>"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _ERR_SISTEMA = "
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _recordarPila = (e) =>"
+        ],
+        [
+          "frontend/src/erroresNavegador.js",
+          "export const ERRORES_NAVEGADOR = ["
+        ],
+        [
+          "frontend/src/erroresNavegador.js",
+          "export const PALABRAS_INGLES = ["
+        ],
+        [
+          "frontend/src/App.jsx",
+          "import { ERRORES_NAVEGADOR, PALABRAS_INGLES } from './erroresNavegador.js'"
         ]
       ],
       "palabras": [
@@ -1950,21 +2240,80 @@
         "Botones: texto corto + «?» con la explicación.",
         "Editores en modal aparte, nunca inline en la lista.",
         "Un botón que el sistema apaga mientras hace algo DICE qué está haciendo (giro + estado corto, p. ej. «Armando la medida…»); nunca apagado y mudo (MAPA 678).",
-        "Un aviso pasajero (cargando, escaneando) no puede empujar ni tapar la grilla: va en un renglón que YA existe (p. ej. al lado del título), chico, y el porqué en el `title` (MAPA 683)."
+        "Un aviso pasajero (cargando, escaneando) no puede empujar ni tapar la grilla: va en un renglón que YA existe (p. ej. al lado del título), chico, y el porqué en el `title` (MAPA 683).",
+        "Un nombre que no entra NO se corta a «…» si hay lugar para un segundo renglón (subtítulos y nombres de mesa del paso Arte: renglón aparte o `WebkitLineClamp: 2`); medir a 1366 px (MAPA 767).",
+        "Las barras con título + botones PARTEN EN RENGLONES (`flexWrap`), nunca `overflow: hidden` + botones `flexShrink: 0`: probar a 1024 px y a 1366 con el menú lateral abierto (MAPA 768).",
+        "Una lista «Faltan N» muestra las N (con desplazamiento), no las primeras y « …»; un nombre de tipografía se muestra ENTERO (`completo`), no el interno de 31 letras.",
+        "El build avisa «Duplicate key» en un estilo: es una falla (gana la última clave). Un `ref` de un `<input type=file>` sólo vale donde ese input está montado: cada pantalla con su selector (MAPA 772).",
+        "El término de la variante lo elige el usuario (Talle, Variante…): frases sin artículo con género («cada talle», «Faltan nombres: talles») (MAPA 775).",
+        "Un contenedor que se desplaza dentro del visor lleva `data-desplaza`: la rueda del visor no le hace zoom ni `preventDefault`.",
+        "El término de la variante lo elige el usuario (Talle, Talla, Variante…): toda frase con artículo usa `generoTerm(term.variante)` (`.la .un .los .todos .o .del .este`), nunca «el/la» fijo (MAPA 776).",
+        "Plurales: nunca «fila(s)» ni «{término}s»: `cuantos(n, 'palabra')` («1 fila» / «3 filas») y `generoTerm(term.variante).pl` («tallas», «opciones», «colores»); adjetivos con `.os`/`.o` (MAPA 777).",
+        "Avisos del SERVIDOR que lee la persona: `_cuantos(n, palabra)` (servidor.py, gemelo de `cuantos`), nunca «(s)»; cambiar su redacción va en `integracion_externa/CAMBIOS.md` (MAPA 778).",
+        "En el PEDIDO cada molde tiene SU término: `termDe(mid)` (no `term`, que es el del molde activo de Configuración). Frases sobre la columna de la planilla (Talles por mesa, Copia, lote) dicen «talle»: un pedido mezcla moldes (MAPA 779).",
+        "`_genero_es`/`_plural_es` (servidor.py) son GEMELOS de `generoTerm`/`pluralTerm` (App.jsx): mismas listas; si se toca uno se toca el otro (lo vigila verificar_genero_termino.py, MAPA 780).",
+        "Todo aviso de error pasa por `enCastellano` (dentro de `showError`): los errores del navegador vienen en inglés. Un error nuevo del navegador que aparezca → sumarlo a `_ERRORES_EN` (MAPA 782).",
+        "Lo que queda en inglés sin frase propia es el comodín `_ERR_SISTEMA` («falla interna del programa (no es por algo que hiciste)»). Los AVISOS usan `explicarError` (no `enCastellano`): le suma «Código F-XXXX» y manda original + página + pila a `POST /api/registro/navegador` (`datos.codigo`); nunca más «el detalle quedó en la consola» (la PC del error puede no estar a mano). `enCastellano` queda pura: la pantalla del Registro la usa para mostrar lo guardado (MAPA 817).",
+        "Decimales con COMA en pantalla: `dec(x, d)` (App.jsx); nunca `toFixed` crudo en un texto visible (MAPA 786).",
+        "`enCastellano` NO traduce palabra por palabra: desde el primer tramo en inglés (`_EN_PISTA` sin `_ES_PISTA`) todo se cambia por UNA frase de `_ERR_CLASES` (o «error del sistema»); un error nuevo se suma a `_ERR_CLASES` (MAPA 788).",
+        "`enCastellano` v3: lo técnico (`_ERR_TECNICO`) se reconoce esté donde esté; el resto se decide tramo por tramo por PALABRAS (`_EN_PAL`/`_ES_PAL`). Un error nuevo de afuera → `_ERR_TECNICO`/`_ERR_CLASES` + un caso en `verificar_en_castellano.mjs` (MAPA 789).",
+        "En `enCastellano` los nombres entre «» se protegen (no se miran sus palabras); lo técnico descarta su tramo entero; quedan sólo los tramos en castellano anteriores (MAPA 790).",
+        "`verificar_en_castellano.mjs` saca del código TODOS nuestros textos de error (showError/new Error/showWarn, \"error\": …/raise) y exige que `enCastellano` no los toque; en `_ERR_TECNICO` el orden manda la frase (lo más específico primero) (MAPA 791).",
+        "Lo que se ve dice «clic» (no «click»); un borrado total (Vaciar el registro) pide un segundo toque en el mismo lugar (MAPA 792).",
+        "En `_ERR_TECNICO` la clase genérica (`XxxError`) va ÚLTIMA con frase `null` (= clasificar el resto con `_ERR_CLASES`); los paréntesis técnicos se sacan o se traducen por dentro (MAPA 793).",
+        "🔴 Algo que se calcula AL DIBUJAR en App.jsx no puede llamar (ni a través de otra función) a una `const` declarada más abajo: `verificar_tdz.mjs` no lo ve. Después de tocar algo así, abrir el build en el sandbox y mirar la consola (MAPA 795).",
+        "La hora se muestra con `_HORA_FMT` (24 h, cero adelante) en toda la app; la explicación de un botón va en `<Ayuda>` («?»), nunca en un `title` del navegador.",
+        "Fechas día/mes/año: `toLocaleDateString('es-UY', …)` fijo y `_fechaEs` para las «AAAA-MM-DD …» que manda el servidor.",
+        "Lo que dice «talle» en avisos y ficha sale del término del molde (`generoTerm(term.variante)` / `_termino_de(pid)`); la ficha recibe `planilla.termino_pl` y titula «TABLA DE <TÉRMINO>» (gemelos `tituloTabla` ↔ `_titulo_tabla`).",
+        "Los avisos flotantes (`showError`/`showMsg`) van con zIndex 10100, por encima de toda ventana (`Modal` 10000, selector 10010).",
+        "Los errores DEL NAVEGADOR se explican con `ERRORES_NAVEGADOR` (`frontend/src/erroresNavegador.js`): [patrón, frase, ¿falla?] por familia; el orden manda (lo específico primero). Van en `_ERR_TECNICO` DESPUÉS de lo propio del servidor/Python/PDF y antes de la clase genérica. Un error nuevo del navegador → una fila o un patrón ahí + un caso en `CAMBIAN` del contrato. `PALABRAS_INGLES` (mismo archivo) se suma a `_EN_PAL`: nunca meter palabras que también son castellano (MAPA 818).",
+        "`verificar_en_castellano.mjs` pasa las 2.279 muestras oficiales (`frontend/errores_navegador_muestras.json`) por `enCastellano`: ninguna puede quedar igual ni con inglés. La falla de programación sale «falla interna…: qué le pasó» y `explicarError` SUMA el código al final (MAPA 818).",
+        "Los contratos que corren un tramo suelto de App.jsx con node (`verificar_genero_termino.py`) importan lo que ese tramo usa de otros archivos (`PALABRAS_INGLES`, `ERRORES_NAVEGADOR` de erroresNavegador.js, MAPA 818/819)."
       ],
       "cicatrices": [
-        "(histórica, del diccionario ya quitado) anclas pasadas como argumento de función quedaban como «texto muerto»: un `data-tour` se escribe literal."
+        "(histórica, del diccionario ya quitado) anclas pasadas como argumento de función quedaban como «texto muerto»: un `data-tour` se escribe literal.",
+        "MAPA 767 (inspector): a 1366 px el «molde · diseño» de la barra del Arte quedaba en 14 px («…») y los nombres de mesa de «Diseños» cortados.",
+        "MAPA 768 (inspector): a 1024 px el título de la barra del Arte quedaba en 0 px y los botones se salían de la tarjeta.",
+        "MAPA 777: «El molde ya está partido con estes talles» (este+'s'); «3 talles nombradas/definidas/listas» con el término por defecto; «opcións», «colors» → `.estos`, `.os`, `.pl`.",
+        "MAPA 778: «Crear plantilla» y las ayudas de Moldería armaban «${nomT}s» y «los/del» a mano («los tallas», «del talla guía»); «el edad», «los combinaciones» → reglas del castellano en `generoTerm`.",
+        "MAPA 779: la tarjeta bloqueada del pedido tomaba el término del molde activo de Configuración («toma la talla» en una bandera con «Talle»); quedaban «talle» fijos en Cambiar pieza, emparejar y los 422 del servidor.",
+        "MAPA 780: el gemelo corto del servidor daba «imagenes», «3 mes», «la avión» mientras la pantalla decía bien.",
+        "MAPA 781: «Ningún de los talles elegidos» — «ningún» va delante del sustantivo; delante de «de los …» va `ninguno` (pronombre). El contrato del término ahora revisa TODOS los .py (había «usuario/s» en api_usuarios.py y «(s)» en la consola).",
+        "MAPA 782: «No se pudo leer usuarios: Unexpected token '<'… is not valid JSON» en pantalla (fetch().json() sin la parte de usuarios en el servidor).",
+        "MAPA 788: la traducción por pedazos dejaba frases mezcladas («The request is el navegador no dio permiso agent…»).",
+        "MAPA 789: «Error al guardar: no hay conexión» salía «error del sistema» (tomaba «Error» por inglés) y «<urlopen error …>» pasaba entero (el «No» del mensaje de Windows contaba como castellano).",
+        "MAPA 790: «'utf-8' codec can't decode…» y el `message` de IndexedDB sin el nombre dejaban frases mezcladas; ««The Best Shirt.ai»: …» se tomaba por error en inglés.",
+        "MAPA 792: el Registro ocultaba el error ORIGINAL cuando la conclusión se traducía; «Mesa: null» en Moldería.",
+        "MAPA 795: `totalPrendas` (al dibujar) → `filaVacia` → `_colEsBoton` (declarada 3000 líneas abajo) dejó la app en «No se pudo cargar» para todos; el contrato TDZ dio verde.",
+        "MAPA 800: el Monitor mostraba la hora del servidor y la de la PC en formatos distintos; la lista de planillas mostraba códigos internos «(numero)», «(diseno)».",
+        "MAPA 804: con «Tamaño» elegido la ficha seguía «TABLA DE TALLES» y el aviso de achique decía «talle M».",
+        "MAPA 807: un aviso dado dentro de una ventana quedaba detrás de ella y «Guardar» parecía no hacer nada.",
+        "MAPA 807: contratos viejos esperaban «6.5 cm» (ahora coma) y «este talle» literal (ahora `generoTerm`): al cambiar un texto, buscar el contrato que lo cita.",
+        "2026-11-23 (MAPA 817): el cartel «error del sistema (avisá; el detalle quedó en la consola)» no decía qué era y el detalle quedaba sólo en la consola de la PC donde pasó: el usuario no tenía acceso a esa PC y el error se perdió.",
+        "2026-11-23 (MAPA 818): «Failed to fetch dynamically imported module» (pestaña vieja tras un build) decía «no hay conexión»; «removeChild on Node» (traductor automático) y «NotReadableError» (archivo cambiado después de elegirlo) caían en «error del sistema». Y «WebAssembly: …»/«Warning: …» quedaban en inglés delante de la frase porque `_EN_PAL` no tenía esas palabras."
       ],
       "contratos": [
         "frontend/verificar_tdz.mjs",
-        "frontend/verificar_estilo_ui.mjs"
+        "frontend/verificar_estilo_ui.mjs",
+        "verificar_genero_termino.py",
+        "frontend/verificar_en_castellano.mjs"
       ],
       "mapa": [
         372,
         373,
         678,
         683,
-        689
+        689,
+        767,
+        768,
+        772,
+        775,
+        800,
+        801,
+        804,
+        807,
+        817,
+        818
       ],
       "memoria": "botones-texto-corto.md",
       "conexiones": []
@@ -2014,6 +2363,10 @@
         [
           "servidor.py",
           "os.replace"
+        ],
+        [
+          "servidor.py",
+          "def _guardar_json_atomico("
         ]
       ],
       "palabras": [
@@ -2027,7 +2380,8 @@
       "reglas": [
         "open(\"w\") trunca antes de fallar: siempre .tmp + os.replace.",
         "Nunca a git: config_externo.json, secret.txt, datos/publicacion.json, respaldos_publicado/, config_publicado.env.",
-        "Matar procesos por PID; nunca mass-kill."
+        "Matar procesos por PID; nunca mass-kill.",
+        "En servidor.py no queda ningún `json.dump(…, open(…, \"w\"))`: se usa `_guardar_json_atomico` (MAPA 774)."
       ],
       "cicatrices": [],
       "contratos": [],
@@ -2094,6 +2448,7 @@
         "Sugerir"
       ],
       "reglas": [
+        "En la ventana «Mesas» con «Misma mesa, separados» (`sep`) los textos hablan de GRUPO, no de mesa («Tocá un grupo», «Todos los talles tienen grupo»): ahí todo va en la misma mesa (MAPA 821).",
         "Paridad de motores: anidar_por_fila (py) == anidarPorFila (js) también con por_talles_mesa.",
         "Copia manda sobre los grupos (cada fila ya es su mesa); con Copia no viaja talles_mesa.",
         "El talle que se agrupa es el de la columna de ESE molde (ya resuelto en la prenda traducida).",
@@ -2317,7 +2672,7 @@
         "Nunca mandar cabeceras propias al puente (CORS), igual que Illustrator.",
         "abrirEnCorel vive DESPUÉS de showMsg (contrato TDZ, tope 301).",
         "El instalador cierra el puente viejo por PID (sólo el de su carpeta); nunca mass-kill.",
-        "El publicado LLEVA los instaladores (empaquetar.py INCLUIR_PATRONES) pero la pantalla no los ofrece: /api/corel/version y /api/illustrator/version devuelven instalador null con PUBLICADO; sólo los entrega la API del otro sistema (/api/externo/v1/conectores, MAPA 619).",
+        "Los instaladores de Illustrator y Corel viajan en TODA actualización (git, ZIP, `empaquetar.py INCLUIR_PATRONES`) y TAMBIÉN el publicado los ofrece en sus botones (`/api/illustrator|corel/version → instalador`, `/instalador`, `extension.zip`): regla del usuario «sí o sí» (MAPA 765, deja sin efecto la 572). La API del otro sistema también los da (/api/externo/v1/conectores, MAPA 619).",
         "Una sola tarjeta (PlantillaProgramas) con los dos programas lado a lado: Illustrator naranja (#FF9A00/#330000), CorelDRAW verde; los instaladores de los dos a la vista.",
         "Todas las mesas en UN espacio: vista de varias páginas + acomodo libre (Freeform=1) + SetPageOrigin en el CENTRO de cada mesa (y hacia arriba); cada mesa sigue siendo una página (el PDF no cambia). Siempre a tamaño real y en un archivo.",
         "Botones sin texto cortado: acción y programa en dos renglones, nada de «…». Los instaladores se llaman «Conectores» y tienen su «?».",
@@ -2340,7 +2695,8 @@
       "mapa": [
         598,
         629,
-        630
+        630,
+        765
       ],
       "memoria": "corel.md",
       "conexiones": [
@@ -2438,6 +2794,10 @@
         [
           "frontend/src/App.jsx",
           "const botonFuentesPc = "
+        ],
+        [
+          "motor_pedido.py",
+          "def nombre_visible("
         ]
       ],
       "palabras": [
@@ -2460,7 +2820,9 @@
         "Paridad py/js: nombres_fuente == nombresFuente y resolver_fuente == resolverFuente (ps/completo DESPUÉS del interno en cada vuelta).",
         "La migración de `subida_*` nunca pierde nada: idéntica → se saca la copia; distinta → no se toca.",
         "El nombre INTERNO de una tipografía en el navegador sale de `nombreInternoMupdf(bytes)` (= `fitz.Font(...).name`); NUNCA de `new mupdf.Font(nombre, bytes).getName()`, que devuelve el nombre que se le pasa (MAPA 669).",
-        "Las tipografías de la PC conviven con las cargadas y van AL FINAL del catálogo (una cargada siempre gana). Para nombres se suman todas (`catalogoConPc`); para estampar SÓLO las que faltan, con bytes (`fuentesConPc`). El permiso se pide al PRIMER CLIC de la página (`pedirAlPrimerClic`, una vez) y nunca sin un clic. Configuración → Fuentes lista las de la PC con «Cargar al sistema»; las colecciones .ttc se leen con `soloEsaCara` (MAPA 672). El modal de reemplazos sigue sólo con las del sistema (MAPA 670)."
+        "Las tipografías de la PC conviven con las cargadas y van AL FINAL del catálogo (una cargada siempre gana). Para nombres se suman todas (`catalogoConPc`); para estampar SÓLO las que faltan, con bytes (`fuentesConPc`). El permiso se pide al PRIMER CLIC de la página (`pedirAlPrimerClic`, una vez) y nunca sin un clic. Configuración → Fuentes lista las de la PC con «Cargar al sistema»; las colecciones .ttc se leen con `soloEsaCara` (MAPA 672). El modal de reemplazos sigue sólo con las del sistema (MAPA 670).",
+        "Para MOSTRAR una tipografía se usa `nombre` (`MP.nombre_visible`: familia+estilo / familia / completo que siga al interno; el interno de MuPDF se corta en 31 letras y el completo puede venir con «_» o cortado); para ELEGIR y comparar, siempre `interno` (MAPA 769).",
+        "Dos tipografías con distinto interno nunca con el mismo `nombre` para ver: `catalogo_fuentes` les agrega el archivo (MAPA 770)."
       ],
       "cicatrices": [
         "MAPA 599: el `interno` de MuPDF se corta en 31 letras: dos estilos de una familia de nombre largo quedaban iguales.",
@@ -2468,7 +2830,8 @@
         "MAPA 599: `max_age` de un día en el archivo de la fuente dejaba la versión vieja en el navegador al reemplazarla con el mismo nombre.",
         "2026-10-12 (MAPA 669): toda fuente subida quedaba con interno «subida» (el análisis del navegador hacía `new mupdf.Font('subida', bytes).getName()`); el contrato no lo vio porque simulaba al navegador con PyMuPDF.",
         "MAPA 672: el permiso de las fuentes de la PC quedaba detrás de un botón de la ventana «Fuentes»: el usuario no lo encontró, buscó en Configuración y el arte siguió diciendo «no encuentra la fuente».",
-        "MAPA 673: el único intento del primer clic falló con «Page needs to be visible» y no se reintentaba: el permiso quedó en 'prompt' y el arte seguía avisando «Tipografía no encontrada» con la fuente instalada. Ahora reintenta salvo que la persona cierre el cartel, y el botón va en el cartel amarillo."
+        "MAPA 673: el único intento del primer clic falló con «Page needs to be visible» y no se reintentaba: el permiso quedó en 'prompt' y el arte seguía avisando «Tipografía no encontrada» con la fuente instalada. Ahora reintenta salvo que la persona cierre el cartel, y el botón va en el cartel amarillo.",
+        "MAPA 769 (inspector): el modal «Fuentes» mostraba «Adidas WC 2026 fan inspired fon» — `fuentesEstado.js` descartaba `completo` y el completo de la tipografía tampoco servía solo."
       ],
       "contratos": [
         "verificar_fuente_ya_existe.py",
@@ -2480,7 +2843,9 @@
         670,
         671,
         672,
-        673
+        673,
+        769,
+        770
       ],
       "memoria": "fuentes-nombre-real.md",
       "conexiones": [
@@ -2753,19 +3118,39 @@
         "Gemelos py/js: motor_pedido (lookup en arte_rect) ↔ pieza/caminoA.js (armarBase); la lista del editor: get_editables ↔ arte/editablesVista.js.",
         "La caja de un sombreado (`sh`) es la del RECORTE que lo contiene (pila q/Q de TODA la mesa, no por capa): un degradado lineal/radial no tiene límite propio y MuPDF lo mide infinito (±2·10⁹). El `fill-shade` sin límite no se suma a la caja de la capa; sale de sus figuras `shading`. Trillizos: molde_real._analizar_capa ↔ molde/capas.js analizarCapa ↔ arte/editables.js objetosDeCapa; y _extraer_editables_crudo ↔ extraerEditables.",
         "Si cambia lo que devuelve `extraer_editables`, cambiar el nombre del memo (`MEMO_EDITABLES`, hoy `editables_v2`): va por archivo, no por versión del código, y lo usa también servidor.py.",
-        "Referencia del MAPA: MAPA_DEL_SISTEMA.md §10.b y changelog 603, 604."
+        "Referencia del MAPA: MAPA_DEL_SISTEMA.md §10.b y changelog 603, 604.",
+        "«Agregar objeto» busca la mesa de la pieza en el mapeo de SU VARIABLE (como el visor y el motor), si no en el base, si no en cualquier variable: gemelos `colocarObjeto` (editarDiseno.js) ↔ colocar del servidor (MAPA 793).",
+        "El objeto agregado mide sus cm reales en el talle que se MIRA (`talleRef`), no en el primero alfabético (MAPA 794).",
+        "«Editar diseño» abre en el talle que se mira en el Arte (`etqData.talle_ref`) y tras colocar/quitar se queda en el elegido (`mantenerTalleEdRef`) (MAPA 796).",
+        "El nombre de una capa nueva se compara SIN mayúsculas con las que ya hay (el sistema las lee en minúsculas): gemelos `inyectarEditable` ↔ `inyectar_editable` (MAPA 798).",
+        "El alcance de un ajuste del editor = talles con la MISMA mesa para la pieza ∩ lo elegido en «Elegí los talles» (+ el talle en vista). Sin elegir = «Todos» (la selección arranca vacía).",
+        "Los nombres de capa «Editable …» se comparan con `normNombre`/`_norm_nombre` (sin mayúsculas, sin acentos, guión = espacio) al desambiguar un objeto agregado: gemelos `inyectarEditable` ↔ `inyectar_editable`.",
+        "Los objetos AGREGADOS no se recolorean (`recolorable: false`, van como formulario `/OAn Do`): es a propósito; hacerlos recoloreables sería función nueva.",
+        "Un rango de capa editable sin variantes no se guarda: avisa y deja la ventana abierta.",
+        "La lista de objetos de «Editar diseño» dice la pieza SIN el número interno (`_genTelaP`: «en Espalda», no «en Espalda 8», que es el nombre en otra variable) y la dice en todo objeto que tenga pieza (MAPA 821)."
       ],
       "cicatrices": [
         "2026-10-01: «Editable logo» (letras con degradado lineal recortado, arte CAMISETA NEGRO 2) no salía en el visor: su caja era el rectángulo infinito de MuPDF (151 millones de cm). El escudo, con degradado de malla, sí salía. Arreglado midiendo el sombreado por su recorte (MAPA 604).",
         "2026-10-01: la misma capa en Frente y Espalda salía UNA vez en el editor (dedup por nombre) y las dos compartían el ajuste (clave = nombre). Arreglado con la clave por mesa (MAPA 603).",
-        "2026-07-22: el ColorPickerModal montado dentro de una pestaña hacía que el color del editable no abriera desde el editor: los modales globales van al final del return de App."
+        "2026-07-22: el ColorPickerModal montado dentro de una pestaña hacía que el color del editable no abriera desde el editor: los modales globales van al final del return de App.",
+        "MAPA 793: en el molde a medida «Agregar objeto» daba «esa pieza no tiene mesa de arte asignada»: sólo se miraba el mapeo base (vacío).",
+        "MAPA 794: un logo de 9 cm salía de 16 cm en M (se medía en el talle «0»).",
+        "MAPA 796: el editor abría siempre en el talle del medio de la lista (XLfem mirando M) y el objeto se medía ahí.",
+        "MAPA 797: con el editor ya cargado por el efecto del paso Arte (tras F5, sin `etqData`), «Editar diseño» no volvía a elegir el talle (`keep`); y tras agregar quedaba seleccionado otro objeto («logo» en vez de «logo 2»).",
+        "MAPA 798: «Editable Logo» + «Editable logo» = el logo dos veces en la hoja; el TAMAÑO del editor mostraba la medida del arte en vez de la del talle editado (`_medidaReal`).",
+        "MAPA 799: elegir sólo XL y escribir 9 cm cambiaba también S, M y L (`tallesDeObjeto` ignoraba lo elegido y la selección nacía con el talle en vista).",
+        "MAPA 799: «Lógo.svg» junto a «Editable logo» quedó «Lógo» sin renombrar y el editor mezclaba sus figuras (la 798 sólo comparaba sin mayúsculas)."
       ],
       "contratos": [
         "verificar_navegador_arte.py"
       ],
       "mapa": [
         603,
-        604
+        604,
+        799,
+        800,
+        804,
+        821
       ],
       "memoria": "capa-editable-es-el-objeto",
       "conexiones": [
@@ -2776,8 +3161,8 @@
     },
     {
       "id": "mupdf-prestado",
-      "nombre": "MuPDF presta sombreados e imágenes: no se liberan",
-      "que": "mupdf.js 1.26.4 entrega a los dispositivos el sombreado/la imagen sin referencia propia pero lo anota para liberar: `devolver` lo desanota para que el recolector no libere memoria ajena.",
+      "nombre": "MuPDF: el sombreado se presta (devolver), la imagen de fillImage se SUELTA",
+      "que": "mupdf.js 1.26.4 entrega a los dispositivos propios el sombreado sin referencia propia (`devolver` lo desanota para que el recolector no libere memoria ajena) y la IMAGEN de `fillImage` con su propia referencia: hay que soltarla (`soltarImagen`) o queda tomada para siempre.",
       "archivos": [
         "frontend/src/motor/pdf/prestado.js",
         "frontend/src/motor/pdf/dibujos.js",
@@ -2800,10 +3185,27 @@
         [
           "frontend/src/motor/pieza/caminoA.js",
           "fillShade: devolver"
+        ],
+        [
+          "frontend/src/motor/pdf/prestado.js",
+          "export function soltarImagen("
+        ],
+        [
+          "frontend/src/motor/pdf/dibujos.js",
+          "fillImage(image) { soltarImagen(image)"
+        ],
+        [
+          "frontend/src/motor/arte/editables.js",
+          "soltarImagen(image)"
+        ],
+        [
+          "frontend/src/motor/pieza/caminoA.js",
+          "fillImage: soltarImagen"
         ]
       ],
       "palabras": [
         "devolver",
+        "soltarImagen",
         "fillShade",
         "fillImage",
         "fillImageMask",
@@ -2811,23 +3213,28 @@
         "mupdf.Device"
       ],
       "reglas": [
-        "Todo dispositivo propio (`new mupdf.Device({...})`) que DEFINA fillShade, fillImage, fillImageMask o clipImageMask pasa su primer argumento por `devolver` (después de usarlo), aunque no lo use.",
-        "Al actualizar mupdf.js: si esos avisos pasan a hacer `_wasm_keep_…`, sacar `devolver` (dejaría una referencia sin soltar)."
+        "Todo dispositivo propio (`new mupdf.Device({...})`) que DEFINA fillShade, fillImageMask o clipImageMask pasa su primer argumento por `devolver` (después de usarlo), aunque no lo use.",
+        "🔴 `fillImage` NO: su imagen trae referencia propia → `soltarImagen(image)` (después de usarla). Con `devolver` cada recorrida deja la imagen tomada para siempre (MAPA 814).",
+        "Antes de cambiar cómo se suelta algo del motor: medir con la sonda del bloque libre (`_wasm_malloc`/`_wasm_free` por bisección) y repetir ciclos abrir→recorrer→dibujar→cerrar; el RSS de Node no sirve.",
+        "Al actualizar mupdf.js: volver a medir los cuatro avisos (cuáles traen referencia propia y cuáles no)."
       ],
       "cicatrices": [
+        "2026-11-11 (MAPA 814): con una imagen de 120 MB en el arte, `devolver` en `fillImage` perdía ≈350 MB por recorrida (mapeo + editables + mapeo por nombre = 1 GB de los 2 GB del hilo): la vista previa y la tizada se quedaban sin memoria.",
         "2026-10-01: «RuntimeError: null function or function signature mismatch» (fz_drop_colorspace / fz_drop_icc_link) al juntar basura después de armar los editables de un arte con 33 degradados ICC: el envoltorio `new Shade(puntero)` sin keep liberaba el sombreado del documento (MAPA 604)."
       ],
       "contratos": [
         "verificar_navegador_arte.py"
       ],
       "mapa": [
-        604
+        604,
+        814
       ],
       "memoria": "degradados-sin-limite",
       "conexiones": [
         "editables",
         "camino-a",
-        "generar-navegador"
+        "generar-navegador",
+        "memoria-motor"
       ]
     },
     {
@@ -3190,7 +3597,9 @@
         "🔴 TODO LO QUE EL USUARIO HACE EN EL PEDIDO SE PUEDE MANDAR POR LA API (MAPA 712): una opción nueva del Panel de Pedidos va también a `revisar_datos` + `cuerpo_de` (+ robot si toca el arte), al esquema `pedido.schema.json` (additionalProperties:false), a FORMATO_PEDIDO y con su alarma en ALARMAS. Los nombres de objetos editables los resuelve `robot_arte` con el arte.",
         "Guía de NOVEDADES para el sistema externo (MAPA 734): sale del `git diff` de `documentacion/integracion_externa/` desde la última entregada; HTML con los estilos de `como_usar_cada_opcion.html` → PDF con Chrome sin cabecera.",
         "Las guías para personas van VISUALES (MAPA 734): hojas apaisadas, un dibujo por cosa, casi sin texto; el detalle largo queda en los .md.",
-        "La plantilla para Illustrator/CorelDRAW desde el otro sistema = el MISMO cálculo que la ventana «Crear plantilla» (`motorPlantilla`); `GET /plantillas/{ref}` dice CÓMO se crea en datos (`conectores`: a dónde, versión, instalador) y la página del otro sistema la manda al conector con `codigo/crear_en_programa.js` (el plan TAL CUAL, en orden, sólo `Content-Type`). La llave nunca va al navegador."
+        "La plantilla para Illustrator/CorelDRAW desde el otro sistema = el MISMO cálculo que la ventana «Crear plantilla» (`motorPlantilla`); `GET /plantillas/{ref}` dice CÓMO se crea en datos (`conectores`: a dónde, versión, instalador) y la página del otro sistema la manda al conector con `codigo/crear_en_programa.js` (el plan TAL CUAL, en orden, sólo `Content-Type`). La llave nunca va al navegador.",
+        "Alarma `misma-columna-de-talle` (MAPA 755): se mapea en `_reglas_del_pedido` ANTES de la de «talle»+«columna» (si no, sale como `talle-inexistente`).",
+        "Anular una llave pide confirmación (modal propio): no se deshace."
       ],
       "cicatrices": [
         "2026-10-02: breusplanilla@gmail.com es cuenta PERSONAL con la carpeta en su Mi unidad: la cuenta de servicio del 606 no podía guardar ahí. Se agregó OAuth de la persona. Pendiente: la app de Google sigue en «Prueba» → el permiso vence a los 7 días hasta publicarla (pide página principal + política de privacidad públicas) (MAPA 607).",
@@ -3208,13 +3617,15 @@
         "2026-10-13 (MAPA 698): la actualización «reinicio» en Linux (KillMode=process) dejaba vivo al robot del servidor viejo; el de la 1.0.49 no arma la copia a medida y los pedidos «a medida» salían «la pieza de 103,6 × 103,6 cm» pida la medida que pida.",
         "2026-10-14 (MAPA 708): un pedido con datos sanos volvía RECHAZADO «no se pudo revisar el pedido: arte_personalizacion»: la revisión corría el plan entero y, si el molde ya tenía un diseño con arte guardado, llegaba a leer ese arte → 428 al «navegador» que no existe.",
         "2026-10-14: `moldes[].reemplazos` se leía en `cuerpo_de` pero `revisar_datos` nunca lo copiaba: se perdía sin avisar (MAPA 712).",
-        "2026-10-27 (752): `/plantillas` y `/conectores` no tenían contrato en vivo y el otro sistema no tenía código para mandar el plan al conector; ahora sección 10 de `verificar_integracion_externa.py`."
+        "2026-10-27 (752): `/plantillas` y `/conectores` no tenían contrato en vivo y el otro sistema no tenía código para mandar el plan al conector; ahora sección 10 de `verificar_integracion_externa.py`.",
+        "MAPA 799: el nombre del archivo de mesa perdió el « - xN» que promete COMO_USAR_CADA_OPCION.md; restaurado + contrato del nombre en el build."
       ],
       "contratos": [
         "verificar_integracion_externa.py",
         "verificar_permisos_rutas.py",
         "verificar_planilla_sin_talles.py",
-        "verificar_molde_a_medida.py"
+        "verificar_molde_a_medida.py",
+        "frontend/verificar_nombre_mesa.mjs"
       ],
       "mapa": [
         606,
@@ -3235,7 +3646,10 @@
         708,
         712,
         734,
-        752
+        752,
+        755,
+        799,
+        804
       ],
       "memoria": "integracion-pedido-externo",
       "conexiones": [
@@ -3956,7 +4370,8 @@
         "NADA DEL USO DEPENDE DEL SERVIDOR (regla del usuario 2026-10-13, MAPA 692): el servidor guarda y entrega lo guardado (`_a_medida_publico`, `_datos_ficha_a_medida`); la computadora del usuario decide y calcula (`amEnTela`, `fichaAMedida`, `agruparAMedidaFicha`). Los gemelos Python (`_cabe_en_tela`, `_ficha_a_medida`, `_agrupar_a_medida_ficha`) quedan SÓLO para la API del otro sistema y la ficha del servidor, y el contrato exige que den lo mismo.",
         "Los DIBUJOS de la ficha a medida (plano, terminación en corte, esquina/punta, pasos) se calculan en el navegador con `dibujosAMedida` (aMedidaDibujos.js), gemelo EXACTO de `ficha_a_medida.dibujos_a_medida` (que queda para la ficha del servidor y la API); `verificar_ficha_a_medida_navegador.py` los compara (MAPA 692).",
         "ELEGIR LA MEDIDA NO TOCA EL SERVIDOR (MAPA 695): la copia del pedido se arma recién al cargar el arte (`asegurarCopiaAMedida` dentro de `cargarDisenoWizard`) o al tocar «Crear plantilla»/«Asignar telas»; automático sólo el re-armado de una copia que ya existe. Nunca armar copias de fondo ni al entrar al paso.",
-        "Elegir la tela de un molde a medida NO arma la copia (dato del pedido); «Poner medida» se marca con una medida válida (`_amMedidaInvalida`), no con «hay copia» (MAPA 696)."
+        "Elegir la tela de un molde a medida NO arma la copia (dato del pedido); «Poner medida» se marca con una medida válida (`_amMedidaInvalida`), no con «hay copia» (MAPA 696).",
+        "Ficha técnica: la CANTIDAD vacía se escribe «1» en los dos gemelos (`_dibujar_tabla` ↔ `dibujarTabla`)."
       ],
       "cicatrices": [
         "2026-10-06 (MAPA 623): el doble de la base del entorno aislado no tenía `guardar_registro` y el molde se daba de alta con 0 piezas: se agregó al doble.",
@@ -4044,7 +4459,8 @@
         691,
         692,
         695,
-        696
+        696,
+        801
       ],
       "memoria": "molde-a-medida.md",
       "conexiones": [
@@ -4733,6 +5149,889 @@
       ],
       "memoria": "editar-piezas-molde.md",
       "conexiones": []
+    },
+    {
+      "id": "arte-en-pc",
+      "nombre": "El arte del PEDIDO vive en la PC (por pedido)",
+      "que": "El arte de un pedido (camino A) queda en IndexedDB con clave POR PEDIDO (`pedidoPc` en tizada_wizard, nuevo en cada «Nuevo/Terminar pedido»): bytes vigente+original, versión y lo que calculó el análisis (det, auto, pers, mapeo, pv, validación). `aplicarArtesPc` pisa los diseños de `/motor_b` con sello ['pc', pedido, sha1, versión]; `deteccionPc` arma la detección del paso Arte; el plan recibe `artes_pc` y el servidor lo usa ANTES que su carpeta (que es la misma para todas las personas: se cruzaban los artes, MAPA 758). Desde 761 el arte NO se sube: objetos agregados, versiones, mapeo a mano y revalidación también quedan en la PC; al servidor sólo va la config del MOLDE (nombre del diseño, mapeo fijo por `/api/arte/mapeo_fijo`).",
+      "archivos": [
+        "frontend/src/motor/arte/enPc.js",
+        "frontend/src/motor/arte/previa.js",
+        "frontend/src/motor/arte/mesa.js",
+        "frontend/src/motor/arte/editarDiseno.js",
+        "frontend/src/motor/arte/fuentesSubir.js",
+        "frontend/src/motor/arte/fuentesEstado.js",
+        "frontend/src/motor/pruebas/arte_en_pc.mjs",
+        "verificar_arte_en_pc.py",
+        "frontend/src/motor/pedido/generar.js",
+        "frontend/src/motor/prepararArte.js"
+      ],
+      "anclas": [
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "export function fijarPedidoPc"
+        ],
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "export async function aplicarArtesPc"
+        ],
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "export async function datosPlanPc"
+        ],
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "export async function deteccionPc"
+        ],
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "export async function soltarArtesPc"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "guardarArtePc("
+        ],
+        [
+          "frontend/src/App.jsx",
+          "artes_pc = await datosPlanPc"
+        ],
+        [
+          "servidor.py",
+          "_ARTES_PC = threading.local()"
+        ],
+        [
+          "servidor.py",
+          "def _apc("
+        ],
+        [
+          "servidor.py",
+          "def _validacion_de("
+        ],
+        [
+          "servidor.py",
+          "def _mapeo_de("
+        ],
+        [
+          "servidor.py",
+          "solo_molde"
+        ],
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "export function objetoAgregarPc"
+        ],
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "export function objetoTransformPc"
+        ],
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "export function objetoColocadoPc"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _enPc = !!(_pa && _pa.sha1)"
+        ],
+        [
+          "servidor.py",
+          "def arte_mapeo_fijo("
+        ],
+        [
+          "servidor.py",
+          "cfg_disenos"
+        ],
+        [
+          "servidor.py",
+          "el diseño de este pedido está en tu computadora"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "_arteEnPc"
+        ],
+        [
+          "frontend/src/motor/arte/editarDiseno.js",
+          "el archivo original del diseño no está en esta computadora"
+        ],
+        [
+          "servidor.py",
+          "\"arte_mapeo_variantes\": \"mapeo_variantes\""
+        ],
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "export async function arteEnPc"
+        ],
+        [
+          "frontend/src/motor/cache.js",
+          "const esDelPedido"
+        ],
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "function enFila"
+        ],
+        [
+          "servidor.py",
+          "def _ajeno("
+        ],
+        [
+          "servidor.py",
+          "def _carpeta_compartida("
+        ],
+        [
+          "servidor.py",
+          "def _con_etag("
+        ],
+        [
+          "frontend/src/motor/arte/motorB.js",
+          "export function pedirJsonUnaVez"
+        ],
+        [
+          "frontend/src/motor/arte/motorB.js",
+          "export const pedirMotorB"
+        ],
+        [
+          "servidor.py",
+          "def _no_escribir_en_la_carpeta_compartida("
+        ],
+        [
+          "servidor.py",
+          "def _capas_propias"
+        ],
+        [
+          "frontend/src/motor/arte/enPc.js",
+          "async function autoDe"
+        ]
+      ],
+      "palabras": [
+        "artes_pc",
+        "pedidoPc",
+        "aplicarArtesPc",
+        "datosPlanPc",
+        "deteccionPc",
+        "guardarArtePc",
+        "en_pc",
+        "artepc|",
+        "_apc",
+        "solo_molde",
+        "objetoAgregarPc",
+        "mapeo_fijo",
+        "cfg_disenos",
+        "inyectadas"
+      ],
+      "reglas": [
+        "Todo lo que lee el arte del pedido pasa por `aplicarArtesPc` (motorDe, infoMolde, fuentesSubir, editarDiseno): nunca pedir `/motor_b` pelado para un diseño del pedido.",
+        "Sin los bytes en la PC (`vivo`) el arte NO se marca en_pc: `traerConCache` bajaría el del servidor, que puede ser el de otra persona.",
+        "`slugDiseno` es gemelo EXACTO de `_slugify_diseno`: `artes_pc` va por slug del NOMBRE del diseño, como arma las filas el plan.",
+        "La validación guardada en la PC lleva `archivo` y `modo` como la del servidor: el plan decide separado/clásico con `val.modo`.",
+        "Mapeo a mano / fuente nueva / Editar diseño: actualizar TAMBIÉN la PC (`actualizarDatosPc` / `versionNuevaPc`).",
+        "El robot / API externa (Node, sin IndexedDB) NO pasa por acá: sin pedido fijado todo sigue como antes.",
+        "Objetos agregados del pedido: `archivo` = `pc,<pedido>,<id>.pdf` (la clave `oa|…|archivo` lleva `|pc,`) y el número no se reusa (`oa.n`); soltarArtesPc también los borra.",
+        "Con el arte en la PC NUNCA llamar a las rutas del servidor que necesitan su archivo (`/api/arte`, `/api/arte/mapeo`, `/api/arte/validacion`, `/objeto_agregado/*`, `editable_quitar`): el servidor no lo tiene (o tiene el de otra persona).",
+        "La config del diseño en el MOLDE (nombre, mapeo fijo, posiciones base/colores/marcas de editables) sigue en el servidor: es del molde, no del pedido.",
+        "`prepararArte` (worker `arte_preparar`) devuelve también `det, auto, pers, pv`: es lo que se guarda con el arte en la PC; sacarlos rompe `guardarArtePc` y `deteccionPc`.",
+        "`/api/generar_multi` (la tizada en el servidor, respaldo) con `artes_pc` → 409: el servidor no tiene ese arte y su carpeta puede ser de otra persona; nunca generar con la carpeta.",
+        "Ningún RESPALDO al servidor con el arte en la PC: `/api/arte/preview_piezas`, `/api/arte/asignar_todo`, `/api/generar_multi`, `arte_archivo?original=1` (dibujarían/leerían el arte de su carpeta, que puede ser de otra persona).",
+        "`_arte_calc` con `artes_pc` NUNCA calcula sobre la carpeta: devuelve lo que mandó la PC (`_CALC_EN_PC`) o vacío. Un cálculo nuevo del arte en el plan = una clave nueva en `datosPlanPc` + `_CALC_EN_PC`.",
+        "El arte del pedido NUNCA se sube: si la PC no lo pudo preparar, se avisa y no se carga (MAPA 762).",
+        "Al abrir el pedido, un arte marcado cargado que no está en la PC (`arteEnPc`: datos + bytes) se da por NO cargado y se pide volver a cargarlo (pedidos de antes de 760, MAPA 762).",
+        "Cada pestaña tiene su `pedidoPc` (neurona `pestana-pedido`).",
+        "`traerConCache` NUNCA baja una clave del arte del pedido (`arte|…|pc,…`, `oa|…|pc,…`): si falta, error (cache.js `esDelPedido`).",
+        "Todo cambio del registro del arte (`artepc|…`) pasa por `enFila` (enPc.js): guardar, versión nueva, datos, objetos y lo calculado.",
+        "`arteCargado` arranca VACÍO y sólo se llena con artes comprobados en la PC (`arteEnPc`); nada lee el guardado tal cual.",
+        "Colocar/quitar un objeto cambia el arte: vaciar las vistas previas (`_pvLimpiar`) y redibujar el talle que se ve.",
+        "Después de colocar/quitar un objeto: PRIMERO recargar la lista del editor y DESPUÉS redibujar (el redibujo rearma el motor y cancela lo que esté usando el motor viejo); `editablesEnNavegador` reintenta una vez si sale «cancelado».",
+        "En el pedido, un diseño del servidor que no está (vivo) en la PC NO existe (`aplicarArtesPc` lo saca, salvo «principal»); en el servidor, un pedido con `artes_pc` trata esos diseños como SIN arte (`_ajeno`).",
+        "Los `/motor_b` del arte se piden con `pedirMotorB` (motorB.js): el mismo a la vez viaja una vez; nunca cachear después de que llega.",
+        "El servidor NO entrega el arte de la carpeta compartida (`_carpeta_compartida`: diseño con nombre que no es «principal» ni `x-…`): /motor_b no lo lista, /arte_archivo y /objeto_agregado 404, /editables_datos sin datos de la carpeta, /deteccion y /perfil 409 (MAPA 771).",
+        "`/motor_b` es revalidable (ETag débil + 304, `_con_etag`); `_comprimir` conserva un ETag débil. Nunca cachear su contenido del lado de la pantalla.",
+        "`_ajeno` (plan) usa el MISMO criterio que lo que el servidor entrega (`_carpeta_compartida`), con o sin `artes_pc`; los contratos que necesitan un diseño con carpeta en el servidor usan `x-…`.",
+        "`POST /api/arte` rechaza ANTES de escribir (carpeta compartida, sin paquete) y escribe atómico.",
+        "Un diseño `x-…` (carpeta de UN pedido del otro sistema) es ajeno para toda persona: sólo lo usan el robot (`X-Robot-Token`) y el servidor fuera de un request (`_carpeta_compartida`).",
+        "Ninguna escritura sobre la carpeta compartida (`before_request _no_escribir_en_la_carpeta_compartida`); `POST /api/arte` guarda el arte anterior y lo devuelve si el paquete se rechaza.",
+        "Antes de reemplazar/borrar un PDF que el servidor pudo abrir (fitz/pikepdf), `MP.cerrar_abiertos()`: Windows no deja tocar un archivo abierto (MAPA 774).",
+        "La traba de la carpeta compartida mira el diseño en dirección, formulario Y cuerpo; alcanza uno para frenar.",
+        "Al cargar el arte del pedido, la validación es la de la VARIABLE (igual que el mapeo a mano).",
+        "En CONFIGURACIÓN (`activoTab !== 'pedidos'`) nada toca el arte del pedido en la PC: el mapeo/validación son del «principal» del molde (MAPA 775).",
+        "La firma del motor (`motorDe`) sólo lleva lo que el HILO guarda (sellos, editables, objetos, fuentes…); nunca lo que viaja en cada pedido (el mapeo).",
+        "`datosPlanPc` manda como `auto` lo MISMO que muestra el paso Arte sin nada asignado (`autoDe`: automático por nombre → mapeo fijo del molde → sugerencias de la detección): si no, la pieza se ve con diseño y sale en blanco / la tizada no se genera."
+      ],
+      "cicatrices": [
+        "MAPA 758: dos personas, mismo molde + «JUGADOR»: la carpeta `entrada/<pid>/disenos/jugador/` era la misma → al rehacer la tizada salía el arte de la otra.",
+        "MAPA 760: el fetch de Node 24 se cae (assert undici) leyendo la respuesta de `POST /api/arte` de Werkzeug: los arneses suben con node:http.",
+        "MAPA 761: `cat > archivo` sin entrada colgó un comando (espera stdin); los scripts largos de edición, a un archivo y no en heredoc.",
+        "MAPA 761: el respaldo `/api/generar_multi` (si falla la tizada en la PC) habría estampado el arte de la carpeta del servidor con «no calcula» apagado → 409 con `artes_pc`.",
+        "MAPA 761: usar `_pvErrAviso` (declarado más abajo) en `cargarPreviewPiezas` subió el tope TDZ a 297 → se contesta con un `Response` 409 `solo_navegador` y el aviso sale por el camino de siempre.",
+        "MAPA 761: la ficha (`_procesos_ficha`) pedía el mapeo por talle con 428 y el navegador lo calculaba con el sello de la carpeta del servidor (arte de otra persona) → `mapeo_variantes` viaja en `artes_pc`.",
+        "MAPA 764 (inspector): después de colocar, el editor usaba el motor abierto con la versión borrada y `traerConCache` bajaba la carpeta del servidor guardándola con la clave de la PC.",
+        "MAPA 764 (inspector): el visor del talle mirado no mostraba el objeto recién colocado (la tizada sí).",
+        "MAPA 766 (inspector, 2ª vuelta): el redibujo de F4 cancelaba el trabajo del editor (pool cerrado) → la lista de «Editar diseño» quedaba vieja.",
+        "MAPA 770 (inspector): un pedido sin arte cargado mostraba las tipografías del arte de la carpeta del servidor (de otra persona).",
+        "MAPA 771 (inspector): el servidor seguía entregando el arte de la carpeta compartida (motor_b, arte_archivo) a cualquiera con sesión.",
+        "MAPA 772 (inspector): `POST /api/arte` guardaba el arte y DESPUÉS contestaba 409; un `maxWidth` repetido anulaba el arreglo del aviso del visor.",
+        "MAPA 773 (inspector, datos reales): el respaldo del plan caía en `x-edb73cd6-jugador` (pedido del otro sistema) para un pedido sin su arte.",
+        "MAPA 774 (inspector): un rechazo después de `arte_es_separado` dejaba guardado el arte RECHAZADO (WinError 5: PDF abierto).",
+        "MAPA 775 (inspector): «Guardar Mapeo de Arte» en Configuración pisaba el arte del pedido en la PC (`disenoActivo` seguía siendo el del pedido).",
+        "MAPA 776: «Guardar Mapeo de Arte» en Configuración dejaba en `_detArteCache` del pedido el mapeo del «principal» (clave con `disenoActivo`) → en el pedido se actualiza la clave de `_disM`; desde Configuración se tiran las del molde.",
+        "MAPA 776: `_arte_version_nueva` aceptaba un PDF en blanco con las mismas medidas → además pide las mismas capas propias (OCG no «Editable») y ninguna mesa con dibujo vacía.",
+        "MAPA 777: la firma de `motorDe` (previa.js) incluía `d.mapeo` → cada mapeo guardado en la PC cerraba el hilo con la vista previa en curso y la pieza quedaba con el arte crudo («10 / NOMBRE») hasta F5. El mapeo NO va en la firma: viaja en cada pedido (`mapeoArte`).",
+        "MAPA 778: en «Asignar telas» el visor apagaba la vista previa (`pv` con `!telaModo`) y mostraba el arte crudo; ahora la vista previa va con el color de la tela encima.",
+        "MAPA 804: la Bandera a medida mostraba «Frente ✓» por la sugerencia, al plan iba `auto: {}` → `mapeo_arte: null` → «la tizada la genera tu computadora: recargá…» (409)."
+      ],
+      "contratos": [
+        "verificar_arte_en_pc.py"
+      ],
+      "mapa": [
+        758,
+        760,
+        761,
+        762,
+        764,
+        766,
+        770,
+        771,
+        772,
+        773,
+        774,
+        775,
+        804
+      ],
+      "memoria": "artes-cruzados-entre-personas.md",
+      "conexiones": [
+        "molde-en-pc",
+        "moldes-en-la-pc",
+        "camino-a",
+        "generar-navegador",
+        "pestana-pedido"
+      ]
+    },
+    {
+      "id": "pestana-pedido",
+      "nombre": "Cada pestaña, su pedido",
+      "que": "El avance del pedido se guarda por PESTAÑA (`tizada_wizard|<número>`, número en sessionStorage); un candado del navegador (Web Locks) por pestaña dice cuáles siguen abiertas: F5 conserva, duplicar da número nuevo, una pestaña nueva recupera el último pedido no abierto.",
+      "archivos": [
+        "frontend/src/pestana.js",
+        "frontend/src/main.jsx",
+        "frontend/src/App.jsx",
+        "frontend/src/base.js",
+        "servidor.py"
+      ],
+      "anclas": [
+        [
+          "frontend/src/pestana.js",
+          "export async function prepararPestana"
+        ],
+        [
+          "frontend/src/pestana.js",
+          "export const claveWizard"
+        ],
+        [
+          "frontend/src/pestana.js",
+          "export function pedidosGuardados"
+        ],
+        [
+          "frontend/src/main.jsx",
+          "prepararPestana()"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "localStorage.getItem(claveWizard())"
+        ],
+        [
+          "frontend/src/pestana.js",
+          "export function tizadasDeOtrasPestanas()"
+        ],
+        [
+          "frontend/src/base.js",
+          "export function ponerMoldeDePestana"
+        ],
+        [
+          "frontend/src/base.js",
+          "h.set('X-Tizada-Molde', moldePestana)"
+        ],
+        [
+          "servidor.py",
+          "request.headers.get(\"X-Tizada-Molde\")"
+        ],
+        [
+          "servidor.py",
+          "response.headers[\"X-Tizada-Molde-Activado\"]"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "ponerMoldeDePestana(data.activo)"
+        ]
+      ],
+      "palabras": [
+        "tizada_wizard",
+        "claveWizard",
+        "prepararPestana",
+        "tizada_pestana",
+        "navigator.locks",
+        "pedidosGuardados",
+        "X-Tizada-Molde",
+        "tizada_molde_pestana",
+        "molde activo",
+        "ponerMoldeDePestana"
+      ],
+      "reglas": [
+        "Nunca leer/escribir `tizada_wizard` a mano: siempre `claveWizard()` (es la clave de ESTA pestaña).",
+        "`prepararPestana()` corre ANTES de dibujar la app (main.jsx): el estado inicial del pedido se lee de esa clave en el primer render.",
+        "Qué pestaña está abierta lo dice el candado (Web Locks), nunca un reloj: en una pestaña escondida los timers casi no corren.",
+        "«Nuevo pedido» suelta los artes de la PC salvo los de `pedidosGuardados()` (los pedidos de las otras pestañas).",
+        "Pestaña DUPLICADA = pedido vacío (no adopta huérfanos); una pestaña NUEVA adopta el último huérfano bajo el candado `tizada_adoptar`.",
+        "El avance de una pestaña cerrada hace más de 7 días se olvida (sus artes dejan de estar protegidos).",
+        "«Nuevo pedido» manda `conservar` = las tizadas anotadas por las OTRAS pestañas (`tizadasDeOtrasPestanas`) y `limpiar_trabajos` no las toca (MAPA 787).",
+        "El MOLDE ACTIVO también es de cada pestaña (MAPA 819): `base.js` manda `X-Tizada-Molde` en cada `/api/` y `_get_active_producto_id` lo pone antes que la sesión (si existe y se puede ver). Todo lugar que active un molde en la sesión pasa por `_activar_en_sesion` (contesta `X-Tizada-Molde-Activado` → esa pestaña adopta el nuevo); escribir `session[\"pid_activo\"]` a mano deja a la pestaña mandando el viejo."
+      ],
+      "cicatrices": [
+        "MAPA 762: con una sola clave de pedido para todas las pestañas, dos pestañas compartían pedido y arte.",
+        "MAPA 764 (inspector): la pestaña duplicada adoptaba el pedido de otra pestaña cerrada.",
+        "MAPA 787: «Nuevo pedido» en A le borraba del servidor la tizada a la pestaña B (`incluir_anteriores`).",
+        "MAPA 792: «Nuevo pedido» borraba `tizada_mesas_nombres_<id>` de las tizadas de OTRA pestaña → respeta `tizadasDeOtrasPestanas()`.",
+        "MAPA 819 (inspector): dos pestañas compartían el activo de la sesión: la quieta pedía la config del molde de la otra y lo re-activaba (8 `activar`, «Molde activado ✓» sola, tipografía pendiente con todo resuelto)."
+      ],
+      "contratos": [
+        "verificar_arte_en_pc.py"
+      ],
+      "mapa": [
+        762,
+        764,
+        819
+      ],
+      "memoria": "artes-cruzados-entre-personas.md",
+      "conexiones": [
+        "arte-en-pc",
+        "molde-en-pc"
+      ]
+    },
+    {
+      "id": "usuarios",
+      "nombre": "Usuarios, roles y permisos",
+      "que": "Quién entra al sistema y qué puede hacer: login por sesión, roles con permisos, `requiere(...)` en cada ruta; pantalla Configuración › Usuarios y permisos.",
+      "archivos": [],
+      "anclas": [
+        [
+          "auth.py",
+          "def permisos_de"
+        ],
+        [
+          "auth.py",
+          "PERMISOS_RETIRADOS"
+        ],
+        [
+          "api_usuarios.py",
+          "def listar_roles"
+        ],
+        [
+          "api_usuarios.py",
+          "def _utc_iso"
+        ],
+        [
+          "api_usuarios.py",
+          "def _seria_el_ultimo_admin"
+        ]
+      ],
+      "palabras": [
+        "usuario",
+        "rol",
+        "permiso",
+        "PERMISOS_RETIRADOS",
+        "ultimo_acceso",
+        "auth/yo"
+      ],
+      "reglas": [
+        "Borrar un usuario lo DESACTIVA (no borra la fila: `creado_por` es autoría); nunca dejar el sistema sin un admin activo; nadie se borra/desactiva a sí mismo.",
+        "Los permisos RETIRADOS (`PERMISOS_RETIRADOS`) no se cuentan ni se muestran en ningún lado (`/api/permisos`, `/api/roles`, `permisos_de`): siguen en las bases viejas.",
+        "Las fechas de la base son UTC (SYSUTCDATETIME): la API las da como ISO con «Z» (`_utc_iso`) y la pantalla las muestra en la hora de la PC, día/mes/año.",
+        "La sesión se renueva como mucho cada 12 h en `/api/auth/yo` (`SESSION_REFRESH_EACH_REQUEST = False`, MAPA 799-800)."
+      ],
+      "cicatrices": [
+        "MAPA 807: el admin decía «19 de 18 acciones»: `ayuda.grabar` (retirado en 689) seguía en su rol y se contaba.",
+        "MAPA 807: «Último acceso» mostraba la hora UTC cruda (18:27 cuando eran las 15:27)."
+      ],
+      "contratos": [
+        "verificar_permisos_rutas.py"
+      ],
+      "mapa": [
+        799,
+        800,
+        807
+      ],
+      "memoria": "permisos-nuevos-llegan-solos.md",
+      "conexiones": [
+        "integracion-externa",
+        "base-datos",
+        "ui-reglas"
+      ]
+    },
+    {
+      "id": "nombrar-piezas",
+      "nombre": "Nombrar piezas (Moldería): nombre + correspondencia entre talles",
+      "que": "El ÚNICO lugar donde se le pone nombre a cada pieza de un molde (camino A y B, también desde el pedido y en «mi molde»): se seleccionan en el visor y se escribe qué es; con varios talles el mismo gesto fija la correspondencia. Backend `/api/plantilla/emparejado` + `/api/plantilla/grupo_pieza`.",
+      "archivos": [
+        "frontend/src/App.jsx",
+        "servidor.py"
+      ],
+      "anclas": [
+        [
+          "frontend/src/App.jsx",
+          "const puedeNombrarPiezas"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const activarEmparejar"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const crearGrupoTodas"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "agrupar-activar"
+        ],
+        [
+          "servidor.py",
+          "def plantilla_grupo_pieza"
+        ],
+        [
+          "servidor.py",
+          "def _guia_y_asignaciones"
+        ],
+        [
+          "motor_pedido.py",
+          "CAPAS_GENERICAS"
+        ],
+        [
+          "frontend/src/motor/nombres.js",
+          "export const CAPAS_GENERICAS"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const avisarAltaMolde"
+        ]
+      ],
+      "palabras": [
+        "nombrar piezas",
+        "nombre de las piezas",
+        "agrupar",
+        "emparejado",
+        "grupo_pieza",
+        "talle único",
+        "un solo talle",
+        "una sola variante",
+        "una sola pieza",
+        "Capa 1"
+      ],
+      "reglas": [
+        "SE CARGA LO QUE VENGA (regla del usuario, MAPA 810): una variante, una pieza, todo en una capa. Nunca pedir más de una variante ni un paso de variantes antes de nombrar piezas.",
+        "Se puede nombrar con UNA sola variante (`puedeNombrarPiezas` = al menos una variante real y el molde no está «falta nombrar variantes»): nunca volver a pedir `> 1` (MAPA 809).",
+        "Todo en la capa genérica («Capa 1» de Illustrator, «0» de AutoCAD = `CAPAS_GENERICAS`) y ninguna otra capa de variante → esa capa ES la variante (`_talles_de_plantilla` ↔ `tallesDePlantilla`, gemelos idénticos). Con otras capas de variante al lado sigue siendo de sistema (MAPA 810).",
+        "El aviso al subir (`avisarAltaMolde`) manda a nombrar en «Moldería» → «Nombrar piezas» (Variables › Paso 1 ya no existe), dice «1 variante» en singular con la palabra configurada y no muestra como problema la «etiqueta de texto «X-Pieza-#»» que falta (es el caso normal).",
+        "La palabra es la de la VARIANTE configurada (`term.variante`, por defecto «Talle»): ningún texto nuevo de esta parte escribe «talle» fijo.",
+        "Con el molde sin variante (`sin_variantes`/`falta_nombrar_variantes` sin `resuelto`) NO se muestra: el emparejado no puede leer piezas.",
+        "Variables › Grupos manda a Moldería › Nombrar piezas: el botón de Moldería tiene que existir para todo molde que Variables pueda abrir (si no, círculo sin salida).",
+        "En «mi molde» (`modoMiMolde`) «Indicar qué es cada pieza →» PRENDE el nombrado ahí mismo (`activarEmparejar(true, 'simple')`), no navega a Variables."
+      ],
+      "cicatrices": [
+        "2026-11-11 (MAPA 809): un molde de talle único (DXF «totebag» con capa «Único», .ai con todo en «Capa 1» ya nombrada) no mostraba «Nombrar piezas» (`tallesMolde.length > 1`) y Variables decía «nombralas en Moldería»: no había forma de nombrar. Ya estaba sospechado en MAPA 574 (3) sin arreglar.",
+        "2026-11-11 (MAPA 810): un .ai con todo en «Capa 1» entraba con «no se le reconoció ningún talle … cada talle debe ser una capa (M, 3XL, 16…)» y el visor trabado en «Falta nombrar» hasta repartir piezas a mano; el aviso de subida mandaba a «Variables → Paso 1» (no existe). El usuario: «se carga lo que queramos; si quiero una sola pieza, una sola pieza»."
+      ],
+      "contratos": [],
+      "mapa": [
+        574,
+        809,
+        810
+      ],
+      "memoria": "nombrar-con-un-talle.md",
+      "conexiones": [
+        "camino-a",
+        "camino-b",
+        "van-juntas"
+      ]
+    },
+    {
+      "id": "memoria-motor",
+      "nombre": "Memoria del motor del navegador (2 GB por hilo)",
+      "que": "El motor de PDF del navegador (mupdf.js, wasm) tiene un tope de 2 GB POR HILO. Con artes pesados (imágenes de cientos de MB) la tizada y la preparación del arte se quedaban sin memoria: los buffers de `saveToBuffer` se soltaban recién cuando el navegador recolectaba el objeto, y cada apertura desde los bytes copiaba el archivo entero.",
+      "archivos": [
+        "frontend/src/motor/pdf/guardar.js",
+        "frontend/src/motor/pieza/caminoA.js",
+        "frontend/src/motor/arte/mapeo.js",
+        "frontend/src/motor/arte/preparar.js",
+        "frontend/src/motor/obrero.worker.js",
+        "frontend/src/motor/pieza/svg.js",
+        "frontend/src/motor/arte/previa.js",
+        "frontend/src/motor/pedido/generar.js",
+        "frontend/src/motor/pool.js"
+      ],
+      "anclas": [
+        [
+          "frontend/src/motor/pdf/guardar.js",
+          "export function guardarPdf"
+        ],
+        [
+          "frontend/src/motor/pieza/caminoA.js",
+          "arteBuf = new mupdf.Buffer(arteBytes)"
+        ],
+        [
+          "frontend/src/motor/arte/mapeo.js",
+          "function abrirCopias"
+        ],
+        [
+          "frontend/src/motor/arte/preparar.js",
+          "const fuente = new mupdf.Buffer(bytes)"
+        ],
+        [
+          "frontend/src/motor/obrero.worker.js",
+          "function tomarArte"
+        ],
+        [
+          "frontend/src/motor/obrero.worker.js",
+          "function soltarArte"
+        ],
+        [
+          "frontend/src/motor/arte/previa.js",
+          "export function soltarPreviasLibres"
+        ],
+        [
+          "servidor.py",
+          "def registro_navegador"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "/api/registro/navegador"
+        ],
+        [
+          "frontend/src/motor/pieza/svg.js",
+          "w.destroy()"
+        ],
+        [
+          "frontend/src/motor/arte/previa.js",
+          "export function tizadaEmpieza"
+        ],
+        [
+          "frontend/src/motor/arte/previa.js",
+          "export async function renovarMotorSiPesa"
+        ],
+        [
+          "frontend/src/motor/arte/previa.js",
+          "async function conHiloLimpio"
+        ],
+        [
+          "frontend/src/motor/pedido/generar.js",
+          "tizadaEmpieza()"
+        ],
+        [
+          "frontend/src/motor/obrero.worker.js",
+          "async memoria()"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "PV_TALLE_PESADO"
+        ],
+        [
+          "frontend/src/motor/obrero.worker.js",
+          "arteId = `propio|${clave}|${++nPropios}`"
+        ]
+      ],
+      "palabras": [
+        "memoria",
+        "malloc",
+        "realloc",
+        "failed",
+        "saveToBuffer",
+        "la tizada la genera tu computadora",
+        "arte pesado",
+        "imagen grande"
+      ],
+      "reglas": [
+        "NUNCA `doc.saveToBuffer(...).asUint8Array().slice()` suelto: siempre `guardarPdf(doc, opciones)` (suelta el buffer del motor en el acto; mismos bytes). El buffer de `saveToBuffer` sólo se libera cuando el navegador recolecta el objeto, y el navegador no ve esa memoria (MAPA 811).",
+        "El MISMO archivo abierto varias veces A LA VEZ se abre desde UN `mupdf.Buffer` compartido (`contextoCaminoA` → `arteBuf`, `contexto_a`, `prepararArte` → `fuente`, `abrirCopias`): abrir desde los bytes copia el archivo entero cada vez. Cada documento guarda su referencia: el buffer se suelta al final sin romper ninguno.",
+        "Las funciones del arte que reciben `bytes` y sólo los usan para `abrir` aceptan también un `Buffer`; si una nueva usa los bytes para otra cosa (sha1, largo, copiar), recibirlos como Uint8Array. Comprobar SIEMPRE que dé lo mismo con bytes que con Buffer: en `contexto_a` los pasos están en try/catch que devuelven vacío (una personalización vacía saldría sin nombre ni número, en silencio).",
+        "No rasterizar ni achicar las imágenes del usuario para ahorrar memoria (LEY: vector original): la salida es soltar y compartir memoria, no tocar el archivo.",
+        "El hilo del molde guarda UNA copia por arte para TODOS sus contextos (visor + tizada): `contexto_a({arteId})` → `tomarArte`/`soltarArte` (contadas por clave). `arteId` = clave de caché del archivo (`arte|pid|diseño|sello`). Un contexto nuevo NUNCA copia el arte si ya está (MAPA 813).",
+        "Antes de armar la tizada, `soltarPreviasLibres` suelta los contextos del visor que nadie usa (el visor los rearma solo).",
+        "Si la tizada falla en la PC y el servidor no calcula, la pantalla dice el motivo REAL (`_errPc`) y lo deja en `POST /api/registro/navegador`; nunca sólo «recargá la página».",
+        "Todo `DocumentWriter` y el dispositivo de su `beginPage` se sueltan con `destroy()` después de `close()` (`pieza/svg.js escribirSvg`): el escritor guarda su referencia al buffer de salida y si no el SVG entero queda en el motor (MAPA 814).",
+        "La tizada tiene el hilo para ella: `generarPedidoEnNavegador` avisa con `tizadaEmpieza()` (y SIEMPRE avisa que terminó, en `finally`); `previasCaminoA/B` esperan con `esperarTizada()`. Es la vista previa la que espera, nunca la tizada (MAPA 169).",
+        "Antes de armar, `renovarMotorSiPesa(pid)`: si el motor del hilo ya lleva más de 700 MB (o no contesta en 1,5 s) se cierra y `motorDe` arma uno nuevo; con artes comunes no se toca. Si igual se queda sin memoria, UN reintento con todos los hilos nuevos.",
+        "Un equipo de hilos cerrado (`pool.cerrar()`) contesta «cancelado» en el acto a toda tarea nueva: nunca deja una promesa colgada.",
+        "La precarga de talles (`_prefetchTalles`) no corre si el talle a la vista pesa más de `PV_TALLE_PESADO` (30 MB de dibujo) y `_pvGuardar` tiene tope por PESO (`PV_TOPE_PESO`), no sólo por cantidad.",
+        "Para medir memoria del motor: la cuenta exacta (`$libmupdf_wasm_Module.HEAPU8.buffer.byteLength`, hay que crear el objeto ANTES de importar mupdf.js) y la sonda del bloque libre; y probar el ESCENARIO COMPLETO en un hilo (vistas previas y después la tizada), no la tizada sola.",
+        "El contexto del arte abre el archivo DE A POCO (al armar cada pieza): su copia del arte vive lo que vive el contexto. Sin `arteId` lleva uno propio (`propio|clave|n`) y se suelta con `contexto_a_soltar`/al rearmarlo, nunca al terminar de armarlo.",
+        "`verificar_arte_cambia.py` permite vaciar `_pvCache` sin subir la generación SÓLO en los dos topes de memoria de `_pvGuardar` (cantidad y `PV_TOPE_PESO`), que corren después de descartar lo de otra generación."
+      ],
+      "cicatrices": [
+        "2026-11-11 (MAPA 811): «base nfl mujer y diablos.ai» (239 MB, una imagen de 8965 × 6827 px CMYK = 120 MB comprimidos) → la 5ª pieza con la mesa 7 fallaba «realloc (163443015 bytes) failed» y la 2ª preparación del arte en el mismo hilo «malloc (238911340 bytes) failed»; la tizada caía al servidor (que no calcula) y salía «la tizada la genera tu computadora: recargá la página». Las imágenes NO estaban dañadas.",
+        "2026-11-11 (MAPA 813): con la 811 seguía fallando: el hilo del molde tenía los contextos del visor (hasta 4, de dos versiones del arte) + los de la tizada, cada uno con SU copia de 239 MB → «malloc (238341085 bytes) failed» en la vista previa y en la tizada. El motivo estaba sólo en la consola del navegador.",
+        "2026-11-11 (MAPA 814): tercera vuelta — `realloc (163443015 bytes) failed` al guardar la hoja: el hilo llegaba a la tizada con 1 GB perdido por la imagen de `fillImage` (ver `mupdf-prestado`) y con los SVG de las vistas previas sin soltar (la 3ª llenaba los 2 GB). Las dos vueltas anteriores midieron RSS y la tizada sola: no lo veían.",
+        "MAPA 819: sin `arteId` la copia se soltaba en el `finally` de `contexto_a` → la primera pieza «no document to open» (`verificar_navegador_pieza_a.py` §4)."
+      ],
+      "contratos": [],
+      "mapa": [
+        811,
+        813,
+        814,
+        819
+      ],
+      "memoria": "memoria-motor-navegador.md",
+      "conexiones": [
+        "generar-navegador",
+        "camino-a",
+        "vector-original",
+        "mupdf-prestado"
+      ]
+    },
+    {
+      "id": "buscador",
+      "nombre": "Buscador de moldes y variables (pedido y Moldería)",
+      "que": "El campo de búsqueda del paso Moldes del pedido (variables; el nombre de un molde muestra todas las suyas) y el de Configuración › Moldería. Coincide sólo lo que CONTIENE lo escrito de corrido (sin tildes ni mayúsculas); el exacto va primero y no esconde a los demás; al borrar vuelve todo. Además, el control (sólo lectura) de códigos de variable repetidos entre moldes.",
+      "archivos": [
+        "frontend/src/buscador.js",
+        "frontend/src/App.jsx",
+        "frontend/verificar_buscador.mjs",
+        "servidor.py"
+      ],
+      "anclas": [
+        [
+          "frontend/src/buscador.js",
+          "export function puntajeBusqueda"
+        ],
+        [
+          "frontend/src/buscador.js",
+          "export function filtrarBusqueda"
+        ],
+        [
+          "frontend/src/buscador.js",
+          "export function clavesRepetidas"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "filtrarBusqueda(buscarVariable, varsCatalogo, v => [v.label, v.moldeNombre])"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "_k: `${p.id}|${i}`"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "key={v._k}"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "pedido-buscar-variable"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "molde-buscar"
+        ],
+        [
+          "servidor.py",
+          "def _claves_repetidas"
+        ],
+        [
+          "servidor.py",
+          "def _avisar_claves_repetidas"
+        ],
+        [
+          "servidor.py",
+          "variables_con_codigo_repetido"
+        ],
+        [
+          "frontend/package.json",
+          "node verificar_buscador.mjs"
+        ]
+      ],
+      "palabras": [
+        "buscador",
+        "buscar",
+        "filtro",
+        "cortada"
+      ],
+      "reglas": [
+        "Coincide SÓLO lo que contiene lo escrito tal cual, de corrido: «cortada m» no trae «Camiseta cortada» por tener una «m» en otro lado. Nada de «cada palabra en cualquier parte» (MAPA 815).",
+        "El nombre EXACTO va primero pero NO esconde a los demás que lo contienen («cortada» muestra «Cortada», «Cortada M», «Recortada»…). Orden: exacto > empieza igual > arranca una palabra > adentro.",
+        "En el pedido se busca en [variable, molde] por separado: escribir el molde muestra todas sus variables. Sin el texto pegado «molde variable» (juntaba el final de uno con el principio del otro).",
+        "Borrar la búsqueda devuelve TODO en su orden.",
+        "La `key` de una tarjeta de variable es `v._k` (molde + lugar), NUNCA `v.clave`: dos moldes con el mismo código de variable dejaban tarjetas pegadas al filtrar y se acumulaban al borrar.",
+        "El control de códigos repetidos sólo LEE y avisa (registro del sistema + `/api/productos/diagnostico`): no cambia ningún dato."
+      ],
+      "cicatrices": [
+        "2026-11-12 (MAPA 815): «busco cortada y aparecen moldes que no tienen cortada» + «al borrar queda trancado» = dos moldes con una variable del MISMO código (armados con «Aplicar configuración» antes del 2026-09-21) + `key={v.clave}`. Con datos limpios no se reproduce: hay que inyectar la clave repetida.",
+        "2026-11-12: la regla «si hay exacto quedan sólo los exactos» (514) escondía «Cortada M» al escribir «cortada»; y «todas las palabras en cualquier lado» hacía que «cortada m» trajera cualquier cosa con una «m»."
+      ],
+      "contratos": [
+        "frontend/verificar_buscador.mjs"
+      ],
+      "mapa": [
+        514,
+        815
+      ],
+      "memoria": "buscador-moldes-variables.md",
+      "conexiones": [
+        "pestana-pedido",
+        "molde-archivado"
+      ]
+    },
+    {
+      "id": "tizada-corte",
+      "nombre": "Tizada para corte (sin arte, un talle por mesa, formatos de corte)",
+      "que": "El tercer camino del pedido: sin arte; de cada pieza sale SÓLO su línea de corte (el molde, sin etiqueta); paso «Telas» (la pantalla del Arte sin el arte); cada talle en su mesa; al descargar se elige DXF 2000, Illustrator 3, PLT, SVG, EPS o PDF. También por la API (`modo: corte`).",
+      "archivos": [
+        "frontend/src/App.jsx",
+        "servidor.py",
+        "frontend/src/motor/corte/exportar.js",
+        "frontend/src/motor/corte/formatos.js",
+        "frontend/src/motor/pieza/caminoA.js",
+        "frontend/src/motor/obrero.worker.js",
+        "frontend/src/motor/arte/previa.js",
+        "frontend/src/motor/pedido/generar.js",
+        "frontend/src/motor/mesaSuelta.js",
+        "integracion_externa.py",
+        "frontend/src/motor/robot/robot.mjs",
+        "verificar_tizada_corte.py"
+      ],
+      "anclas": [
+        [
+          "frontend/src/App.jsx",
+          "pedido-armar-corte"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const [pedidoCorte, setPedidoCorte]"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "railTelas={pedidoCorte}"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _fueraDeCorte"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const piezasCorteDe"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "corte-formatos"
+        ],
+        [
+          "servidor.py",
+          "_corte = bool(cuerpo.get(\"corte\"))"
+        ],
+        [
+          "servidor.py",
+          "class _SinPersonalizacion"
+        ],
+        [
+          "servidor.py",
+          "_tm_cada_uno"
+        ],
+        [
+          "frontend/src/motor/corte/exportar.js",
+          "export function geometriaDeSvg"
+        ],
+        [
+          "frontend/src/motor/corte/exportar.js",
+          "export function aDxf"
+        ],
+        [
+          "frontend/src/motor/corte/exportar.js",
+          "export function aAi3"
+        ],
+        [
+          "frontend/src/motor/corte/exportar.js",
+          "export function aPlt"
+        ],
+        [
+          "frontend/src/motor/corte/exportar.js",
+          "export function exportarMesa"
+        ],
+        [
+          "frontend/src/motor/pieza/caminoA.js",
+          "const sinArte = arte === null"
+        ],
+        [
+          "frontend/src/motor/arte/previa.js",
+          "export async function asegurarContextoCorte"
+        ],
+        [
+          "frontend/src/motor/obrero.worker.js",
+          "async corte_exportar"
+        ],
+        [
+          "frontend/src/motor/mesaSuelta.js",
+          "export function mesaCorte"
+        ],
+        [
+          "integracion_externa.py",
+          "\"molde-no-corte\""
+        ],
+        [
+          "integracion_externa.py",
+          "FORMATOS_CORTE"
+        ],
+        [
+          "frontend/src/motor/robot/robot.mjs",
+          "tipo: 'corte', formato: f"
+        ],
+        [
+          "servidor.py",
+          "\"etiqueta\": {\"activo\": False} if _corte"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const entrarEnCorte = () =>"
+        ]
+      ],
+      "palabras": [
+        "corte",
+        "laser",
+        "láser",
+        "dxf",
+        "plt",
+        "hpgl",
+        "illustrator 3",
+        "sin arte"
+      ],
+      "reglas": [
+        "🔴 SÓLO EL MOLDE: sin etiqueta, ni en la hoja (`etiqueta: {activo: False}` en el plan) ni en los archivos de corte (`exportarMesa` con `etiqueta` falso siempre). Regla del usuario 2026-11-23 (MAPA 817).",
+        "La exportación sale de la MISMA hoja que se ve (`svgDePagina` con texto como trazado): CORTE = trazos llenos sin punteado y SIN relleno gemelo; ETIQUETA = rellenos. La etiqueta del sistema va en curvas con un halo trazado: el halo tiene su gemelo relleno y NO es corte.",
+        "Una línea de corte por pieza: el borde «fuera» se dibuja dos veces sobre el mismo contorno → se deduplica.",
+        "Curvas exactas donde el formato las tiene (DXF 2000 = SPLINE grado 3, AI 3, EPS, SVG); en PLT se aplanan a ≤ 0,02 mm. Todo en mm reales, escala 1:1. Formatos: dxf (2000, nunca R12), ai (Illustrator 3), plt, svg, eps, pdf.",
+        "El paso «Telas» de corte es la pantalla del Arte reusada (mismo visor, mismo selector de telas, mismo «Piezas»): nunca una ventana propia (corrección del usuario 2026-11-23).",
+        "En corte la línea de corte sale siempre (`borde_corte.activo = True`), no se exigen nombre ni número, sólo moldes base (a medida y camino B → 422), y los talles sin grupo van cada uno en su mesa (`cada_uno`).",
+        "La arma sólo la PC: `generar_multi` con `corte` → 409. La hoja lleva su perfil de color (sin él avisa el RIP).",
+        "Entrar a corte (`entrarEnCorte`) SACA del pedido lo que `_fueraDeCorte` esconde (molde a medida, con diseño adentro) y avisa: escondido pero elegido bloqueaba las tarjetas y el pedido reventaba al Enviar (MAPA 819).",
+        "En corte la planilla no muestra texto ni número (`colActiva`): tampoco van a la ficha ni al CSV."
+      ],
+      "cicatrices": [
+        "2026-11-23: la primera exportación tomaba el halo de las letras de la etiqueta como corte (2472 líneas para 112 piezas).",
+        "2026-11-23: se armó una ventana «Telas y piezas» propia con selects; el usuario pidió la misma de siempre → se reusa la pantalla del Arte con `railTelas`.",
+        "2026-11-23: sin perfil de color la hoja de corte hacía avisar al RIP («no trae el perfil de salida»).",
+        "2026-11-23 (MAPA 817): la primera versión sacaba la etiqueta en la hoja y en los archivos de corte; el usuario: «en el corte no deben salir las etiquetas, sólo es molde, nada más».",
+        "MAPA 819: Bandera elegida en «Armar con base» → «Tizada para corte»: quedaba invisible en el pedido, «Otra planilla» en todas las tarjetas, 422 al Enviar."
+      ],
+      "contratos": [
+        "verificar_tizada_corte.py",
+        "verificar_integracion_externa.py"
+      ],
+      "mapa": [
+        816,
+        817,
+        819
+      ],
+      "memoria": "tizada-corte.md",
+      "conexiones": [
+        "generar-navegador",
+        "plan-pedido",
+        "talles-mesa",
+        "integracion-externa",
+        "pasos-pedido",
+        "camino-a",
+        "telas",
+        "piezas-fuera",
+        "etiqueta"
+      ]
     }
   ]
 }

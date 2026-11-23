@@ -229,7 +229,7 @@ function Reproductor({ video, onTerminar, haySiguiente, onSiguiente }) {
           <img src={rutaApi(`/api/ayuda/miniatura/${video.id}?m=${video.mini || ''}`)} alt="" onError={(e) => { e.currentTarget.style.display = 'none' }} />
           <div className="tzv-prep-caja">
             {error ? <span className="tzv-error">{error}</span> : <>
-              <div className="tzv-anillo" style={{ '--p': pct }}><span>{pct}%</span></div>
+              <div className="tzv-anillo" style={{ '--p': pct }}><span>{pct} %</span></div>
               <span>Preparando el video…</span>
             </>}
           </div>

@@ -76,6 +76,10 @@ FLAGS_TEXTO = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES
 # Capas reservadas: no son talles. El resto de las capas con dibujo se
 # interpretan como talles.
 CAPAS_SISTEMA = {"Fondo", "Capa 1", "Personalizable", "0", "referencia", "Referencia"}
+# Las capas que el PROGRAMA le pone solo al archivo (no las nombró nadie). Si el molde está todo
+# en UNA de ellas y no hay ninguna otra capa de variante, esa capa ES la variante (ver
+# `_talles_de_plantilla`). Gemelo: `CAPAS_GENERICAS` de frontend/src/motor/nombres.js.
+CAPAS_GENERICAS = ("Capa 1", "0")
 
 # Reglas por pieza usadas en el armado del pedido. Se pueden sobrescribir desde
 # datos/config_producto.json (clave "piezas"), pero estos son los valores por
@@ -317,6 +321,28 @@ def nombres_fuente(datos):
     return out
 
 
+def nombre_visible(info):
+    """El nombre ENTERO de una tipografía para MOSTRAR (MAPA 769). Ninguno de los nombres sirve solo:
+    el `interno` de MuPDF se corta en 31 letras («Adidas WC 2026 fan inspired fon»), el completo (id 4) a
+    veces viene con «_» («Adidas_WC_2026_fan_inspired_font») o también cortado por la propia tipografía
+    («Hawken Personal Use Only Reg»), y a veces el interno trae «?» en lugar de letras. Se toma, de familia +
+    estilo, familia sola y completo, el MÁS CORTO que siga al interno y sea más largo que él; si el interno
+    trae «?», el mejor de los otros. Sólo para mostrar y buscar: se elige SIEMPRE por `interno`."""
+    import re
+    info = info or {}
+    interno = (info.get("interno") or "").strip()
+    n = lambda s: re.sub(r"[\s_\-]+", "", s.lower())
+    lim = lambda s: re.sub(r"\s+", " ", (s or "").replace("_", " ")).strip()
+    fam, est = lim(info.get("familia")), lim(info.get("estilo"))
+    cands = [c for c in dict.fromkeys([lim(f"{fam} {est}") if fam and est else "", fam, lim(info.get("completo"))]) if c]
+    if not interno:
+        return cands[0] if cands else ""
+    if "?" in interno or "\ufffd" in interno:
+        return max(cands, key=len) if cands else interno
+    mas = [c for c in cands if len(c) > len(interno) and n(c).startswith(n(interno))]
+    return min(mas, key=len) if mas else interno
+
+
 def identidad_fuente(info):
     """Con qué se decide que dos tipografías son LA MISMA (para preguntar «ya existe»): el nombre
     completo normalizado (familia + estilo), o el interno si no hay. Los estilos de una familia
@@ -334,7 +360,7 @@ def _info_fuente(ruta):
         _nom = nombres_fuente(datos)
         hit = {"interno": _FUENTE_INTERNO.pop(k, None) or fitz.Font(fontbuffer=datos).name,
                "hash": hashlib.md5(datos).hexdigest()[:12],
-               "completo": _nom["completo"], "ps": _nom["ps"]}
+               "completo": _nom["completo"], "ps": _nom["ps"], "familia": _nom["familia"], "estilo": _nom["estilo"]}
         _FUENTE_INFO[k] = hit
     return hit
 
@@ -376,9 +402,19 @@ def catalogo_fuentes(carpeta):
             try:
                 _inf = _info_fuente(ruta)
                 cat[ruta] = {"interno": _inf["interno"], "archivo": os.path.basename(ruta), "hash": _inf["hash"],
-                             "completo": _inf.get("completo") or "", "ps": _inf.get("ps") or ""}
+                             "completo": _inf.get("completo") or "", "ps": _inf.get("ps") or "",
+                             "nombre": nombre_visible(_inf)}   # el nombre ENTERO para mostrar (MAPA 769)
             except Exception:
                 pass
+    # dos tipografías DISTINTAS nunca con el mismo nombre para ver (inspector, MAPA 770: «MoreggiTFont4? Camiseta?» y
+    # «MoreggiTFont4 Camiseta» salían iguales y no se sabía cuál se elegía) → se les agrega el archivo
+    _vistos = {}
+    for _ruta, _c in cat.items():
+        _vistos.setdefault(_c["nombre"].lower(), []).append(_c)
+    for _grupo in _vistos.values():
+        if len({_c["interno"] for _c in _grupo}) > 1:
+            for _c in _grupo:
+                _c["nombre"] = f'{_c["nombre"]} ({os.path.splitext(_c["archivo"])[0]})'
     return cat
 
 
@@ -551,6 +587,16 @@ def _talles_de_plantilla(doc):
         mediana = formas[len(formas) // 2]
         if cnt["0"] >= mediana * 0.5:          # tiene contenido de talle, no basura de CAD
             con_dibujo.add("0")
+    # 🔴 UNA SOLA VARIANTE EN LA CAPA GENÉRICA (2026-11-11, MAPA 810). Si el archivo no trae NINGUNA
+    # capa con nombre de variante y el molde está todo en la capa que el programa pone solo
+    # («Capa 1» de Illustrator, «0» de AutoCAD), ESA capa es la variante. Antes el molde quedaba
+    # trabado en «falta nombrar las variantes» hasta repartir las piezas a mano — regla del usuario:
+    # «se carga lo que queramos: una variante, una pieza». En inglés («Layer 1») ya pasaba así.
+    # Con otras capas de variante al lado, la genérica sigue siendo de sistema (puede traer basura).
+    if not con_dibujo:
+        _gen = [n for n in CAPAS_GENERICAS if cnt.get(n)]
+        if len(_gen) == 1:
+            con_dibujo = {_gen[0]}
     return _ordenar_por_archivo(doc, con_dibujo)
 
 
@@ -4288,9 +4334,11 @@ def validar_arte_separado(path_arte, registro_molde, carpeta_fuentes, mapeo, var
 
     # Una pieza está asignada si tiene mesa default (sin #) O alguna mesa #variante/#rango.
     sin_asignar = [p for p in piezas if not mapeo.get(p) and not mapeo_var.get(p)]
+    # `faltan` (lista): el pedido descuenta las piezas que apagó en «Piezas a imprimir» (MAPA 821) sin leer el texto
     checks.append({"nombre": "Cada pieza tiene un arte asignado", "ok": not sin_asignar,
                    "detalle": f"{len(piezas) - len(sin_asignar)}/{len(piezas)} piezas" +
-                   (f" — faltan: {', '.join(sin_asignar)}" if sin_asignar else "")})
+                   (f" — faltan: {', '.join(sin_asignar)}" if sin_asignar else ""),
+                   "faltan": list(sin_asignar), "total": len(piezas)})
     ok &= not sin_asignar
 
     # AVISO (no bloquea): variantes sin cubrir en piezas mapeadas SOLO por # (sin default).

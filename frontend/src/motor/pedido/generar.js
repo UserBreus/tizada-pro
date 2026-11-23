@@ -14,7 +14,7 @@
 // pieza sale de `pieza_a` (`pieza/caminoA.js`); la hoja se compone en el hilo del PRIMER molde
 // del grupo, adonde van todas las bases. Si el servidor tiene esto apagado, o un molde del
 // camino A no tiene el arte de su diseño, devuelve `null` y la pantalla genera en el servidor.
-import { motorDe, cerrarMotores, asegurarMoldeA, asegurarContextoA, disenoDe } from '../arte/previa.js'
+import { motorDe, cerrarMotores, asegurarMoldeA, asegurarContextoA, asegurarContextoCorte, disenoDe, soltarPreviasLibres, tizadaEmpieza, renovarMotorSiPesa } from '../arte/previa.js'
 import { piezasDe } from '../arte/prendas.js'
 import { traerConCache, claveDe, urlDe } from '../cache.js'
 import { pyRound } from '../py.js'
@@ -76,7 +76,24 @@ function fuentesGuia(pers, talle, fuentes, resolver) {
  * `avisar(texto)` recibe el avance. Devuelve `{id}` del trabajo guardado, o `null` si este pedido
  * lo tiene que generar el servidor.
  */
-export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null } = {}) {
+export async function generarPedidoEnNavegador(cuerpo, opciones = {}) {
+  // 🔴 MIENTRAS SE ARMA, LAS VISTAS PREVIAS ESPERAN (MAPA 814): el hilo del molde es de la tizada.
+  // Se avisa SIEMPRE que terminó (bien, mal o cancelada): si no, las vistas previas quedarían esperando.
+  const _terminaTizada = tizadaEmpieza()
+  try {
+    try { return await _generarPedido(cuerpo, opciones) } catch (e) {
+      // AL MOTOR SE LE ACABÓ LA MEMORIA: una vez más con TODOS los hilos nuevos (un hilo no devuelve lo
+      // que ya tomó: insistir en el mismo no sirve). Cancelada o por otro motivo, sale como siempre.
+      const sinMemoria = /malloc|realloc|out of memory|memory access|allocation failed/i.test(String((e && e.message) || e))
+      if (!sinMemoria || (e && (e.cancelado || e.capacidad)) || (opciones.cancelado && opciones.cancelado())) throw e
+      console.warn('la tizada se quedó sin memoria en el motor: se reintenta con los hilos nuevos', e)
+      cerrarMotores()
+      return await _generarPedido(cuerpo, opciones)
+    }
+  } finally { _terminaTizada() }
+}
+
+async function _generarPedido(cuerpo, { rutaApi, avisar = null, cancelado = null } = {}) {
   if (!(await navegadorGeneraTizada(rutaApi))) return null
   const t0 = performance.now()
   // 🔴 EL % REAL (pedido del usuario 2026-09-22: «la barra queda en 15 % trancada»). La barra de
@@ -84,7 +101,12 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
   // Ahora cada aviso lleva el porcentaje de lo HECHO: revisar 0-4 · cada grupo (su parte según sus
   // prendas): piezas 55 % + hojas 45 % · ficha 92-96 · guardar 96-99. Sólo se cuenta: no agrega trabajo.
   let pctActual = 0
+  // 🔴 CANCELAR (prueba 2026-10-30, MAPA 756): el botón «Cancelar» sólo sabía frenar un trabajo DEL SERVIDOR, y
+  // armada acá ese trabajo no existe hasta el final → no hacía nada. Se corta al terminar el paso en curso (como el
+  // del servidor: nunca a mitad de escribir un PDF) y NO se guarda nada. Cada aviso de avance es un punto de corte.
+  const _corte = () => { if (cancelado && cancelado()) { const e = new Error('cancelado'); e.cancelado = true; throw e } }
   const decir = (t, pct = null) => {
+    _corte()
     if (pct !== null) pctActual = Math.max(pctActual, Math.min(99, Math.round(pct)))
     if (avisar) avisar(`nav|${pctActual}|${t}`)
   }
@@ -96,6 +118,10 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
   const plan = await json(rutaApi('/api/pedido/plan'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) })
   if (!plan.todo_camino_b && !plan.todo_navegador) return null
   _tiempos.plan = (performance.now() - _tPlan0) / 1000
+  // 🔴 UN HILO LIMPIO SI EL DEL MOLDE YA VIENE CARGADO (MAPA 814): con un arte pesado las vistas previas
+  // dejan el motor arriba de 1 GB y la tizada (que necesita ~1,5 GB de los 2) no entraba. Con artes
+  // comunes el hilo no llega al tope y no se toca.
+  for (const pid of new Set(plan.moldes.map((md) => md.pid))) await renovarMotorSiPesa(pid)
   // LA PUERTA (etapa 5): la memoria que piden las mesas desplegadas (camino B) o la plantilla y el
   // arte (camino A) de todos los moldes del pedido
   {
@@ -105,9 +131,10 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
       if (m && m.info.mesas) for (const x of m.info.mesas) mb += (x.bytes || 0) / 1048576
       if (m && m.info.camino_a) {
         mb += ((m.info.plantilla || {}).bytes || 0) / 1048576
+        if (md.corte) continue                    // TIZADA PARA CORTE (MAPA 816): sin arte que bajar
         const d = disenoDe(m, md.diseno)
         if (!d) return null                       // sin arte para ese diseño: lo decide el servidor
-        mb += ((d.sello || [])[0] || 0) / 1048576
+        mb += (d.en_pc ? (d.bytes || 0) : ((d.sello || [])[0] || 0)) / 1048576   // en la PC el sello no lleva el tamaño (MAPA 760)
       }
     }
     const puerta = puedeHacer({ tipo: 'tizada', mb, hojas: Math.max(1, plan.grupos.length) })
@@ -278,16 +305,22 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
     // siempre (molde por molde): mismas hojas, mismo acomodo.
     const _tPiezas0 = performance.now()
     const _motores = await Promise.all(grupo.moldes.map((mi) => motorDe(plan.moldes[mi].pid, rutaApi)))
+    // 🔴 LA MEMORIA DEL HILO PARA LA TIZADA (MAPA 813): los contextos del visor (cada uno con el arte
+    // abierto, hasta 4 por molde) se sueltan antes de armar los de la tizada; el visor los rearma solo
+    for (const _m of new Set([mmG, ..._motores])) soltarPreviasLibres(_m)
     const _procA = async (md, m) => {
       const items = [], guias = []
         // ── CAMINO A: molde pelado + arte separado, en el hilo del grupo ──
       await mmG.pool.enviar('fuentes', await bajarFuentes(md.fuentes, md.pid, rutaApi, md._pc))
       await asegurarMoldeA(m, rutaApi, md.pid, (m.info.plantilla || {}).sello, mmG)
-      const { clave } = await asegurarContextoA(m, rutaApi, md.diseno, {
-        mapeoArte: md.mapeo_arte || null, editablesCfg: md.editables_cfg, editablesTamano: md.editables_tamano,
-        editablesColor: md.editables_color, editablesMarca: md.editables_marca, editablesSinMarca: md.editables_sin_marca,
-        marcasComoCruz: true, borde: md.borde_corte, referencia: md.referencia,
-      }, { hilo: mmG })
+      // 🔴 TIZADA PARA CORTE (MAPA 816): el molde SIN arte — cada pieza en blanco con su línea de corte y su etiqueta
+      const { clave } = md.corte
+        ? await asegurarContextoCorte(m, { borde: md.borde_corte, referencia: md.referencia, hilo: mmG })
+        : await asegurarContextoA(m, rutaApi, md.diseno, {
+          mapeoArte: md.mapeo_arte || null, editablesCfg: md.editables_cfg, editablesTamano: md.editables_tamano,
+          editablesColor: md.editables_color, editablesMarca: md.editables_marca, editablesSinMarca: md.editables_sin_marca,
+          marcasComoCruz: true, borde: md.borde_corte, referencia: md.referencia,
+        }, { hilo: mmG })
       const { registro } = m.info
       for (let k = 0; k < md.prendas.length; k++) {
         const pr = md.prendas[k]
@@ -318,7 +351,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
       if (guiasMd.length) {
         // la guía de la ficha se dibuja con `marcas_como_cruz=False` (`_molde_guia_ficha`): ahí el
         // objeto se tiene que seguir viendo en su lugar, la cruz es para la tela → otro contexto
-        const { clave: claveFicha } = await asegurarContextoA(m, rutaApi, md.diseno, {
+        const { clave: claveFicha } = md.corte ? { clave } : await asegurarContextoA(m, rutaApi, md.diseno, {
         mapeoArte: md.mapeo_arte || null, editablesCfg: md.editables_cfg, editablesTamano: md.editables_tamano,
         editablesColor: md.editables_color, editablesMarca: md.editables_marca, editablesSinMarca: md.editables_sin_marca,
         marcasComoCruz: false, borde: md.borde_corte, referencia: md.referencia,
@@ -407,7 +440,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
     for (const [tela, piezas] of porTela) {
       const _iniT = _ini + _parte * (0.55 + 0.45 * (_telaK / _nTelas)), _parteT = _parte * 0.45 / _nTelas
       _telaK++
-      decir(`Acomodando en la tela «${tela}» (${piezas.length} piezas)…`, _iniT)
+      decir(`Acomodando en la tela «${tela}» (${piezas.length} ${piezas.length === 1 ? 'pieza' : 'piezas'})…`, _iniT)   // («1 pieza», MAPA 801)
       const cfg = { ...CFG_BASE, ...(plan.cfg_nesting || {}), ...((plan.telas_cfg || {})[tela] || {}) }
       // las mesas de origen tienen que estar abiertas en el MISMO hilo que compone la hoja
       const _tHoja0 = performance.now()
@@ -470,6 +503,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
   const resultado = { hojas, validaciones, duracion_s: pyRound((performance.now() - t0) / 1000, 1), piezas: totalPiezas,
                       avisos, avisos_pedido: avisosPedido, perfil_icc: perfil ? perfil.nombre : null, ficha,
                       ficha_paginas: _fichaPaginas, rip: { hojas: _rip },
+                      ...(plan.corte ? { corte: true } : {}),   // TIZADA PARA CORTE: la pantalla ofrece los formatos de corte (MAPA 816)
                       tiempos: { plan: _r1(_tiempos.plan), piezas: _r1(_tiempos.piezas), hojas: _tiempos.hojas, ficha: _r1(_tiempos.ficha), guia: _r1(_tiempos.guia || 0) } }
   const fd = new FormData()
   fd.append('resultado', JSON.stringify(resultado))
@@ -477,6 +511,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
   fd.append('nombres', JSON.stringify(plan.nombres))
   fd.append('pids', JSON.stringify(cuerpo.molds || cuerpo.productos || []))
   for (const [nombre, bytes] of Object.entries(archivos)) fd.append(nombre, new Blob([bytes], { type: 'application/pdf' }), nombre)
+  _corte()                                          // cancelada a último momento: no se guarda nada
   const d = await json(rutaApi('/api/paquetes/pedido'), { method: 'POST', body: fd })
   // `archivos`: la pantalla los usa para precalentar el visor sin volver a bajarlos (`precalentarVista`)
   return { id: d.id, resultado: d.resultado, segundos: (performance.now() - t0) / 1000, archivos }

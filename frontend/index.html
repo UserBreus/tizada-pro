@@ -29,9 +29,16 @@
     <div id="arranque">
       <div class="caja">
         <h1>No se pudo cargar la aplicación</h1>
-        <p>El programa está bien: lo que falló fue la <b>descarga</b> de los archivos.
-           Casi siempre se arregla recargando.</p>
-        <p>Si vuelve a pasar seguido, avisá: puede ser el <code>HTTP/3</code> del servidor.</p>
+        <div id="arranque-descarga">
+          <p>El programa está bien: lo que falló fue la <b>descarga</b> de los archivos.
+             Casi siempre se arregla recargando.</p>
+          <p>Si vuelve a pasar seguido, avisá: puede ser el <code>HTTP/3</code> del servidor.</p>
+        </div>
+        <!-- un error DEL PROGRAMA al arrancar no es «la descarga» (vuelta 31, MAPA 795): se dice lo que es -->
+        <div id="arranque-programa" style="display:none">
+          <p>Falló el <b>programa</b> al arrancar (no la descarga). Recargar no lo arregla: avisá con este detalle.</p>
+          <p style="font-size:12px">Detalle técnico (para quien lo arregla): <code id="arranque-detalle"></code></p>
+        </div>
         <button onclick="location.reload(true)">Recargar</button>
       </div>
     </div>
@@ -50,8 +57,25 @@
           if (e && e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
             clearTimeout(t);
             document.getElementById('arranque').style.display = 'grid';
+            return;
+          }
+          // un error del PROGRAMA mientras la app todavía no montó: el cartel dice eso, con el detalle
+          var r = document.getElementById('root');
+          if (e && e.message && (!r || r.childElementCount === 0)) {
+            document.getElementById('arranque-descarga').style.display = 'none';
+            document.getElementById('arranque-programa').style.display = 'block';
+            document.getElementById('arranque-detalle').textContent = String(e.message).slice(0, 300);
           }
         }, true);
+        // …y un error del programa que llega como promesa rechazada (`main.jsx` monta adentro de una promesa)
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = document.getElementById('root');
+          if (r && r.childElementCount === 0) {
+            document.getElementById('arranque-descarga').style.display = 'none';
+            document.getElementById('arranque-programa').style.display = 'block';
+            document.getElementById('arranque-detalle').textContent = String((e && e.reason && (e.reason.message || e.reason)) || 'sin detalle').slice(0, 300);
+          }
+        });
       })();
     </script>
   </body>

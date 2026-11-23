@@ -1294,7 +1294,8 @@ for _f, _te, _an, _al in (("triangulo", "dobladillo", 3, 1.5), ("triangulo", "ov
 _app691 = io.open(os.path.join(_AQUI, "frontend", "src", "App.jsx"), encoding="utf-8").read()
 _i691 = _app691.index("const _amTelaNoEntra = (am, telaId) =>")
 _b691 = _app691[_i691:_i691 + 600]
-ok("amEnTela(am, t.ancho_cm)" in _b691, "la pantalla (`_amTelaNoEntra`) decide con `amEnTela` (forma, punta, terminación y su margen)")
+# (desde MAPA 716 lleva también el largo de mesa del pedido: `amEnTela(am, t.ancho_cm, largoMesaCm)`)
+ok("amEnTela(am, t.ancho_cm" in _b691, "la pantalla (`_amTelaNoEntra`) decide con `amEnTela` (forma, punta, terminación y su margen)")
 
 print("\n692 · 🔴 LA FICHA DEL MOLDE A MEDIDA LA ARMA LA COMPUTADORA DEL USUARIO (el servidor sólo da los datos)")
 # Regla del usuario (2026-10-13): «nada del uso depende del servidor». El plan manda `a_medida_datos` (lo

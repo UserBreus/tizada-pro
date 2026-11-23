@@ -83,7 +83,7 @@ async function _pasada(rutaApi) {
     if (!r.ok) throw new Error(d.error || `el servidor contestó ${r.status}`)
     lista = d.moldes || []
   } catch (e) {
-    avisar({ fase: 'error', fallidos: [{ nombre: 'la lista de moldes', error: e.message }] })
+    avisar({ fase: 'error', fallidos: [{ nombre: 'la lista de moldes', error: e.message, lista: true }] })
     return
   }
 

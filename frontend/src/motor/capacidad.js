@@ -89,12 +89,12 @@ export function puedeHacer(trabajo) {
   const necesita = trabajo.tipo === 'molde' ? memoriaParaMolde(trabajo.mb, hilos) : memoriaParaTizada(trabajo.mb, trabajo.hojas || 1)
   if (eq.memoriaGb && eq.memoriaGb * 1024 * 0.6 < necesita) {
     return { puede: false, detalle: { ...eq, necesita },
-             motivo: `Esta computadora no tiene la memoria para ${trabajo.tipo === 'molde' ? 'preparar este molde' : 'generar esta tizada'} de ${Math.round(trabajo.mb)} MB: hacen falta ${(necesita / 1024).toFixed(1)} GB libres y el navegador informa ${eq.memoriaGb} GB en total. Cerrá otras pestañas o programas, o usá una computadora con más memoria.` }
+             motivo: `Esta computadora no tiene la memoria para ${trabajo.tipo === 'molde' ? 'preparar este molde' : 'generar esta tizada'} de ${Math.round(trabajo.mb)} MB: hacen falta ${(necesita / 1024).toFixed(1).replace('.', ',')} GB libres y el navegador informa ${String(eq.memoriaGb).replace('.', ',')} GB en total. Cerrá otras pestañas o programas, o usá una computadora con más memoria.` }
   }
   const reserva = reservaDePrueba(Math.min(necesita, 2048))
   if (!reserva.ok) {
     return { puede: false, detalle: { ...eq, necesita, reserva },
-             motivo: `Esta computadora no pudo reservar la memoria que hace falta (${(necesita / 1024).toFixed(1)} GB; se consiguieron ${reserva.mb} MB). Cerrá otras pestañas o programas y volvé a intentarlo.` }
+             motivo: `Esta computadora no pudo reservar la memoria que hace falta (${(necesita / 1024).toFixed(1).replace('.', ',')} GB; se consiguieron ${reserva.mb} MB). Cerrá otras pestañas o programas y volvé a intentarlo.` }
   }
   const puntos = puntosDePotencia()
   if (puntos < UMBRAL_PUNTOS) {

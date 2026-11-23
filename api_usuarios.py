@@ -161,6 +161,14 @@ def yo():
         return jsonify({"ok": False, "usuario": None, "base": False,
                         "error": "no hay conexión con la base de datos del sistema",
                         "detalle": str(e)[:200]}), 503
+    if u:
+        # la semana de la sesión se cuenta desde que se abrió la app: con `SESSION_REFRESH_EACH_REQUEST = False`
+        # (servidor.py, MAPA 799) la cookie ya no se renueva sola. Pero SÓLO cada 12 h: esta respuesta manda la cookie
+        # con la sesión tal como estaba al empezar, y al abrir la app sale junto a un `activar` → si la mandara siempre
+        # podría volver a dejar el molde viejo (inspector, MAPA 800).
+        import time as _t
+        if _t.time() - float(session.get("_renovada") or 0) > 12 * 3600:
+            session["_renovada"] = int(_t.time())
     return jsonify({"ok": bool(u), "usuario": u, "base": True})
 
 
@@ -182,6 +190,16 @@ def cambiar_mi_password():
 
 
 # ── Usuarios ─────────────────────────────────────────────────────────────────
+def _utc_iso(v):
+    """Una fecha de la base (UTC, sin zona) como ISO con «Z»; texto vacío si no hay."""
+    if not v:
+        return ""
+    try:
+        return v.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+    except AttributeError:
+        return str(v)
+
+
 @bp.get("/api/usuarios")
 @requiere("usuario.ver", "usuario.gestionar")
 def listar_usuarios():
@@ -189,8 +207,10 @@ def listar_usuarios():
                   "FROM usuario ORDER BY usuario")
     for u in us:
         u["roles"] = auth.roles_de(u["id"])
-        u["creado_en"] = str(u["creado_en"] or "")
-        u["ultimo_acceso"] = str(u["ultimo_acceso"] or "")
+        # la base los guarda en UTC (SYSUTCDATETIME): van marcados como UTC («…Z») y la pantalla los muestra en la hora
+        # de la PC. Antes salía la hora UTC cruda (18:27 cuando eran las 15:27, MAPA 807)
+        u["creado_en"] = _utc_iso(u["creado_en"])
+        u["ultimo_acceso"] = _utc_iso(u["ultimo_acceso"])
         u["activo"] = bool(u["activo"])
     return jsonify({"ok": True, "usuarios": us})
 
@@ -298,9 +318,10 @@ def listar_roles():
     rs = db.filas("SELECT id, clave, nombre, descripcion, es_sistema FROM rol ORDER BY id")
     for r in rs:
         r["es_sistema"] = bool(r["es_sistema"])
+        # sin los RETIRADOS (como `/api/permisos`): el admin decía «19 de 18 acciones» (MAPA 807)
         r["permisos"] = [x["clave"] for x in db.filas(
             "SELECT p.clave FROM permiso p JOIN rol_permiso rp ON rp.permiso_id=p.id "
-            "WHERE rp.rol_id=? ORDER BY p.clave", r["id"])]
+            "WHERE rp.rol_id=? ORDER BY p.clave", r["id"]) if x["clave"] not in auth.PERMISOS_RETIRADOS]
         r["usuarios"] = db.valor("SELECT COUNT(*) FROM usuario_rol WHERE rol_id=?", r["id"])
     return jsonify({"ok": True, "roles": rs})
 
@@ -365,7 +386,7 @@ def borrar_rol(rid):
         return jsonify({"error": "el rol de sistema no se puede borrar"}), 400
     n = db.valor("SELECT COUNT(*) FROM usuario_rol WHERE rol_id=?", rid)
     if n:
-        return jsonify({"error": f"el rol está asignado a {n} usuario/s: sacáselo primero"}), 400
+        return jsonify({"error": f"el rol está asignado a {n} {'usuario' if n == 1 else 'usuarios'}: {'sacáselo' if n == 1 else 'sacáselo a cada uno'} primero"}), 400
     db.ejecutar("DELETE FROM rol WHERE id=?", rid)
     return jsonify({"ok": True})
 

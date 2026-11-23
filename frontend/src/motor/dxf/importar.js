@@ -25,6 +25,7 @@
 //
 // ENTRADA: `dxfAPdf(mupdf, bytes)` → `{pdf: Uint8Array, resumen}`; `resumen` = `dxf_resumen`
 // (`piezas`, `talles`, `nombres_detectados`, `nombres`, `indices`, `escala_pdf`).
+import { guardarPdf } from '../pdf/guardar.js'
 import { pyRound, pyStrip, pyHypot, compararTuplas } from '../py.js'
 import { leerDXF, plainMtext } from './leer.js'
 import { makePath, virtualEntities } from './geometria.js'
@@ -557,7 +558,7 @@ function _construirPdf(mupdf, piezas, ordenTalles, escalaCm) {
       indices[t] = entradas.map((e, i) => [e, i]).sort((a, b) => compararTuplas(a[0][0], b[0][0]) || (a[1] - b[1])).map((x) => x[0][1])
     }
 
-    const out = doc.saveToBuffer('garbage=3,compress').asUint8Array().slice()
+    const out = guardarPdf(doc, 'garbage=3,compress')
     const resumen = {
       piezas: piezas.length, talles: ordenTalles.slice(),
       nombres_detectados: nombres.filter((n) => n), nombres,

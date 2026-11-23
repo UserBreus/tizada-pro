@@ -11,11 +11,13 @@
 // personalización guardada, el catálogo, los reemplazos del pedido) y el mismo resolvedor de
 // tipografías que usa la tizada (`texto/fuentes.js`). Misma forma de respuesta que tenían esos
 // endpoints, así la pantalla no cambia.
+import { pedirMotorB } from './motorB.js'   // el mismo /motor_b a la vez viaja una sola (MAPA 770)
 import { resolverFuente } from '../texto/fuentes.js'
 import { claveFuenteCampo, fuenteDeCampo } from '../pieza/estampar.js'
 import { FuenteCurvas } from '../texto/curvas.js'
 import { traerConCache } from '../cache.js'
 import { catalogoConPc, bytesPc } from '../texto/fuentesPc.js'
+import { aplicarArtesPc } from './enPc.js'
 
 const ordenPy = (a, b) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -32,7 +34,7 @@ async function json(url) {
  */
 async function infoMolde(pid, rutaApi, reemplazos) {
   const q = reemplazos ? '?fuentes_reemplazo=' + encodeURIComponent(JSON.stringify(reemplazos)) : ''
-  return json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/motor_b${q}`))
+  return aplicarArtesPc(await pedirMotorB(rutaApi(`/api/productos/${encodeURIComponent(pid)}/motor_b${q}`)), pid)   // los artes del pedido, de la PC (MAPA 760)
 }
 
 /** ¿El molde con diseño todavía no tiene sus páginas por talle? (antes: `desplegado_listo`) */
@@ -77,7 +79,8 @@ export async function fuentesEstadoLocal({ pid, diseno = 'principal', reemplazos
   const alias = (info.fuentes || {}).alias || {}
   // el catálogo del modal: sólo el del SISTEMA (como `catalogo_fuentes(FUENTES)`), por nombre — las de la PC
   // no van ahí (un reemplazo se guarda en el servidor, y el servidor no las tiene)
-  const catalogo = subidas.filter((c) => !c.propia).map((c) => ({ interno: c.interno, archivo: c.archivo }))
+  // `nombre` = el nombre ENTERO para mostrar y buscar (el interno se corta en 31 letras, MAPA 769); se elige por `interno`
+  const catalogo = subidas.filter((c) => !c.propia).map((c) => ({ interno: c.interno, archivo: c.archivo, nombre: c.nombre || c.interno }))
     .sort((a, b) => ordenPy(String(a.interno).toLowerCase(), String(b.interno).toLowerCase()))
   const vacio = { ok: true, requeridas: [], faltantes: [], reemplazables: [], originales: {}, campos: [], catalogo, reemplazos: alias }
   if (!info.camino_a && !info.camino_b) return vacio

@@ -65,6 +65,7 @@
 //   el aplanado para el RIP la vuelve a escribir y ahí sí comprime), el consumo de tela en cm y el
 //   alto de cada página (cm, redondeado a 1 decimal como `round(x, 1)` de Python).
 
+import { guardarPdf } from '../pdf/guardar.js'
 import { pyFixed, pyRound } from '../py.js'
 
 export const CM = 72 / 2.54
@@ -404,7 +405,7 @@ export function componerHoja(mupdf, entrada) {
   }
   if (perfil) embeberPerfil(out, perfil)
   // Sin comprimir: el aplanado para el RIP la vuelve a escribir (y ahí sí comprime).
-  const pdf = out.saveToBuffer('').asUint8Array().slice()
+  const pdf = guardarPdf(out, '')
   for (const mp of mapas.values()) { try { mp.destroy() } catch { /* nada */ } }
   try { out.destroy() } catch { /* nada */ }
   for (const d of abiertos) { try { d.destroy() } catch { /* nada */ } }

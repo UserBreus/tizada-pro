@@ -34,14 +34,14 @@ FONT_B = "hebo"
 
 
 def _texto(page, x, y, s, size=9, color=NEGRO, bold=False, max_w=None):
-    """Escribe texto, recortándolo con «…» si no entra en `max_w`. Devuelve el ancho usado."""
+    """Escribe texto, recortándolo con «...» (tres puntos: helv no tiene «…») si no entra en `max_w`. Devuelve el ancho."""
     s = "" if s is None else str(s)
     fn = FONT_B if bold else FONT
-    if max_w:
-        while s and fitz.get_text_length(s, fontname=fn, fontsize=size) > max_w:
+    if max_w and fitz.get_text_length(s, fontname=fn, fontsize=size) > max_w:
+        # no entra: se achica hasta que entre CON «...» al final (gemelo: `texto` de motor/ficha/ficha.js, MAPA 791)
+        while s and fitz.get_text_length(s + "...", fontname=fn, fontsize=size) > max_w:
             s = s[:-1]
-        if s and fitz.get_text_length(s + "…", fontname=fn, fontsize=size) <= max_w + 2 and s != str(s):
-            pass
+        s = (s.rstrip() + "...") if s else ""   # (si ni «...» entra, nada: nunca más ancho que la columna)
     page.insert_text((x, y), s, fontsize=size, fontname=fn, color=color)
     return fitz.get_text_length(s, fontname=fn, fontsize=size)
 
@@ -78,14 +78,15 @@ def _seccion(page, y, texto):
 
 
 # ── TABLA DE TALLES (la planilla del pedido tal cual) ─────────────────────────────────────────
-def _titulo_tabla(columnas):
+def _titulo_tabla(columnas, termino_pl=None):
     """PLANILLA SIN TALLES (MAPA 622): una bandera no tiene talles, así que la tabla no se puede
     llamar «de talles». Sólo se decide con columnas que dicen su `role` (la pantalla y la API lo
     mandan); una planilla vieja sin roles queda como siempre. Gemelo de `tituloTabla` (ficha.js)."""
     cols = columnas or []
     if any("role" in c for c in cols) and not any(c.get("role") == "talle" for c in cols):
         return "PLANILLA DEL PEDIDO"
-    return "TABLA DE TALLES"
+    # con el término del molde («tamaños»…) si la pantalla lo mandó (MAPA 804; gemelo de `tituloTabla`)
+    return "TABLA DE " + (termino_pl.strip() if isinstance(termino_pl, str) and termino_pl.strip() else "talles").upper()
 
 
 def _dibujar_tabla(page, y, columnas, filas, y_max, fila0=0):
@@ -125,6 +126,10 @@ def _dibujar_tabla(page, y, columnas, filas, y_max, fila0=0):
         _texto(page, x0 + 7, y + 12, str(fila0 + r + 1), size=8, bold=True, color=(0.25, 0.28, 0.32))
         for i, c in enumerate(columnas):
             val = fila.get(c.get("id"), fila.get(c.get("label"), ""))
+            # CANTIDAD vacía = 1 prenda (es lo que fabrica el pedido); en la ficha salía la celda en blanco
+            # (inspector, MAPA 801; gemelo: `dibujarTabla` de ficha.js)
+            if c.get("role") == "cantidad" and (val is None or str(val).strip() == ""):
+                val = "1"
             _texto(page, _cx(i + 1) + 6, y + 12, val, size=8.5, color=NEGRO, max_w=w_col - 10)
         y += alto_fila
         dibujadas += 1
@@ -275,7 +280,7 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
 
     # 1) TABLA (arriba). Puede ocupar más de una página si hay muchas filas (la numeración sigue).
     pg = nueva_pagina()
-    titulo = _titulo_tabla(columnas)
+    titulo = _titulo_tabla(columnas, (planilla or {}).get("termino_pl"))
     y = _seccion(pg, 78, titulo)
     y += 6
     y, restan, _f0 = _dibujar_tabla(pg, y, columnas, filas, A4_H - MARGEN)

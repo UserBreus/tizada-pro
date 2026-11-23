@@ -7,6 +7,7 @@
 // prendas de muestra ya traducidas (`/prendas`); el hilo de trabajo arma cada pieza (base +
 // estampado, `obrero.worker.js` → `pieza`) y la convierte a SVG. El resultado tiene la MISMA forma
 // que la respuesta del servidor: `{piezas: {nombre: {svg, w_cm, h_cm}}, talle}`.
+import { pedirMotorB } from './motorB.js'   // el mismo /motor_b a la vez viaja una sola (MAPA 770)
 import { crearPool } from '../pool.js'
 import { traerConCache, base64DeTexto, claveDe, urlDe } from '../cache.js'
 import { fuentesConPc, fuentesDePers, alCambiarPc, catalogoConPc } from '../texto/fuentesPc.js'
@@ -14,11 +15,62 @@ import { piezasDe } from './prendas.js'
 export { asegurarFuentes }
 import { pyRound } from '../py.js'
 import { persConLimite } from '../pieza/estampar.js'
+import { aplicarArtesPc, artePc, vigentePc } from './enPc.js'
 
 const CM = 28.3465
 const motores = new Map()          // pid → {info, pool, mesasAbiertas:Set, fuentesListas:bool}
 // al dar el permiso de las fuentes de esta PC (MAPA 670), los hilos vuelven a recibir las tipografías
 alCambiarPc(() => { for (const m of motores.values()) m.fuentesListas = false })
+
+// 🔴 LA TIZADA TIENE EL HILO PARA ELLA (MAPA 814). El motor del navegador tiene 2 GB por hilo y una
+// tizada con un arte pesado («base nfl mujer y diablos.ai»: una imagen de 120 MB) necesita ~1,5 GB
+// aun con el hilo LIMPIO (medido). Dos cosas, las dos chicas:
+//  · `renovarMotorSiPesa`: si el hilo del molde ya viene cargado (las vistas previas lo dejan arriba de
+//    1 GB con un arte así), se cierra y el próximo `motorDe` arma uno nuevo. Con artes comunes el hilo
+//    no llega al tope y NO se renueva: nada cambia ni tarda más.
+//  · mientras se arma la tizada, las vistas previas ESPERAN (`esperarTizada`): son un adorno y no
+//    pueden gastarle la memoria a la tizada (regla: «el preview no puede matar la tizada»). Es la
+//    vista previa la que espera a la tizada, nunca al revés (MAPA 169: la tizada no va detrás de nada).
+let _tizadaEnCurso = null
+/** La tizada avisa que empieza; devuelve la función que avisa que terminó (llamarla SIEMPRE, en `finally`). */
+export function tizadaEmpieza() {
+  let soltar
+  const p = new Promise((ok) => { soltar = ok })
+  _tizadaEnCurso = p
+  return () => { if (_tizadaEnCurso === p) _tizadaEnCurso = null; soltar() }
+}
+async function esperarTizada() { while (_tizadaEnCurso) await _tizadaEnCurso }
+const TOPE_HILO_MB = 700   // de 2048: por arriba de esto la tizada arranca en un hilo nuevo
+/** Cierra el hilo del molde si su motor ya lleva tomada mucha memoria; el próximo `motorDe` arma uno limpio. */
+export async function renovarMotorSiPesa(pid, { topeMb = TOPE_HILO_MB } = {}) {
+  const m = motores.get(pid)
+  if (!m) return false
+  let mb = Infinity
+  // si no contesta en 1,5 s es que tiene vistas previas en cola (con un arte así, 20 s cada una): la
+  // tizada no espera detrás de un adorno → se renueva igual (lo que estaba en cola sale «cancelado»)
+  try {
+    const r = await Promise.race([m.pool.enviar('memoria', {}), new Promise((ok) => setTimeout(() => ok(null), 1500))])
+    if (r) mb = (r.bytes || 0) / 1048576
+  } catch { /* no contesta: se renueva */ }
+  if (mb < topeMb) return false
+  if (motores.get(pid) === m) { try { m.pool.cerrar() } catch { /* nada */ } motores.delete(pid) }
+  return true
+}
+
+const _sinMemoria = (e) => /malloc|realloc|out of memory|memory access|allocation failed/i.test(String((e && e.message) || e))
+/**
+ * Una vista previa con UN reintento en un hilo nuevo si al motor se le acabó la memoria (MAPA 814): el
+ * hilo no devuelve lo que ya tomó, así que insistir en el mismo no sirve. Las otras vistas previas que
+ * estuvieran en ese hilo salen «cancelado» y la pantalla las vuelve a pedir (ya lo hacía).
+ */
+async function conHiloLimpio(pid, hacer) {
+  try { return await hacer() } catch (e) {
+    if (!_sinMemoria(e) || _tizadaEnCurso) throw e
+    const m = motores.get(pid)
+    if (m) { try { m.pool.cerrar() } catch { /* nada */ } motores.delete(pid) }
+    return await hacer()
+  }
+}
 
 async function json(url, opts) {
   const r = await fetch(url, opts)
@@ -30,10 +82,15 @@ async function json(url, opts) {
 /** El motor de un molde: sus datos y su hilo. Se abre una vez por molde (y se rearma si cambió). */
 export async function motorDe(pid, rutaApi, { reemplazos = null } = {}) {
   const q = reemplazos ? '?fuentes_reemplazo=' + encodeURIComponent(JSON.stringify(reemplazos)) : ''
-  const info = await json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/motor_b${q}`))
+  // los artes de ESTE pedido salen de la PC (MAPA 760): el servidor puede tener el de otra persona con el mismo diseño
+  const info = await aplicarArtesPc(await pedirMotorB(rutaApi(`/api/productos/${encodeURIComponent(pid)}/motor_b${q}`)), pid)
   if (!info.camino_b && !info.camino_a) return null
+  // 🔴 SIN EL MAPEO (inspector, MAPA 777): el mapeo viaja en cada pedido al hilo (`mapeoArte`), el hilo no guarda nada
+  // de él. Con el mapeo acá, cada arrastre/«Quitar diseño» del pedido (que guarda el mapeo en la PC) CERRABA el hilo con
+  // la vista previa a medio hacer («cancelado») y la pieza quedaba dibujada con el arte crudo («10 / NOMBRE» en vez de
+  // la muestra «00 / TEXTO») hasta recargar.
   const firma = JSON.stringify([(info.mesas || []).map((m) => m.sello), info.plantilla && info.plantilla.sello,
-    (info.disenos || []).map((d) => [d.id, d.sello, d.mapeo, d.editables_cfg, d.editables_color, d.editables_marca, d.editables_sin_marca, d.objetos]),
+    (info.disenos || []).map((d) => [d.id, d.sello, d.editables_cfg, d.editables_color, d.editables_marca, d.editables_sin_marca, d.objetos]),
     Object.keys(info.registro).length, info.borde, info.etiqueta, info.fuentes, info.editables_tamano, info.limite_texto])
   let m = motores.get(pid)
   if (m && m.firma !== firma) { try { m.pool.cerrar() } catch { /* nada */ } motores.delete(pid); m = null }
@@ -91,7 +148,11 @@ async function asegurarFuentes(m, rutaApi) {
  * `prendas`: si no se pasan, se piden al servidor las de muestra (NOMBRE / 00 y una fila por
  * opción de cada toggle, como `_piezas_base`).
  */
-export async function previasCaminoB({ pid, variante, talle, rutaApi, reemplazos = null, prendas = null, avisar = null }) {
+export async function previasCaminoB(args) {
+  await esperarTizada()                       // la vista previa no le gasta el hilo a la tizada (MAPA 814)
+  return conHiloLimpio(args.pid, () => _previasCaminoB(args))
+}
+async function _previasCaminoB({ pid, variante, talle, rutaApi, reemplazos = null, prendas = null, avisar = null }) {
   const m = await motorDe(pid, rutaApi, { reemplazos })
   if (!m) return null
   if (m.info.paginas_pendientes) return { piezas: {}, talle, preparando: true }
@@ -188,15 +249,46 @@ async function motorParaLeer(pid, rutaApi) {
  * `GET /api/productos/editables`). Devuelve `{objetos, talles, piezas}` o null si el molde no es
  * del camino A o el diseño no tiene arte.
  */
-export async function editablesEnNavegador({ pid, diseno = 'principal', variante = '*', rutaApi }) {
+export async function editablesEnNavegador(args) {
+  try {
+    return await _editablesEnNavegador(args)
+  } catch (e) {
+    // 🔴 el hilo se cerró en el medio: otro dibujo (la vista del talle, después de colocar/quitar un objeto) rearmó el
+    // motor con el arte nuevo y canceló este trabajo — el editor quedaba con la lista VIEJA (inspector, MAPA 766).
+    // Una vez más, con el motor de ahora.
+    if (!/cancelad/i.test(String((e && e.message) || e))) throw e
+    return _editablesEnNavegador(args)
+  }
+}
+async function _editablesEnNavegador({ pid, diseno = 'principal', variante = '*', rutaApi }) {
   const m = await motorParaLeer(pid, rutaApi)
   if (!m || !m.info.camino_a) return null
   const d = disenoDe(m, diseno)
   if (!d) return null
   const q = `?diseno=${encodeURIComponent(diseno || 'principal')}&variante=${encodeURIComponent(variante || '*')}`
   const datos = await json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/editables_datos${q}`))
-  const arte = await traerConCache(`arte|${m.pid}|${d.id}|${(d.sello || []).join(',')}`,
-    rutaApi(`/api/productos/${encodeURIComponent(m.pid)}/arte_archivo` + (d.id !== 'principal' ? `?diseno=${encodeURIComponent(d.id)}` : '')))
+  if (d.en_pc) {
+    // el de la PC, no el de la carpeta del servidor (MAPA 760); los objetos agregados y las capas que agregó el
+    // usuario, también (MAPA 761: leídos frescos, el motor abierto puede tener la lista de antes de un cambio)
+    datos.mapeo = { ...((d.mapeo || {}).mapeo || {}) }
+    const apc = await artePc(pid, d.id)
+    const oa = ((apc && apc.datos) || {}).oa || {}
+    datos.inyectadas = [...new Set((oa.inyectadas || []).map((x) => x.capa).filter(Boolean))].sort()
+    datos.agregados = (oa.objetos || []).map((o) => ({ id: o.id, nombre: o.nombre || o.id, archivo: o.archivo, pieza: o.pieza || '',
+      w_cm: o.w_cm, h_cm: o.h_cm, transforms: ((o.transforms || {})[variante || '*']) || ((o.transforms || {})['*']) || {} }))
+  }
+  // 🔴 con el arte en la PC, la VIGENTE de ahora: el motor abierto (`motorParaLeer`) puede tener el sello de antes
+  // de «colocar» un objeto — esa versión ya no existe y antes terminaba bajando la carpeta del servidor (MAPA 764)
+  let arte, selloTxt = (d.sello || []).join(',')
+  if (d.en_pc) {
+    const apcV = await artePc(pid, d.id)
+    arte = apcV && await vigentePc(pid, d.id)
+    if (!arte) throw new Error('el diseño de este pedido no está en esta computadora: volvé a cargar el arte')
+    selloTxt = ['pc', apcV.pedido, apcV.sha1, apcV.version].join(',')
+  } else {
+    arte = await traerConCache(`arte|${m.pid}|${d.id}|${selloTxt}`,
+      rutaApi(`/api/productos/${encodeURIComponent(m.pid)}/arte_archivo` + (d.id !== 'principal' ? `?diseno=${encodeURIComponent(d.id)}` : '')))
+  }
   const agregados = []
   for (const o of (datos.agregados || [])) {
     let bytes = null
@@ -209,7 +301,7 @@ export async function editablesEnNavegador({ pid, diseno = 'principal', variante
     agregados.push({ ...o, bytes })
   }
   const bytes = arte.slice()
-  const clave = `arte|${m.pid}|${d.id}|${(d.sello || []).join(',')}`
+  const clave = `arte|${m.pid}|${d.id}|${selloTxt}`
   return m.pool.enviar('editables_vista', { bytes, datos: { ...datos, agregados, clave } },
                        [bytes.buffer, ...agregados.filter((a) => a.bytes).map((a) => a.bytes.buffer)])
 }
@@ -231,7 +323,10 @@ export async function asegurarContextoA(m, rutaApi, diseno, cfg, { hilo = null, 
   const d = disenoDe(m, diseno)
   if (!d) throw new Error('este diseño no tiene el arte cargado')
   const k = clave || `${m.pid}|${d.id}|${(d.sello || []).join(',')}`
-  const firma = JSON.stringify([k, cfg, conPersonalizacion])
+  // lo que el contexto toma del MOLDE cuando `cfg` no lo dice también va en la firma: con «Ancho manda» elegido en
+  // Configuración la vista previa seguía con el contexto armado en «alto» hasta un F5 (inspector, MAPA 804)
+  const firma = JSON.stringify([k, cfg, conPersonalizacion, cfg && cfg.referencia ? null : (m.info.referencia_medida || 'alto'),
+    cfg && cfg.borde !== undefined ? null : (m.info.borde ?? null)])
   h.contextosA = h.contextosA || new Map()
   if (h.contextosA.get(k) && h.contextosA.get(k).firma === firma) return { clave: k, pers: h.contextosA.get(k).pers }
   // 🔴 UNO SOLO EN CURSO POR CLAVE Y FIRMA. Al cargar un arte lo piden a la vez la carga (todos los
@@ -245,6 +340,26 @@ export async function asegurarContextoA(m, rutaApi, diseno, cfg, { hilo = null, 
   try { return await promesa } finally { if (h.contextosEnCurso.get(k)?.promesa === promesa) h.contextosEnCurso.delete(k) }
 }
 
+/**
+ * 🔴 TIZADA PARA CORTE (MAPA 816): el contexto de un molde base SIN ARTE. Cada pieza sale en blanco con
+ * su borde de corte (y la etiqueta, del estampado): `contexto_a` con `arte: null`. No baja nada.
+ */
+export async function asegurarContextoCorte(m, { borde, referencia = null, hilo = null } = {}) {
+  const h = hilo || m
+  const k = `${m.pid}|corte`
+  const firma = JSON.stringify([k, borde ?? null, referencia || m.info.referencia_medida || 'alto'])
+  h.contextosA = h.contextosA || new Map()
+  if (h.contextosA.get(k) && h.contextosA.get(k).firma === firma) return { clave: k }
+  await h.pool.enviar('contexto_a', {
+    clave: k, arte: null, arteId: null, registro: m.info.registro, ordenVar: m.info.orden_var || [],
+    mapeoArte: null, editablesCfg: null, editablesTamano: null, editablesColor: null, editablesMarca: null,
+    editablesSinMarca: null, marcasComoCruz: true, referencia: referencia || m.info.referencia_medida || 'alto',
+    borde: borde === undefined ? m.info.borde : borde, objetos: [], conPersonalizacion: false, molde: m.pid, clasico: false,
+  })
+  h.contextosA.set(k, { firma, pers: null })
+  return { clave: k }
+}
+
 async function _armarContextoA(m, rutaApi, h, d, k, firma, cfg, conPersonalizacion) {
   const arte = await traerConCache(`arte|${m.pid}|${d.id}|${(d.sello || []).join(',')}`,
     rutaApi(`/api/productos/${encodeURIComponent(m.pid)}/arte_archivo` + (d.id !== 'principal' ? `?diseno=${encodeURIComponent(d.id)}` : '')))
@@ -256,6 +371,9 @@ async function _armarContextoA(m, rutaApi, h, d, k, firma, cfg, conPersonalizaci
     objetos.push({ ...o, bytes: bytes.slice() })
   }
   const r = await h.pool.enviar('contexto_a', {
+    // `arteId`: la identidad del archivo (la misma clave de la caché): el hilo guarda UNA copia por
+    // arte para todos sus contextos — visor y tizada — en vez de una por contexto (MAPA 813)
+    arteId: `arte|${m.pid}|${d.id}|${(d.sello || []).join(',')}`,
     clave: k, arte: arte.slice(), registro: m.info.registro, ordenVar: m.info.orden_var || [],
     mapeoArte: cfg.mapeoArte, editablesCfg: cfg.editablesCfg ?? null, editablesTamano: cfg.editablesTamano ?? null,
     editablesColor: cfg.editablesColor ?? null, editablesMarca: cfg.editablesMarca ?? null, editablesSinMarca: cfg.editablesSinMarca ?? null,
@@ -275,7 +393,11 @@ async function _armarContextoA(m, rutaApi, h, d, k, firma, cfg, conPersonalizaci
  * el servidor. `mapeo` = el mapeo {pieza: mesa} que la pantalla está mostrando; `editables` = el
  * ajuste del pedido (`{variable: {IDENT: {talle: tf}}}`, lo que se movió sin guardar).
  */
-export async function previasCaminoA({ pid, diseno = null, variante, talle, rutaApi, reemplazos = null, mapeo = null, editables = null, prendas = null, avisar = null }) {
+export async function previasCaminoA(args) {
+  await esperarTizada()                       // la vista previa no le gasta el hilo a la tizada (MAPA 814)
+  return conHiloLimpio(args.pid, () => _previasCaminoA(args))
+}
+async function _previasCaminoA({ pid, diseno = null, variante, talle, rutaApi, reemplazos = null, mapeo = null, editables = null, prendas = null, avisar = null }) {
   const m = await motorDe(pid, rutaApi, { reemplazos })
   if (!m || !m.info.camino_a) return null
   const d = disenoDe(m, diseno)
@@ -344,6 +466,23 @@ function _soltarPreviasViejas(m, clave) {
     m.previasEnUso.delete(vieja)
     if (m.contextosA) m.contextosA.delete(vieja)
     m.pool.enviar('contexto_a_soltar', { clave: vieja }).catch(() => { /* hilo cerrado: no hay nada que soltar */ })
+  }
+}
+
+/**
+ * Suelta TODOS los contextos del visor de este molde que nadie esté usando ahora (MAPA 813). Lo llama
+ * la tizada antes de armar los suyos: cada contexto tiene el arte abierto en el hilo del molde, y con
+ * un arte de 239 MB los del visor (hasta 4, de versiones distintas del arte si se editó el diseño) más
+ * los de la tizada no entraban en los 2 GB del motor. El visor los vuelve a armar cuando se mire.
+ */
+export function soltarPreviasLibres(m) {
+  if (!m || !m.previasOrden) return
+  for (const k of [...m.previasOrden]) {
+    if (m.previasEnUso && m.previasEnUso.get(k) > 0) continue
+    m.previasOrden = m.previasOrden.filter((x) => x !== k)
+    if (m.previasEnUso) m.previasEnUso.delete(k)
+    if (m.contextosA) m.contextosA.delete(k)
+    m.pool.enviar('contexto_a_soltar', { clave: k }).catch(() => { /* hilo cerrado: no hay nada que soltar */ })
   }
 }
 

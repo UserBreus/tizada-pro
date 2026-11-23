@@ -821,8 +821,8 @@ para cualquier diseño.
   (`POST /api/productos/crear {nombre, propio:true}`) → se sube el molde
   (`POST /api/plantilla` con **`pid`**) → entra a la config.
 - **Configurar** (⚙ en la tarjeta) abre la **misma** pantalla de Config → Moldería por deep-link,
-  en modo `modoMiMolde`: sin **Variables**, con **«Indicar qué es cada pieza →»** (el mismo editor
-  de nombrado) y con **«← Volver al pedido»**. **No hay pantallas nuevas de config.**
+  en modo `modoMiMolde`: sin **Variables**, con **«Indicar qué es cada pieza →»** (prende «Nombrar piezas»
+  de Moldería ahí mismo) y con **«← Volver al pedido»**. **No hay pantallas nuevas de config.**
 - **Un molde propio no tiene variables** → en el pedido se elige **entero** y el motor genera
   **todas** sus piezas.
 
@@ -1108,7 +1108,7 @@ Es el mismo componente en casi todas las pantallas; lo que **cambia es el modo**
 
 | Modo | Se activa en | Gesto |
 |---|---|---|
-| Nombrar piezas | Variables paso 1 | **clic = UNA pieza** (la de adelante, aunque haya otras debajo) · **arrastrar** = varias, apiladas incluidas · **recuadro** desde el fondo = varias |
+| Nombrar piezas | Moldería → «Nombrar piezas» (también con UN solo talle, MAPA 809) | **clic = UNA pieza** (la de adelante, aunque haya otras debajo) · **arrastrar** = varias, apiladas incluidas · **recuadro** desde el fondo = varias |
 | Elegir piezas de variable/grupo | Variables paso 2 | idem |
 | Vincular «van juntas» | detalle del **GRUPO** | clic sobre 2+ piezas del grupo |
 | Telas por pieza | ajuste Telas | clic = pieza lleva esa tela |
@@ -1201,7 +1201,7 @@ molde, con el mismo lenguaje que el panel de capas de Illustrator:
 | Subir molde | `POST /api/plantilla` | `entrada/<pid>/plantilla.ai`, `registro_producto.json`, `piezas.json`, `resumen_plantilla.json` |
 | Nombrar variantes (capa) | `GET/POST /api/plantilla/variantes` | `plantilla.v<N>.ai` + `plantilla.ver` |
 | Nombrar variantes (piezas) | `POST /api/plantilla/variantes_piezas[_borrador]` | `variantes_piezas.json` |
-| Nombrar piezas | `POST /api/plantilla/etiquetas` | `registro_producto.json` (**lo reemplaza**) |
+| Nombrar piezas (Moldería, desde 2026-08) | `POST /api/plantilla/grupo_pieza` (el nombre + la correspondencia) | `registro_producto.json` (re-armado) + `emparejado_talles.json` |
 | Agrupar homólogas | `POST /api/plantilla/grupo_pieza` · `GET/POST /api/plantilla/emparejado` | `emparejado_talles.json` |
 | Variables / grupos / modelos | `POST /api/productos/{variantes,grupos,modelos,conjuntos}` | catálogo |
 | Medidas del diseño | `POST /api/productos/referencia_medida` · `GET /api/plantilla/medidas_variantes` | catálogo |

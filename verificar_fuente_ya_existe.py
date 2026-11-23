@@ -196,6 +196,24 @@ try:
        and "nombresPc().then(setPcLista)" in _app9 and _app9.count("{botonFuentesPc()}") >= 2
        and "cargarFuentesTodas(); _pvLimpiar()" in _app9,
        "Configuración → Fuentes lista las de la PC con «Cargar al sistema»; el botón está también en «Tipografía no encontrada»; al dar el permiso se revisan TODOS los artes")
+    # (MAPA 769-770) EL NOMBRE PARA VER: el interno de MuPDF se corta en 31 letras y el completo de la tipografía
+    # puede venir con «_», cortado o el interno con «?»; dos tipografías distintas nunca con el mismo nombre
+    print("11. el nombre ENTERO para mostrar (`nombre_visible`) y sin repetidos")
+    _nv = MP.nombre_visible
+    ok(_nv({"interno": "Adidas WC 2026 fan inspired fon", "familia": "Adidas WC 2026 fan inspired font", "estilo": "Regular",
+            "completo": "Adidas_WC_2026_fan_inspired_font"}) == "Adidas WC 2026 fan inspired font",
+       "interno cortado en 31 letras → la familia entera (no «… font Regular», no con «_»)")
+    ok(_nv({"interno": "Hawken Personal Use Only Regula", "familia": "Hawken Personal Use Only", "estilo": "Regular",
+            "completo": "Hawken Personal Use Only Reg"}) == "Hawken Personal Use Only Regular",
+       "completo cortado por la propia tipografía → familia + estilo")
+    ok(_nv({"interno": "MoreggiTFont4? Short", "familia": "", "estilo": "", "completo": "MoreggiTFont4 Short"}) == "MoreggiTFont4 Short",
+       "interno con «?» → el nombre bueno")
+    ok(_nv({"interno": "Anton Regular", "familia": "Anton", "estilo": "Regular", "completo": "Anton Regular"}) == "Anton Regular",
+       "un nombre sano queda igual")
+    _cat11 = MP.catalogo_fuentes(os.path.join(os.path.dirname(os.path.abspath(__file__)), "catalogo_fuentes"))
+    _noms11 = [c["nombre"].lower() for c in _cat11.values()]
+    ok(all(c.get("nombre") for c in _cat11.values()) and len(_noms11) == len(set(_noms11)),
+       f"el catálogo real da `nombre` a todas y ninguno se repite ({len(_noms11)} tipografías)")
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

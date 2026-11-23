@@ -12,6 +12,7 @@
 //     `pdf_guia_medidas`, `ai_guia_medidas` (+ `_ai_path`, `_ai_text`, `_ai_layer`).
 // Las que reescriben el archivo NO tocan el del usuario: devuelven los bytes de la versión nueva,
 // y el servidor la guarda al lado (`plantilla.v<N>.ai`), como siempre.
+import { guardarPdf } from '../pdf/guardar.js'
 import { tallesDePlantilla, ordenCapasArchivo, extraerPiezasMesa, detectarPiezas, featsConts, empOffsets, empFijos,
   aplicarFijos, emparejarPorForma, mapaIndices, CAPAS_SISTEMA } from './caminoA.js'
 import { contornoDeDrawing, geometriaPagina, CM } from './contornos.js'
@@ -85,7 +86,7 @@ export function renombrarCapas(mupdf, bytes, mapa) {
       if (Object.prototype.hasOwnProperty.call(m, nom)) { o.put('Name', doc.newString(m[nom])); n++ }
     }
     if (!n) throw new Error('ninguna de esas capas existe en el molde')
-    return { bytes: doc.saveToBuffer('compress').asUint8Array().slice(), n }
+    return { bytes: guardarPdf(doc, 'compress'), n }
   } finally { doc.destroy() }
 }
 
@@ -209,7 +210,7 @@ export function agregarPieza(mupdf, bytes, colocaciones, mesa = 1) {
       if (escrito) puestos.push(talle)
     }
     if (!puestos.length) throw new Error('ninguno de los talles pedidos existe como capa en el molde')
-    return { bytes: doc.saveToBuffer('compress').asUint8Array().slice(), puestos }
+    return { bytes: guardarPdf(doc, 'compress'), puestos }
   } finally { doc.destroy() }
 }
 
@@ -363,7 +364,7 @@ export function separarPorPiezas(mupdf, bytes, molde, asignaciones) {
       if (cierra.has(i)) nuevo.push({ op: 'EMC', args: [] })
     })
     pageObj.put('Contents', doc.addStream(escribir(nuevo), doc.newDictionary()))
-    return { bytes: doc.saveToBuffer('compress').asUint8Array().slice(), mesa, capa_origen: capaOrigen, orden }
+    return { bytes: guardarPdf(doc, 'compress'), mesa, capa_origen: capaOrigen, orden }
   } finally { doc.destroy() }
 }
 
@@ -628,7 +629,7 @@ export function pdfGuiaMedidas(mupdf, capasData, { config = 'default', rango = [
       fd.put('F0', fRef); res.put('Font', fd)
       doc.insertPage(doc.countPages(), doc.addPage([0, 0, PW, PH], 0, res, new TextEncoder().encode(s)))
     }
-    return doc.saveToBuffer('compress').asUint8Array().slice()
+    return guardarPdf(doc, 'compress')
   } finally {
     try { fuente.destroy() } catch { /* nada */ }
     doc.destroy()

@@ -14,6 +14,7 @@
 // sin crear un objeto por instrucción. Por eso los recursos de la página se extraen una vez a datos
 // simples (`recursosLigeros`): así ese trabajo puede ir a otro hilo.
 
+import { guardarPdf } from '../pdf/guardar.js'
 import { instrucciones as parsear, escribir } from '../pdf/contenido.js'
 import { pyRound, compararTuplas } from '../py.js'
 import { sha1Hex } from '../sha1.js'
@@ -468,7 +469,7 @@ export function armarPdfMesa(mupdf, doc, mesa, contenidos) {
   for (const data of contenidos) paginaDesplegada(out, mapa, srcObj, data)
   // compresión RÁPIDA (nivel ~1, lo mismo que usa el servidor con pikepdf): sin pérdida, 5 veces más
   // rápida que la normal y ~15 % más pesada — medido con 20 MB de contenido real: 0,4 s contra 2 s
-  const pdf = out.saveToBuffer('compress,compression-effort=15').asUint8Array().slice()
+  const pdf = guardarPdf(out, 'compress,compression-effort=15')
   // soltar YA la memoria de WebAssembly de esta mesa
   try { mapa.destroy() } catch { /* nada */ }
   try { out.destroy() } catch { /* nada */ }
